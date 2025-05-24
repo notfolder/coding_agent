@@ -1,0 +1,10 @@
+Issue #{issue_number}:
+Title: "{title}"
+Body:
+{body}
+
+Repository settings:
+- Owner: {owner}
+- Repo: {repo}
+- Base branch: `main`
+- Label: `coding agent`
