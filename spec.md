@@ -2,6 +2,7 @@
 
 ## 概要
 github copilot coding agentの様なコーディングエージェントを作る.
+TODO: MCPサーバーを追加できる様にしておきたい
 
 ## 環境
  - OS: mac os
@@ -103,9 +104,13 @@ llmの応答に含まれるjson応答は下記の形式になる。
 
 mcpサーバーの設定ファイル例は下記.
 ```
-mcp:
-  server_url: "http://localhost:8000"
-  api_key_env: "GITHUB_MCP_TOKEN"
+mcp_servers:
+  [
+    {
+      server_url: "http://localhost:8000",
+      api_key_env: "GITHUB_MCP_TOKEN"
+    }
+  ]
 lmstudio:
   base_url: "http://localhost:8080/v1"
   api_key_env: "LMSTUDIO_API_KEY"
@@ -115,7 +120,6 @@ github:
   bot_label: "coding agent"
 scheduling:
   interval: 300  # 秒
-
 ```
 
 ## コードのディレクトリ構成
