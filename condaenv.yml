@@ -1,0 +1,12 @@
+name: coding-agent
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - mcp
+  - python-dotenv
+  - pyyaml
+  - requests
+  - pip
+  - pip:
+      - lmstudio
