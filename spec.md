@@ -10,7 +10,7 @@ github copilot coding agentの様なコーディングエージェントを作�
 
 ## 条件
  - ローカルに起動しているlm studioのllmを利用する([lmstudio-python](https://lmstudio.ai/docs/python)を利用)
- - dockerローカルに起動しているgit hubのmcpサーバーを利用する([mcp-use](https://github.com/mcp-use/mcp-use)を利用)
+ - dockerローカルに起動しているgit hubのmcpサーバーを利用する([modelcontextprotocol](https://modelcontextprotocol.io/quickstart/client)を利用)
  - loggerはpython標準のものを使用。loggerの設定ファイルも生成して。ログはファイルにだけ出力する様な設定で、デイリーでローテーションして圧縮して
 
 ## 動作
