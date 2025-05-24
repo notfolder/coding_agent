@@ -9,7 +9,7 @@ github copilot coding agentの様なコーディングエージェントを作�
  - 起動方法: crontab
 
 ## 条件
- - ローカルに起動しているlm studioのllmを利用する(lmstudio-pythonを利用)
+ - ローカルに起動しているlm studioのllmを利用する([lmstudio-python](https://lmstudio.ai/docs/python)を利用)
  - dockerローカルに起動しているgit hubのmcpサーバーを利用する([mcp-use](https://github.com/mcp-use/mcp-use)を利用)
  - loggerはpython標準のものを使用。loggerの設定ファイルも生成して。ログはファイルにだけ出力する様な設定で、デイリーでローテーションして圧縮して
 
@@ -27,6 +27,21 @@ github copilot coding agentの様なコーディングエージェントを作�
 7. llmのjson応答の中に終了マーク```done: true```があったらissueの```coding agent```を削除(update_issue)する
 8. 次のissueを同様に処理する
 9. 一覧したissueを全て処理したら処理を終了する
+
+## mcp-useの使い方例
+
+```
+from mcp_use import MCPClient
+
+client = MCPClient("http://localhost:8000")
+# コンテキスト送信
+ctx_id = client.send_context("Issue #123: ここに要約を入れる")
+# ツール呼び出し：コード生成
+resp = client.call_tool(ctx_id, "generate_code", {
+    "prompt": "foo.py に Hello World を出力する関数を書いてください。"
+})
+print(resp["code"])
+```
 
 ## JSON応答のスキーマ
 
