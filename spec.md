@@ -11,6 +11,7 @@ github copilot coding agentの様なコーディングエージェントを作�
 ## 条件
  - ローカルに起動しているlm studioのllmを利用する(lmstudio-pythonを利用)
  - dockerローカルに起動しているgit hubのmcpサーバーを利用する(mcp-useを利用)
+ - loggerはpython標準のものを使用。loggerの設定ファイルも生成して。ログはファイルにだけ出力する様な設定で、デイリーでローテーションして圧縮して
 
 ## 動作
 
@@ -112,9 +113,7 @@ scheduling:
 │   ├── mcp_client.py
 │   └── lm_client.py
 ├── handlers/
-│   └── issue_handler.py
-└── utils/
-    └── logger.py
+    └── issue_handler.py
 
 ## 関数/クラスのインターフェース
 
