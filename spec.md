@@ -33,7 +33,90 @@ github copilot coding agentの様なコーディングエージェントを作�
  - システムプロンプト、ユーザープロンプトについては設定ファイルを読み込む様にする
  - mcpサーバーについては設定ファイルを読んで動作する(githubのmcpサーバーの呼び出し方など)
 
-## プロンプトの検討
+mcpサーバーの設定ファイル例は下記.
+```
+mcp:
+  server_url: "http://localhost:8000"
+  api_key_env: "GITHUB_MCP_TOKEN"
+lmstudio:
+  base_url: "http://localhost:8080/v1"
+  api_key_env: "LMSTUDIO_API_KEY"
+github:
+  owner: "my-org"
+  repo: "my-repo"
+  bot_label: "coding agent"
+scheduling:
+  interval: 300  # 秒
 
-上記を実現するためのシステムプロンプトとユーザープロンプトを検討、設定ファイルとして生成する
+```
 
+## コードのディレクトリ構成
+
+.
+├── mcp_config.yaml
+├── system_prompt.txt
+├── main.py
+├── clients/
+│   ├── mcp_client.py
+│   └── lm_client.py
+├── handlers/
+│   └── issue_handler.py
+└── utils/
+    └── logger.py
+
+## 関数/クラスのインターフェース
+
+```
+class Issue(TypedDict):
+    number: int
+    title: str
+    body: str
+
+class MCPClient:
+    def get_issues(self, label: str) -> List[Issue]: ...
+    def update_issue(self, number: int, remove_label: str) -> None: ...
+```
+
+## プロンプトファイルの中身
+
+### system_prompt.txt
+```
+You are an AI coding assistant that cooperates with a controlling program to automate GitHub workflows via a GitHub MCP server over HTTP.  
+
+**Output Format**: Your output **must** be valid JSON only. Do **not** include any human-readable explanations or extra text. Return only one of the following structures:
+
+1. **Tool invocation request**
+   ```json
+   {
+     "command": {
+       "tool": "<tool_name>",
+       "args": { /* tool-specific parameters */ }
+     }
+   }
+
+2. **Final completion signal**
+
+   ```json
+   {
+     "done": true,
+     "result": {
+       /* Final structured result, e.g., PR information */
+     }
+   }
+   ```
+
+---
+
+## Available MCP Tools and Args
+
+* `get_issue`   → `{ "owner": string, "repo": string, "issue_number": int }`
+* `get_file_contents` → `{ "owner": string, "repo": string, "path": string, "ref": string }`
+* `create_or_update_file` → `{ "owner": string, "repo": string, "path": string, "content": string, "branch": string, "message": string }`
+* `create_pull_request` → `{ "owner": string, "repo": string, "title": string, "body": string, "head": string, "base": string }`
+* `update_issue` → \`{ "owner": string, "repo": string, "issue\_numb
+```
+
+## エラーハンドリングと通知
+
+再試行ポリシー（例：HTTP 5xx → 3回リトライ）
+失敗時はログに出力する
