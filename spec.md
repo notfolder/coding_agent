@@ -2,6 +2,9 @@
 
 ## 概要
 github copilot coding agentの様なコーディングエージェントを作る.
+将来的にはシステムプロンプトを変更することで、メールを振り分けたり、様々なタスクのソースからタスクを取得してllmを使って自動処理する汎用的なllmエージェントを考えている。
+コーディングエージェント以外の例としてはメール振分し、重要メールを通知するなど。
+今回はgit hubにラベル付されたissueをタスクとして処理するコーディングエージェントを作成する。
 
 ## 環境
  - OS: mac os
@@ -10,40 +13,39 @@ github copilot coding agentの様なコーディングエージェントを作�
 
 ## 条件
  - ローカルに起動しているlm studioのllmを利用する([lmstudio-python](https://lmstudio.ai/docs/python)を利用)
- - dockerローカルに起動しているgit hubのmcpサーバーを利用する([modelcontextprotocol](https://modelcontextprotocol.io/quickstart/client)を利用)
+ - ローカルに起動しているのmcpサーバーを利用する([modelcontextprotocol](https://modelcontextprotocol.io/quickstart/client)を利用)
  - loggerはpython標準のものを使用。loggerの設定ファイルも生成して。ログはファイルにだけ出力する様な設定で、デイリーでローテーションして圧縮して
+ - このエージェントは、任意のMCPサーバー（Model Context Protocol準拠）を対象とします。
+
+mcpのクライアントは下記2種類の使い方があります。
+
+1. タスクを取得する抽象TaskGetterクラスおよびその具象クラスであるTaskGetterFromGitHubクラスとする。TaskGetterクラスはTaskオブジェクトを返し、その具象クラスとしてTaskGitHubIssueクラスを用意する
+2. llmからの`command`要求に応えるための`MCPToolClient`クラス→設定ファイルからオブジェクトを生成し、llmの応答に従って利用する。
 
 ## 動作
 
-このエージェントは、任意のMCPサーバー（Model Context Protocol準拠）を対象とします。
+1.　起動したらタスクの一覧を取得する(TaskGetter.get_task_list)
+2. タスク一覧のTask一つ一つについて、下記の処理を実施
+3. タスクの処理を通知するためTask.prepare()を呼び出す
+4. llmを呼び出す。システムプロンプトしてユーザープロンプトとしてTask.get_prompt()の内容に従い、指示に従い終わったらjson応答の中に```done: true```といった終了マークを表示するといったプロンプトを指定して呼び出す.llmの応答にはjsonが含まれるものとする。
+5. 以下の処理をjson応答の中に```done: true```が現れるまで繰り返す
+6. llmの応答の中の`comment`フィールドをTask.comment()を呼び出して記録する
+7. mcpサーバーを利用したい旨の回答(`command`)があったらmcpサーバーを呼び出し応答を得る
+8. llmを呼び出す。mcpサーバーの応答をllmに渡して応答を得て4.に戻る
+9. llmのjson応答の中に終了マーク```done: true```があったらTask.finish()してタスクに終了を記録する。
+10. 次のissueを同様に処理する
+11. 一覧したissueを全て処理したら処理を終了する
+
+### TaskGetterFromGitHubクラスのメソッドマッピング
+
 以下githubのissueに対する操作はmcpサーバー[githubのmcpサーバー](https://github.com/github/github-mcp-server)を使います。
 
-1.　起動したら```coding agent```というラベルのissueを一覧(list_issues)する
-2. issue一覧のissue一つ一つについて、下記の処理を実施
-3. llmを呼び出す。システムプロンプトしてgithubのmcpサーバーを使う様に指示し,ユーザープロンプトとしてissueの内容を読んで指示に従い、指示に従い終わったらjson応答の中に```done: true```といった終了マークを表示するといったプロンプトを指定して呼び出す.llmの応答にはjsonが含まれるものとする。
-4. 以下の処理をjson応答の中に```done: true```が現れるまで繰り返す
-5. llmの応答をissueのコメントとして記録する(add_issue_comment)
-6. mcpサーバーを利用したい旨の回答があったらmcpサーバーを呼び出し応答に対応する処理を行う
-7. llmを呼び出す。mcpサーバーの応答をllmに渡して応答を得て4.に戻る
-7. llmのjson応答の中に終了マーク```done: true```があったらissueの```coding agent```を削除(update_issue)する
-8. 次のissueを同様に処理する
-9. 一覧したissueを全て処理したら処理を終了する
+- **TaskGetterFromGitHub.get_task_list**: `coding agent`というラベルがついたissueを一覧(list_issues)し、TaskGitHubIssueクラスのオブジェクトリストを作成する
+- **TaskGitHubIssue.prepare**: そのタスクに紐づいているissueの`coding agent`ラベルを削除し、`coding agent processing`ラベルを付与する(update_issue)
+- **TaskGitHubIssue.get_prompt**: そのタスクに紐づいているissueの内容とコメントを取得(get_issue,get_issue_comments)してプロンプトとして提示する
+- **TaskGitHubIssue.comment**: そのタスクに紐づいているissueにコメントを記録する(add_issue_comment)
+- **TaskGitHubIssue.finish()**: issueの`coding agent processing`ラベルを削除(update_issue)
 
-## mcp-useの使い方例
-
-githubのmcpサーバーを含め、設定ファイルに記述されたmcpサーバーは下記の様に利用します。
-```
-from mcp_use import MCPClient
-
-client = MCPClient("http://localhost:8000")
-# コンテキスト送信
-ctx_id = client.send_context("Issue #123: ここに要約を入れる")
-# ツール呼び出し：コード生成
-resp = client.call_tool(ctx_id, "generate_code", {
-    "prompt": "foo.py に Hello World を出力する関数を書いてください。"
-})
-print(resp["code"])
-```
 
 ## JSON応答のスキーマ
 
@@ -83,7 +85,7 @@ llmの応答に含まれるjson応答は下記の形式になる。
 2. **コマンド検出**:
 
    * レスポンスに `command` キーが存在すればツール呼び出し要求とみなす。
-   * `comment`フィールドの内容をissueのコメントに追加。
+   * `comment`フィールドの内容でTask.commentメソッドを呼び出す。
    * `command.tool` と `command.args` を抽出し、MCPサーバーへPOST。
 3. **ツール出力受け渡し**:
 
@@ -101,7 +103,7 @@ llmの応答に含まれるjson応答は下記の形式になる。
 
 上記環境、条件、動作を実現するコードを生成する。
  - システムプロンプト、ユーザープロンプトについては設定ファイルを読み込む様にする
- - mcpサーバーについては設定ファイルを読んで動作する(githubのmcpサーバーの呼び出し方など)
+ - mcpサーバーについては設定ファイルを読んで動作する
  - mcpサーバーの`system_prompt`フィールドの内容を統合して`system_prompt.txt`の`{mcp_prompt}`に埋め込む
 
 mcpサーバーの設定ファイル例は下記.
@@ -112,12 +114,12 @@ mcp_servers:
       server_url: "http://localhost:8000",
       api_key_env: "GITHUB_MCP_TOKEN",
       system_prompt: |
+        ### github mcp tools
         * `get_issue`   → `{ "owner": string, "repo": string, "issue_number": int }`
         * `get_file_contents` → `{ "owner": string, "repo": string, "path": string, "ref": string }`
         * `create_or_update_file` → `{ "owner": string, "repo": string, "path": string, "content": string, "branch": string, "message": string }`
         * `create_pull_request` → `{ "owner": string, "repo": string, "title": string, "body": string, "head": string, "base": string }`
         * `update_issue` → `{ "owner": string, "repo": string, "issue_number": int, "remove_labels"?: [string], "add_labels"?: [string] }`
-
     }
   ]
 lmstudio:
@@ -133,15 +135,19 @@ scheduling:
 
 ## コードのディレクトリ構成
 
+```
 .
 ├── mcp_config.yaml
 ├── system_prompt.txt
 ├── main.py
 ├── clients/
-│   ├── mcp_client.py
+│   ├── mcp_tool_client.py
 │   └── lm_client.py
-├── handlers/
-    └── issue_handler.py
+└── handlers/
+    ├── task_handler.py
+    ├── task_getter.py
+    └── task_getter_github.py
+```
 
 ## プロンプトファイルの中身
 
@@ -181,16 +187,14 @@ You are an AI coding assistant that cooperates with a controlling program to aut
 
 ## Behavior Rules
 
-1. **First** action: request `get_issue` to fetch the Issue data.
-2. The controlling program parses your JSON `command` and invokes the MCP server over HTTP.
-3. Upon receiving the tool `output`, generate the next JSON `command`.
-4. When the task is complete, return the JSON with `{ "done": true, ... }`.
-5. On errors, the program logs automatically—continue normal flow without emitting error messages.
-6. Infer project language by file extensions and generate or modify files accordingly.
+1. The controlling program parses your JSON `command` and invokes the MCP server over HTTP.
+2. Upon receiving the tool `output`, generate the next JSON `command`.
+3. When the task is complete, return the JSON with `{ "done": true, ... }`.
+4. Infer project language by file extensions and generate or modify files accordingly.
 
 Always adhere strictly to JSON-only output under this system prompt.
 
-```
+````
 
 ### first_user_prompt.txt
 ```
