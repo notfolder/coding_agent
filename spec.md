@@ -2,7 +2,6 @@
 
 ## 概要
 github copilot coding agentの様なコーディングエージェントを作る.
-TODO: MCPサーバーを追加できる様にしておきたい
 
 ## 環境
  - OS: mac os
@@ -16,7 +15,8 @@ TODO: MCPサーバーを追加できる様にしておきたい
 
 ## 動作
 
-以下githubのissueに対する操作はmcpサーバー[githubのmcpサーバー](https://github.com/github/github-mcp-server)を使う
+このエージェントは、任意のMCPサーバー（Model Context Protocol準拠）を対象とします。
+以下githubのissueに対する操作はmcpサーバー[githubのmcpサーバー](https://github.com/github/github-mcp-server)を使います。
 
 1.　起動したら```coding agent```というラベルのissueを一覧(list_issues)する
 2. issue一覧のissue一つ一つについて、下記の処理を実施
@@ -31,6 +31,7 @@ TODO: MCPサーバーを追加できる様にしておきたい
 
 ## mcp-useの使い方例
 
+githubのmcpサーバーを含め、設定ファイルに記述されたmcpサーバーは下記の様に利用します。
 ```
 from mcp_use import MCPClient
 
@@ -53,6 +54,7 @@ llmの応答に含まれるjson応答は下記の形式になる。
 ```json
 {
   "command": {
+    "comment": "なぜこのコマンドを実行するのかの説明"
     "tool": "<tool_name>",
     "args": {
       // tool-specific parameters, matching the definitions above
@@ -66,9 +68,7 @@ llmの応答に含まれるjson応答は下記の形式になる。
 ```json
 {
   "done": true,
-  "result": {
-    // structured result object, e.g., pull request URL, branch name, files modified
-  }
+  "comment": "終了コメント"
 }
 ```
 
@@ -83,6 +83,7 @@ llmの応答に含まれるjson応答は下記の形式になる。
 2. **コマンド検出**:
 
    * レスポンスに `command` キーが存在すればツール呼び出し要求とみなす。
+   * `comment`フィールドの内容をissueのコメントに追加。
    * `command.tool` と `command.args` を抽出し、MCPサーバーへPOST。
 3. **ツール出力受け渡し**:
 
@@ -90,7 +91,7 @@ llmの応答に含まれるjson応答は下記の形式になる。
 4. **完了判定**:
 
    * レスポンスに `done: true` が含まれる場合、処理を終了。
-   * `result` フィールドを最終成果物としてログおよび通知に利用。
+   * `comment` フィールドの内容をissueのコメントに追加。
 5. **ループ**:
 
    * `done` が `true` になるまで手順2〜4を繰り返す。
@@ -101,6 +102,7 @@ llmの応答に含まれるjson応答は下記の形式になる。
 上記環境、条件、動作を実現するコードを生成する。
  - システムプロンプト、ユーザープロンプトについては設定ファイルを読み込む様にする
  - mcpサーバーについては設定ファイルを読んで動作する(githubのmcpサーバーの呼び出し方など)
+ - mcpサーバーの`system_prompt`フィールドの内容を統合して`system_prompt.txt`の`{mcp_prompt}`に埋め込む
 
 mcpサーバーの設定ファイル例は下記.
 ```
@@ -108,7 +110,14 @@ mcp_servers:
   [
     {
       server_url: "http://localhost:8000",
-      api_key_env: "GITHUB_MCP_TOKEN"
+      api_key_env: "GITHUB_MCP_TOKEN",
+      system_prompt: |
+        * `get_issue`   → `{ "owner": string, "repo": string, "issue_number": int }`
+        * `get_file_contents` → `{ "owner": string, "repo": string, "path": string, "ref": string }`
+        * `create_or_update_file` → `{ "owner": string, "repo": string, "path": string, "content": string, "branch": string, "message": string }`
+        * `create_pull_request` → `{ "owner": string, "repo": string, "title": string, "body": string, "head": string, "base": string }`
+        * `update_issue` → `{ "owner": string, "repo": string, "issue_number": int, "remove_labels"?: [string], "add_labels"?: [string] }`
+
     }
   ]
 lmstudio:
@@ -134,19 +143,6 @@ scheduling:
 ├── handlers/
     └── issue_handler.py
 
-## 関数/クラスのインターフェース
-
-```
-class Issue(TypedDict):
-    number: int
-    title: str
-    body: str
-
-class MCPClient:
-    def get_issues(self, label: str) -> List[Issue]: ...
-    def update_issue(self, number: int, remove_label: str) -> None: ...
-```
-
 ## プロンプトファイルの中身
 
 ### system_prompt.txt
@@ -159,20 +155,19 @@ You are an AI coding assistant that cooperates with a controlling program to aut
    ```json
    {
      "command": {
+       "comment": "<The comment field should briefly explain why the tool is being called, to make the action clear and traceable.>",
        "tool": "<tool_name>",
        "args": { /* tool-specific parameters */ }
      }
    }
-````
+   ```
 
 2. **Final completion signal**
 
    ```json
    {
      "done": true,
-     "result": {
-       /* Final structured result, e.g., PR information */
-     }
+     "comment": "e.g., All requested changes were implemented and tested successfully."
    }
    ```
 
@@ -180,11 +175,7 @@ You are an AI coding assistant that cooperates with a controlling program to aut
 
 ## Available MCP Tools and Args
 
-* `get_issue`   → `{ "owner": string, "repo": string, "issue_number": int }`
-* `get_file_contents` → `{ "owner": string, "repo": string, "path": string, "ref": string }`
-* `create_or_update_file` → `{ "owner": string, "repo": string, "path": string, "content": string, "branch": string, "message": string }`
-* `create_pull_request` → `{ "owner": string, "repo": string, "title": string, "body": string, "head": string, "base": string }`
-* `update_issue` → `{ "owner": string, "repo": string, "issue_number": int, "remove_labels"?: [string], "add_labels"?: [string] }`
+{mcp_prompt}
 
 ---
 
