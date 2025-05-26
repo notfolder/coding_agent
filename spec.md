@@ -13,7 +13,7 @@ github copilot coding agentの様なコーディングエージェントを作�
 
 ## 条件
  - ローカルに起動しているlm studioのllmを利用する([lmstudio-python](https://lmstudio.ai/docs/python):lmstudio.mdを利用)
- - ローカルに起動しているのmcpサーバーを利用する([modelcontextprotocol](https://modelcontextprotocol.io/quickstart/client):mcp_client.mdを利用)
+ - ローカルでdockerでstdioで起動するmcpサーバーを利用する([modelcontextprotocol](https://modelcontextprotocol.io/quickstart/client):mcp_client.mdを利用)
  - loggerはpython標準のものを使用。loggerの設定ファイルも生成して。ログはファイルにだけ出力する様な設定で、デイリーでローテーションして圧縮して
  - このエージェントは、任意のMCPサーバー（Model Context Protocol準拠）を対象とします。
 
@@ -98,14 +98,12 @@ llmの応答に含まれるjson応答は下記の形式になる。
 
    * `done` が `true` になるまで手順2〜4を繰り返す。
 
-### プロンプト文脈の維持
+### llmへの要求方法
 
 各LLM呼び出し時には、以下の情報を連結してプロンプトに含めること：
 
  * 直前に実行されたMCPコマンドとそのargs
  * MCPサーバーからのoutput（整形済み）
-
-これによりLLMは逐次的な状態を保持しながら処理を進めることができる。トークン数制限に注意し、古い出力は必要に応じて切り捨てる。
 
 
 ## コードの生成
@@ -119,8 +117,15 @@ llmの応答に含まれるjson応答は下記の形式になる。
 ```
 mcp_servers:
   - mcp_server_name: "github"
-    server_url: "http://localhost:8000"
-    api_key_env: "GITHUB_MCP_TOKEN"
+    "command": "docker"
+    "args": [
+      "run",
+      "-i",
+      "--rm",
+      "-e",
+      "GITHUB_PERSONAL_ACCESS_TOKEN",
+      "ghcr.io/github/github-mcp-server"
+    ],
     system_prompt: |
       ### github mcp tools
       * `github/get_issue`   → `{ "owner": string, "repo": string, "issue_number": int }`
@@ -131,24 +136,24 @@ mcp_servers:
 
 lmstudio:
   base_url:   "http://localhost:8080/v1"
-  api_key_env: "LMSTUDIO_API_KEY"
   max_token:   32768
   max_llm_process_num: 1000
 
 github:
   owner:     "my-org"
-  repo:      "my-repo"
   bot_label: "coding agent"
 
 scheduling:
   interval: 300  # 秒
 ```
 
+GITHUB_PERSONAL_ACCESS_TOKENはcronの起動時に環境変数として設定します
+
 ## コードのディレクトリ構成
 
 ```
 .
-├── mcp_config.yaml
+├── config.yaml
 ├── system_prompt.txt
 ├── main.py
 ├── clients/
