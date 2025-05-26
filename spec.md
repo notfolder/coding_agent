@@ -16,7 +16,7 @@ github copilot coding agentの様なコーディングエージェントを作�
  - 各プロバイダ固有の設定項目を `llm.<provider>` セクションに定義する。
  - ローカルでdockerでstdioで起動するmcpサーバーを利用する([modelcontextprotocol](https://modelcontextprotocol.io/quickstart/client):mcp_client.mdを利用)
  - loggerはpython標準のものを使用。loggerの設定ファイルも生成して。ログはファイルにだけ出力する様な設定で、デイリーでローテーションして圧縮して
- - このエージェントは、任意のMCPサーバー（Model Context Protocol準拠/JSON-RPC 2.0形式での呼び出し）を対象とします。
+ - このエージェントは、任意のMCPサーバー（Model Context Protocol準拠）を対象とします。
 
 mcpのクライアントは下記2種類の使い方があります。
 
@@ -24,36 +24,8 @@ mcpのクライアントは下記2種類の使い方があります。
 2. llmからの`command`要求に応えるための`MCPToolClient`クラス→設定ファイルからオブジェクトを生成し、llmの応答に従って利用する。
 
 **MCP サーバー起動（stdio モード）**
-   設定ファイル `config.yaml` の `mcp_servers[].command` に定義されたコマンドを `subprocess` 経由で起動し、その `stdin`/`stdout` を `MCPClient` に接続する。  
-   MCP サーバーは stdio モードで起動される前提とし、Docker コンテナなども含めて自由に構成できる。
-
-   制御プログラムは以下を実施する：
-   - `command` 配列（例: `["docker", "run", "-i", "--rm", ...]`）を読み込む
-   - `subprocess.Popen(..., stdin=PIPE, stdout=PIPE)` で実行
-   - 得られた `stdin` / `stdout` を `MCPClient(transport="stdio", stdin=..., stdout=...)` に渡す
-
-参考コード:
-```
-import subprocess
-import yaml
-from mcp_client import MCPClient
-
-# 設定読み込み
-with open("config.yaml") as f:
-    cfg = yaml.safe_load(f)
-
-cmd = cfg["mcp_servers"][0]["command"]
-
-# MCP サーバー（stdio）を Docker 経由で起動
-proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-
-# MCPClient 初期化（stdio）
-client = MCPClient(
-    transport="stdio",
-    stdin=proc.stdin,
-    stdout=proc.stdout
-)
-```
+  - `MCPToolClient`クラスを作り、`mcp`ライブラリのクライアントのラッパーにしてください。(非同期を同期にするため)
+  - 設定ファイル `config.yaml` の `mcp_servers[].command` に定義されたコマンドを`from mcp.client.stdio import stdio_client`で起動して使う.
 
 ## 動作
 
