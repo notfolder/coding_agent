@@ -30,10 +30,9 @@ mcpのクライアントは下記2種類の使い方があります。
 4. llmを呼び出す。システムプロンプトしてユーザープロンプトとしてTask.get_prompt()の内容に従い、指示に従い終わったらjson応答の中に```done: true```といった終了マークを表示するといったプロンプトを指定して呼び出す.llmの応答にはjsonが含まれるものとする。
 5. 以下の処理をjson応答の中に```done: true```が現れるまで繰り返す
 6. llmの応答の中の`comment`フィールドをTask.comment()を呼び出して記録する
-7. mcpサーバーを利用したい旨の回答(`command`)があったらmcpサーバーを呼び出し応答を得る.`command`の`tool`は`<mcp_server_name>/<tool_name>`形式になっているため、`<msp_server_name>`のmcpサーバーの`<tool_name>`toolを呼び出して`args`を渡す
-
-8. llmを呼び出す。mcpサーバーの応答をllmに渡して応答を得て4.に戻る,1タスクあたりの最大処理数は設定ファイルの`max_llm_process_num`とする。
-9. llmのjson応答の中に終了マーク```done: true```があったらTask.finish()してタスクに終了を記録する。
+7. mcpサーバーを利用したい旨の回答(`command`)があったらmcpサーバーを呼び出し応答を得る.`command`の`tool`は`<mcp_server_name>/<tool_name>`形式になっているため、`<mcp_server_name>`のmcpサーバーの`<tool_name>`toolを呼び出して`args`を渡す.mcpサーバーは設定ファイルの`mcp_server_name` と`<mcp_server_name>`を単純マッチングする.
+8. llmを呼び出す。mcpサーバーの応答をllmに渡して応答を得る
+9. llmのjson応答の中に終了マーク```done: true```があるか、1タスクあたりの最大処理数(設定ファイルの`max_llm_process_num`)を超えた場合、Task.finish()してタスクに終了を記録してループを終了する。それ以外は4.に戻る
 10. 次のissueを同様に処理する
 11. 一覧したissueを全て処理したら処理を終了する
 
@@ -103,7 +102,6 @@ llmの応答に含まれるjson応答は下記の形式になる。
 
 各LLM呼び出し時には、以下の情報を連結してプロンプトに含めること：
 
- * 前回のLLM応答（最大設定ファイルの`max_token`トークンまで）
  * 直前に実行されたMCPコマンドとそのargs
  * MCPサーバーからのoutput（整形済み）
 
@@ -120,29 +118,28 @@ llmの応答に含まれるjson応答は下記の形式になる。
 設定ファイル例は下記.
 ```
 mcp_servers:
-  [
-    {
-      server_name: "github"
-      server_url: "http://localhost:8000",
-      api_key_env: "GITHUB_MCP_TOKEN",
-      system_prompt: |
-        ### github mcp tools
-        * `github/get_issue`   → `{ "owner": string, "repo": string, "issue_number": int }`
-        * `github/get_file_contents` → `{ "owner": string, "repo": string, "path": string, "ref": string }`
-        * `github/create_or_update_file` → `{ "owner": string, "repo": string, "path": string, "content": string, "branch": string, "message": string }`
-        * `github/create_pull_request` → `{ "owner": string, "repo": string, "title": string, "body": string, "head": string, "base": string }`
-        * `github/update_issue` → `{ "owner": string, "repo": string, "issue_number": int, "remove_labels"?: [string], "add_labels"?: [string] }`
-    }
-  ]
+  - mcp_server_name: "github"
+    server_url: "http://localhost:8000"
+    api_key_env: "GITHUB_MCP_TOKEN"
+    system_prompt: |
+      ### github mcp tools
+      * `github/get_issue`   → `{ "owner": string, "repo": string, "issue_number": int }`
+      * `github/get_file_contents` → `{ "owner": string, "repo": string, "path": string, "ref": string }`
+      * `github/create_or_update_file` → `{ "owner": string, "repo": string, "path": string, "content": string, "branch": string, "message": string }`
+      * `github/create_pull_request` → `{ "owner": string, "repo": string, "title": string, "body": string, "head": string, "base": string }`
+      * `github/update_issue` → `{ "owner": string, "repo": string, "issue_number": int, "remove_labels"?: [string], "add_labels"?: [string] }`
+
 lmstudio:
-  base_url: "http://localhost:8080/v1"
+  base_url:   "http://localhost:8080/v1"
   api_key_env: "LMSTUDIO_API_KEY"
-  max_token: 32768
+  max_token:   32768
   max_llm_process_num: 1000
+
 github:
-  owner: "my-org"
-  repo: "my-repo"
+  owner:     "my-org"
+  repo:      "my-repo"
   bot_label: "coding agent"
+
 scheduling:
   interval: 300  # 秒
 ```
