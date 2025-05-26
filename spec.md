@@ -12,8 +12,8 @@ github copilot coding agentの様なコーディングエージェントを作�
  - 起動方法: crontab
 
 ## 条件
- - ローカルに起動しているlm studioのllmを利用する([lmstudio-python](https://lmstudio.ai/docs/python)を利用)
- - ローカルに起動しているのmcpサーバーを利用する([modelcontextprotocol](https://modelcontextprotocol.io/quickstart/client)を利用)
+ - ローカルに起動しているlm studioのllmを利用する([lmstudio-python](https://lmstudio.ai/docs/python):lmstudio.mdを利用)
+ - ローカルに起動しているのmcpサーバーを利用する([modelcontextprotocol](https://modelcontextprotocol.io/quickstart/client):mcp_client.mdを利用)
  - loggerはpython標準のものを使用。loggerの設定ファイルも生成して。ログはファイルにだけ出力する様な設定で、デイリーでローテーションして圧縮して
  - このエージェントは、任意のMCPサーバー（Model Context Protocol準拠）を対象とします。
 
@@ -38,7 +38,7 @@ mcpのクライアントは下記2種類の使い方があります。
 
 ### TaskGetterFromGitHubクラスのメソッドマッピング
 
-以下githubのissueに対する操作はmcpサーバー[githubのmcpサーバー](https://github.com/github/github-mcp-server)を使います。
+以下githubのissueに対する操作はmcpサーバー[githubのmcpサーバー](https://github.com/github/github-mcp-server):git-hub-mcp-server.mdを使います。
 
 - **TaskGetterFromGitHub.get_task_list**: `coding agent`というラベルがついたissueを一覧(list_issues)し、TaskGitHubIssueクラスのオブジェクトリストを作成する
 - **TaskGitHubIssue.prepare**: そのタスクに紐づいているissueの`coding agent`ラベルを削除し、`coding agent processing`ラベルを付与する(update_issue)
