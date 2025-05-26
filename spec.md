@@ -12,7 +12,8 @@ github copilot coding agentの様なコーディングエージェントを作�
  - 起動方法: crontab
 
 ## 条件
- - ローカルに起動しているlm studioのllmを利用する([lmstudio-python](https://lmstudio.ai/docs/python):lmstudio.mdを利用)
+ - llmの呼び出しは設定ファイルの`llm.provider` で使用するプロバイダを指定する（`lmstudio`/`ollama`/`openai`）。
+ - 各プロバイダ固有の設定項目を `llm.<provider>` セクションに定義する。
  - ローカルでdockerでstdioで起動するmcpサーバーを利用する([modelcontextprotocol](https://modelcontextprotocol.io/quickstart/client):mcp_client.mdを利用)
  - loggerはpython標準のものを使用。loggerの設定ファイルも生成して。ログはファイルにだけ出力する様な設定で、デイリーでローテーションして圧縮して
  - このエージェントは、任意のMCPサーバー（Model Context Protocol準拠）を対象とします。
@@ -22,19 +23,52 @@ mcpのクライアントは下記2種類の使い方があります。
 1. タスクを取得する抽象TaskGetterクラスおよびその具象クラスであるTaskGetterFromGitHubクラスとする。TaskGetterクラスはTaskオブジェクトを返し、その具象クラスとしてTaskGitHubIssueクラスを用意する
 2. llmからの`command`要求に応えるための`MCPToolClient`クラス→設定ファイルからオブジェクトを生成し、llmの応答に従って利用する。
 
+**MCP サーバー起動（stdio モード）**
+   設定ファイル `config.yaml` の `mcp_servers[].command` に定義されたコマンドを `subprocess` 経由で起動し、その `stdin`/`stdout` を `MCPClient` に接続する。  
+   MCP サーバーは stdio モードで起動される前提とし、Docker コンテナなども含めて自由に構成できる。
+
+   制御プログラムは以下を実施する：
+   - `command` 配列（例: `["docker", "run", "-i", "--rm", ...]`）を読み込む
+   - `subprocess.Popen(..., stdin=PIPE, stdout=PIPE)` で実行
+   - 得られた `stdin` / `stdout` を `MCPClient(transport="stdio", stdin=..., stdout=...)` に渡す
+
+参考コード:
+```
+import subprocess
+import yaml
+from mcp_client import MCPClient
+
+# 設定読み込み
+with open("config.yaml") as f:
+    cfg = yaml.safe_load(f)
+
+cmd = cfg["mcp_servers"][0]["command"]
+
+# MCP サーバー（stdio）を Docker 経由で起動
+proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+
+# MCPClient 初期化（stdio）
+client = MCPClient(
+    transport="stdio",
+    stdin=proc.stdin,
+    stdout=proc.stdout
+)
+```
+
 ## 動作
 
-1.　起動したらタスクの一覧を取得する(TaskGetter.get_task_list)
-2. タスク一覧のTask一つ一つについて、下記の処理を実施
-3. タスクの処理を通知するためTask.prepare()を呼び出す
-4. llmを呼び出す。システムプロンプトしてユーザープロンプトとしてTask.get_prompt()の内容に従い、指示に従い終わったらjson応答の中に```done: true```といった終了マークを表示するといったプロンプトを指定して呼び出す.llmの応答にはjsonが含まれるものとする。
-5. 以下の処理をjson応答の中に```done: true```が現れるまで繰り返す
-6. llmの応答の中の`comment`フィールドをTask.comment()を呼び出して記録する
-7. mcpサーバーを利用したい旨の回答(`command`)があったらmcpサーバーを呼び出し応答を得る.`command`の`tool`は`<mcp_server_name>/<tool_name>`形式になっているため、`<mcp_server_name>`のmcpサーバーの`<tool_name>`toolを呼び出して`args`を渡す.mcpサーバーは設定ファイルの`mcp_server_name` と`<mcp_server_name>`を単純マッチングする.
-8. llmを呼び出す。mcpサーバーの応答をllmに渡して応答を得る
-9. llmのjson応答の中に終了マーク```done: true```があるか、1タスクあたりの最大処理数(設定ファイルの`max_llm_process_num`)を超えた場合、Task.finish()してタスクに終了を記録してループを終了する。それ以外は4.に戻る
-10. 次のissueを同様に処理する
-11. 一覧したissueを全て処理したら処理を終了する
+1. MCPサーバーを起動する
+2.　起動したらタスクの一覧を取得する(TaskGetter.get_task_list)
+3. タスク一覧のTask一つ一つについて、下記の処理を実施
+4. タスクの処理を通知するためTask.prepare()を呼び出す
+5. llmを呼び出す。システムプロンプトしてユーザープロンプトとしてTask.get_prompt()の内容に従い、指示に従い終わったらjson応答の中に```done: true```といった終了マークを表示するといったプロンプトを指定して呼び出す.llmの応答にはjsonが含まれるものとする。
+6. 以下の処理をjson応答の中に```done: true```が現れるまで繰り返す
+7. llmの応答の中の`comment`フィールドをTask.comment()を呼び出して記録する
+8. mcpサーバーを利用したい旨の回答(`command`)があったらmcpサーバーを呼び出し応答を得る.`command`の`tool`は`<mcp_server_name>/<tool_name>`形式になっているため、`<mcp_server_name>`のmcpサーバーの`<tool_name>`toolを呼び出して`args`を渡す.mcpサーバーは設定ファイルの`mcp_server_name` と`<mcp_server_name>`を単純マッチングする.
+9. llmを呼び出す。mcpサーバーの応答をllmに渡して応答を得る
+10. llmのjson応答の中に終了マーク```done: true```があるか、1タスクあたりのLLM API への呼び出し回数が最大処理数(設定ファイルの`max_llm_process_num`)を超えた場合、Task.finish()してタスクに終了を記録してループを終了する。それ以外は4.に戻る
+11. 次のissueを同様に処理する
+12. 一覧したissueを全て処理したら処理を終了する
 
 ### TaskGetterFromGitHubクラスのメソッドマッピング
 
@@ -98,13 +132,61 @@ llmの応答に含まれるjson応答は下記の形式になる。
 
    * `done` が `true` になるまで手順2〜4を繰り返す。
 
+### LLM アダプター
+
+- `LLMClient` 抽象クラスを定義し、以下を必ず実装する：
+  1. `send_system_prompt(prompt: str) -> None`
+  2. `send_user_message(message: str) -> None`
+  3. `get_response() -> str`
+
+**呼び出しシーケンス**
+1. `send_system_prompt` を呼出し
+2. 毎ターン：`send_user_message` → `get_response`
+3. `get_response` は内部で履歴にアシスタント応答を追加
+
+- `config.yaml` の `llm.provider` に応じて、以下のラッパークラスを初期化：
+  - `lmstudio` → `LMStudioClient`
+  - `openai`   → `OpenAIClient`
+  - `ollama`   → `OllamaClient`
+
+- エージェントの LLM 呼び出し部は、`LLMClient` の上記３メソッドのみを呼び出すことでプロバイダ差異を完全に吸収する。
+
+- lmstudioの場合は、llm.Chatを利用してコンテキストを保存する
+- ollamaの場合は、```from ollama import chat```を使い、初回呼び出しで返ってくる context（ベクトル配列）を、次回リクエストの context パラメータに渡すことで状態を継続
+  - `self.context: Optional[List[float]]` を保持  
+  - 初回 `send_system_prompt`／`send_user_message` 後のレスポンスで得た `resp.context` を `self.context` に格納  
+  - 次回リクエストで `chat(..., context=self.context)` を呼び出し
+  
+- openaiの場合は、`OpenAI Python SDK (openai パッケージ)`の`ChatCompletion.create(messages=[...])` を使い、自前で messages リストを管理することで状態を継続
+```
+import openai
+
+messages = [{"role":"system","content":"You are…"}]
+messages.append({"role":"user","content":"Hello"})
+resp = openai.ChatCompletion.create(model="gpt-4o", messages=messages)
+reply = resp.choices[0].message
+messages.append({"role":"assistant","content":reply.content})
+```
+
+### LLM 初期化例（擬似コード）
+```python
+prov = cfg["llm"]["provider"]
+if prov == "lmstudio":
+    client = LMStudioClient(...)
+elif prov == "ollama":
+    client = OllamaClient(...)
+elif prov == "openai":
+    client = OpenAIClient(...)
+else:
+    raise ValueError(...)
+client.send_system_prompt(system_prompt)
+
 ### llmへの要求方法
 
 各LLM呼び出し時には、以下の情報を連結してプロンプトに含めること：
 
  * 直前に実行されたMCPコマンドとそのargs
- * MCPサーバーからのoutput（整形済み）
-
+ * MCPサーバーからのoutput(整形済み)
 
 ## コードの生成
 
@@ -117,28 +199,35 @@ llmの応答に含まれるjson応答は下記の形式になる。
 ```
 mcp_servers:
   - mcp_server_name: "github"
-    "command": "docker"
-    "args": [
-      "run",
-      "-i",
-      "--rm",
-      "-e",
-      "GITHUB_PERSONAL_ACCESS_TOKEN",
-      "ghcr.io/github/github-mcp-server"
-    ],
+    command:
+      - "docker"
+      - "run"
+      - "-i"
+      - "--rm"
+      - "-e"
+      - "GITHUB_PERSONAL_ACCESS_TOKEN"
+      - "ghcr.io/github/github-mcp-server"
     system_prompt: |
       ### github mcp tools
-      * `github/get_issue`   → `{ "owner": string, "repo": string, "issue_number": int }`
-      * `github/get_file_contents` → `{ "owner": string, "repo": string, "path": string, "ref": string }`
+      * `github/get_issue`           → `{ "owner": string, "repo": string, "issue_number": int }`
+      * `github/get_file_contents`   → `{ "owner": string, "repo": string, "path": string, "ref": string }`
       * `github/create_or_update_file` → `{ "owner": string, "repo": string, "path": string, "content": string, "branch": string, "message": string }`
       * `github/create_pull_request` → `{ "owner": string, "repo": string, "title": string, "body": string, "head": string, "base": string }`
-      * `github/update_issue` → `{ "owner": string, "repo": string, "issue_number": int, "remove_labels"?: [string], "add_labels"?: [string] }`
+      * `github/update_issue`        → `{ "owner": string, "repo": string, "issue_number": int, "remove_labels"?: [string], "add_labels"?: [string] }`
 
-lmstudio:
-  base_url:   "http://localhost:8080/v1"
-  max_token:   32768
-  max_llm_process_num: 1000
-
+llm:
+  provider: "lmstudio"    # "ollama" | "openai"
+  lmstudio:
+    base_url: "http://127.0.0.1:1234"
+    api_key_env: "LMSTUDIO_API_KEY"
+    context_length: 32768
+  ollama:
+    endpoint: "http://localhost:11434"
+    model: "llama2"
+  openai:
+    api_key_env: "OPENAI_API_KEY"
+    model: "gpt-4o"
+max_llm_process_num: 1000
 github:
   owner:     "my-org"
   bot_label: "coding agent"
