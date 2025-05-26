@@ -16,7 +16,7 @@ github copilot coding agentの様なコーディングエージェントを作�
  - 各プロバイダ固有の設定項目を `llm.<provider>` セクションに定義する。
  - ローカルでdockerでstdioで起動するmcpサーバーを利用する([modelcontextprotocol](https://modelcontextprotocol.io/quickstart/client):mcp_client.mdを利用)
  - loggerはpython標準のものを使用。loggerの設定ファイルも生成して。ログはファイルにだけ出力する様な設定で、デイリーでローテーションして圧縮して
- - このエージェントは、任意のMCPサーバー（Model Context Protocol準拠）を対象とします。
+ - このエージェントは、任意のMCPサーバー（Model Context Protocol準拠/JSON-RPC 2.0形式での呼び出し）を対象とします。
 
 mcpのクライアントは下記2種類の使い方があります。
 
@@ -57,7 +57,7 @@ client = MCPClient(
 
 ## 動作
 
-1. MCPサーバーを起動する
+1. MCPサーバーを起動する(複数のmcp_clientを起動し、辞書で管理、8番で利用する際に振り分けられる様にする)
 2.　起動したらタスクの一覧を取得する(TaskGetter.get_task_list)
 3. タスク一覧のTask一つ一つについて、下記の処理を実施
 4. タスクの処理を通知するためTask.prepare()を呼び出す
@@ -67,14 +67,14 @@ client = MCPClient(
 8. mcpサーバーを利用したい旨の回答(`command`)があったらmcpサーバーを呼び出し応答を得る.`command`の`tool`は`<mcp_server_name>/<tool_name>`形式になっているため、`<mcp_server_name>`のmcpサーバーの`<tool_name>`toolを呼び出して`args`を渡す.mcpサーバーは設定ファイルの`mcp_server_name` と`<mcp_server_name>`を単純マッチングする.
 9. llmを呼び出す。mcpサーバーの応答をllmに渡して応答を得る
 10. llmのjson応答の中に終了マーク```done: true```があるか、1タスクあたりのLLM API への呼び出し回数が最大処理数(設定ファイルの`max_llm_process_num`)を超えた場合、Task.finish()してタスクに終了を記録してループを終了する。それ以外は4.に戻る
-11. 次のissueを同様に処理する
-12. 一覧したissueを全て処理したら処理を終了する
+11. 次のTaskを同様に処理する
+12. 一覧したTaskを全て処理したら処理を終了する
 
 ### TaskGetterFromGitHubクラスのメソッドマッピング
 
 以下githubのissueに対する操作はmcpサーバー[githubのmcpサーバー](https://github.com/github/github-mcp-server):git-hub-mcp-server.mdを使います。
 
-- **TaskGetterFromGitHub.get_task_list**: `coding agent`というラベルがついたissueを一覧(list_issues)し、TaskGitHubIssueクラスのオブジェクトリストを作成する
+- **TaskGetterFromGitHub.get_task_list**: `coding agent`というラベルがついたissueを一覧(search_issues)し、TaskGitHubIssueクラスのオブジェクトリストを作成する
 - **TaskGitHubIssue.prepare**: そのタスクに紐づいているissueの`coding agent`ラベルを削除し、`coding agent processing`ラベルを付与する(update_issue)
 - **TaskGitHubIssue.get_prompt**: そのタスクに紐づいているissueの内容とコメントを取得(get_issue,get_issue_comments)してプロンプトとして提示する
 - **TaskGitHubIssue.comment**: そのタスクに紐づいているissueにコメントを記録する(add_issue_comment)
@@ -218,6 +218,8 @@ mcp_servers:
       - "--rm"
       - "-e"
       - "GITHUB_PERSONAL_ACCESS_TOKEN"
+      - "-e"
+      - "GITHUB_DYNAMIC_TOOLSETS=1"
       - "ghcr.io/github/github-mcp-server"
     system_prompt: |
       ### github mcp tools
@@ -231,11 +233,11 @@ llm:
   provider: "lmstudio"    # "ollama" | "openai"
   lmstudio:
     base_url: "http://127.0.0.1:1234"
-    api_key_env: "LMSTUDIO_API_KEY"
     context_length: 32768
+    model: "qwen3-30b-a3b-mlx"
   ollama:
     endpoint: "http://localhost:11434"
-    model: "llama2"
+    model: "qwen3-30b-a3b-mlx"
     max_token: 32768
   openai:
     api_key_env: "OPENAI_API_KEY"
@@ -245,6 +247,7 @@ max_llm_process_num: 1000
 github:
   owner:     "my-org"
   bot_label: "coding agent"
+  query: 'label:"question"'
 
 scheduling:
   interval: 300  # 秒
@@ -258,6 +261,7 @@ GITHUB_PERSONAL_ACCESS_TOKENはcronの起動時に環境変数として設定し
 .
 ├── config.yaml
 ├── system_prompt.txt
+├── condaenv.yaml # anaconda形式の環境構築ファイル(lmstudio以外はcondaで入れる)
 ├── main.py
 ├── clients/
 │   ├── mcp_tool_client.py
