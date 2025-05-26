@@ -152,12 +152,23 @@ llmの応答に含まれるjson応答は下記の形式になる。
 - エージェントの LLM 呼び出し部は、`LLMClient` の上記３メソッドのみを呼び出すことでプロバイダ差異を完全に吸収する。
 
 - lmstudioの場合は、llm.Chatを利用してコンテキストを保存する
-- ollamaの場合は、```from ollama import chat```を使い、初回呼び出しで返ってくる context（ベクトル配列）を、次回リクエストの context パラメータに渡すことで状態を継続
-  - `self.context: Optional[List[float]]` を保持  
-  - 初回 `send_system_prompt`／`send_user_message` 後のレスポンスで得た `resp.context` を `self.context` に格納  
-  - 次回リクエストで `chat(..., context=self.context)` を呼び出し
-  
-- openaiの場合は、`OpenAI Python SDK (openai パッケージ)`の`ChatCompletion.create(messages=[...])` を使い、自前で messages リストを管理することで状態を継続
+- ollamaの場合は、```from ollama import chat```を使い、自前で messages リストを管理することで状態を継続.4文字を1トークンとして`max_token`を超えない様に切り詰める。
+
+```
+from ollama import chat
+
+messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "空はなぜ青いの？"}
+]
+
+response = chat(model='llama3', messages=messages)
+
+# 応答をmessagesに追加
+messages.append({"role": "assistant", "content": response['message']['content']})
+```
+
+- openaiの場合は、`OpenAI Python SDK (openai パッケージ)`の`ChatCompletion.create(messages=[...])` を使い、自前で messages リストを管理することで状態を継続.4文字を1トークンとして`max_token`を超えない様に切り詰める。
 ```
 import openai
 
@@ -180,6 +191,7 @@ elif prov == "openai":
 else:
     raise ValueError(...)
 client.send_system_prompt(system_prompt)
+
 
 ### llmへの要求方法
 
@@ -224,9 +236,11 @@ llm:
   ollama:
     endpoint: "http://localhost:11434"
     model: "llama2"
+    max_token: 32768
   openai:
     api_key_env: "OPENAI_API_KEY"
     model: "gpt-4o"
+    max_token: 32768
 max_llm_process_num: 1000
 github:
   owner:     "my-org"
