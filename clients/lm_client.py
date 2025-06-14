@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from .llm_base import LLMClient
 from .lmstudio_client import LMStudioClient
 from .ollama_client import OllamaClient
 from .openai_client import OpenAIClient

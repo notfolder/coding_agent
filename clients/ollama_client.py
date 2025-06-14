@@ -1,4 +1,4 @@
-from .lm_client import LLMClient
+from .llm_base import LLMClient
 
 class OllamaClient(LLMClient):
     def __init__(self, config):
