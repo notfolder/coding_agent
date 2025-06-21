@@ -1,5 +1,6 @@
 import logging
 import json
+import re
 
 class TaskHandler:
     def __init__(self, llm_client, mcp_clients, config):
@@ -11,6 +12,7 @@ class TaskHandler:
     def handle(self, task):
         task.prepare()
         prompt = task.get_prompt()
+        self.logger.info(f"LLMに送信するプロンプト: {prompt}")
         self.llm_client.send_system_prompt(self._make_system_prompt())
         self.llm_client.send_user_message(prompt)
         prev_output = None
@@ -18,8 +20,11 @@ class TaskHandler:
         max_count = self.config.get('max_llm_process_num', 1000)
         while count < max_count:
             resp = self.llm_client.get_response()
+            self.logger.info(f"LLM応答: {resp}")
+            # <think>...</think> を除去
+            resp_clean = re.sub(r'<think>.*?</think>', '', resp, flags=re.DOTALL)
             try:
-                data = self._extract_json(resp)
+                data = self._extract_json(resp_clean)
             except Exception as e:
                 self.logger.error(f"LLM応答JSONパース失敗: {e}")
                 count += 1

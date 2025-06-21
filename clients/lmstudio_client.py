@@ -8,14 +8,16 @@ class LMStudioClient(LLMClient):
         self.last_response = None
 
     def send_system_prompt(self, prompt: str) -> None:
-        self.chat = self.model.Chat(prompt)
+        self.chat.add_system_prompt(prompt)
+        # self.chat = self.model.Chat(prompt)
 
     def send_user_message(self, message: str) -> None:
         self.chat.add_user_message(message)
 
     def get_response(self) -> str:
         result = self.model.respond(self.chat)
-        self.chat.add_assistant_message(result)
+        self.chat.add_assistant_response(result)
+        # self.chat.add_assistant_message(result)
         return str(result)
 
 class OllamaClient(LLMClient):

@@ -4,6 +4,8 @@ from .task_getter import TaskGetter
 class TaskGitHubIssue:
     def __init__(self, issue, mcp_client, config):
         self.issue = issue
+        self.issue['repo'] = issue['repository_url'].split('/')[-1]
+        self.issue['owner'] = issue['repository_url'].split('/')[-2]
         self.mcp_client = mcp_client
         self.config = config
 
@@ -11,7 +13,7 @@ class TaskGitHubIssue:
         # ラベル付け変更
         args = {
             'owner': self.config['github']['owner'],
-            'repo': self.issue['repository'],
+            'repo': self.issue['repo'],
             'issue_number': self.issue['number'],
             'remove_labels': [self.config['github']['bot_label']],
             'add_labels': [self.config['github']['bot_label'] + ' processing']
@@ -22,17 +24,17 @@ class TaskGitHubIssue:
         # issue内容・コメント取得
         args = {
             'owner': self.config['github']['owner'],
-            'repo': self.issue['repository'],
+            'repo': self.issue['repo'],
             'issue_number': self.issue['number']
         }
-        issue = self.mcp_client.call_tool('github/get_issue', args)
+        # issue = self.mcp_client.call_tool('github/get_issue', args)
         comments = self.mcp_client.call_tool('github/get_issue_comments', args)
-        return f"ISSUE: {issue}\nCOMMENTS: {comments}"
+        return f"ISSUE: {self.issue}\nCOMMENTS: {comments}"
 
     def comment(self, text):
         args = {
             'owner': self.config['github']['owner'],
-            'repo': self.issue['repository'],
+            'repo': self.issue['repo'],
             'issue_number': self.issue['number'],
             'body': text
         }
@@ -41,7 +43,7 @@ class TaskGitHubIssue:
     def finish(self):
         args = {
             'owner': self.config['github']['owner'],
-            'repo': self.issue['repository'],
+            'repo': self.issue['repo'],
             'issue_number': self.issue['number'],
             'remove_labels': [self.config['github']['bot_label'] + ' processing']
         }
