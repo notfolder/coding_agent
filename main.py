@@ -13,15 +13,16 @@ def setup_logger():
     logging.config.fileConfig('logging.conf', disable_existing_loggers=False)
 
 
-def load_config():
-    with open('config.yaml', 'r') as f:
+def load_config(config_file='config.yaml'):
+    with open(config_file, 'r') as f:
         return yaml.safe_load(f)
 
 
 def main():
     setup_logger()
     logger = logging.getLogger(__name__)
-    config = load_config()
+    config_file = sys.argv[1] if len(sys.argv) > 1 else 'config_github.yaml'
+    config = load_config(config_file)
 
     # LLMクライアント初期化
     llm_client = get_llm_client(config)
