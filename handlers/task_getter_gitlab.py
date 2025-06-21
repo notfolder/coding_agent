@@ -4,8 +4,8 @@ from .task_getter import TaskGetter
 class TaskGitLabIssue:
     def __init__(self, issue, mcp_client, config):
         self.issue = issue
-        self.project_id = issue.get('project_id') or issue.get('project', {}).get('id')
-        self.issue_iid = issue.get('iid') or issue.get('issue_iid') or issue.get('id')
+        self.project_id = issue.get('project_id')
+        self.issue_iid = issue.get('iid')
         self.mcp_client = mcp_client
         self.config = config
 
@@ -22,20 +22,16 @@ class TaskGitLabIssue:
         issue_detail = self.mcp_client.call_tool('gitlab/get_issue', args)
         # コメント取得（GitLabはノートとして管理）
         comments = []
-        try:
-            note_args = {
-                'project_id': f"{self.project_id}",
-                'noteable_type': 'issue',
-                'noteable_iid': self.issue_iid
-            }
-            comments = self.mcp_client.call_tool('gitlab/list_notes', note_args)
-        except Exception:
-            pass  # list_notes未実装の場合はスキップ
+        note_args = {
+            'project_id': f"{self.project_id}",
+            'issue_iid': self.issue_iid
+        }
+        comments = self.mcp_client.call_tool('gitlab/list_issue_discussions', note_args)
         return f"ISSUE: {issue_detail}\nCOMMENTS: {comments}"
 
     def comment(self, text):
         args = {
-            'project_id': self.project_id,
+            'project_id': f"{self.project_id}",
             'noteable_type': 'issue',
             'noteable_iid': self.issue_iid,
             'body': text

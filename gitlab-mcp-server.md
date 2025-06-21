@@ -1,12 +1,66 @@
-* `gitlab/create_file` → `{ "project_id": string, "branch": string, "file_path": string, "content": string, "commit_message": string }`
-* `gitlab/update_file` → `{ "project_id": string, "branch": string, "file_path": string, "content": string, "commit_message": string }`
-* `gitlab/get_file` → `{ "project_id": string, "file_path": string, "ref"?: string }`
-* `gitlab/create_branch` → `{ "project_id": string, "branch": string, "ref"?: string }`
-* `gitlab/search_projects` → `{ "search": string, "page"?: number, "per_page"?: number }`
-* `gitlab/list_issues` → `{ "project_id": string, "labels"?: string[], "state"?: "opened" | "closed" | "all" }`
-* `gitlab/create_issue` → `{ "project_id": string, "title": string, "description": string, "labels"?: string[] }`
-* `gitlab/update_issue` → `{ "project_id": string, "issue_iid": number, "title"?: string, "description"?: string, "labels"?: string[] }`
-* `gitlab/list_merge_requests` → `{ "project_id": string, "state"?: string, "labels"?: string[] }`
-* `gitlab/create_merge_request` → `{ "project_id": string, "source_branch": string, "target_branch": string, "title": string, "description"?: string }`
-* `gitlab/list_comments` → `{ "project_id": string, "issue_iid"?: number, "merge_request_iid"?: number }`
-* `gitlab/create_comment` → `{ "project_id": string, "issue_iid"?: number, "merge_request_iid"?: number, "body": string }`
+* `gitlab/create_or_update_file` → `{ "project_id": string, "file_path": string, "branch": string, "content": string, "commit_message": string }`
+* `gitlab/search_repositories` → `{ "search": string, "page"?: number, "per_page"?: number }`
+* `gitlab/create_repository` → `{ "name": string, "namespace_id"?: number, "visibility"?: string }`
+* `gitlab/get_file_contents` → `{ "project_id": string, "file_path": string, "ref"?: string }`
+* `gitlab/push_files` → `{ "project_id": string, "branch": string, "commit_message": string, "actions": Array<{action: string, file_path: string, content?: string, encoding?: string, previous_path?: string}> }`
+* `gitlab/create_issue` → `{ "project_id": string, "title": string, "description"?: string, "labels"?: string[], "assignees"?: number[] }`
+* `gitlab/create_merge_request` → `{ "project_id": string, "source_branch": string, "target_branch": string, "title": string, "description"?: string, "labels"?: string[] }`
+* `gitlab/fork_repository` → `{ "project_id": string, "namespace"?: string }`
+* `gitlab/create_branch` → `{ "project_id": string, "branch": string, "ref": string }`
+* `gitlab/get_merge_request` → `{ "project_id": string, "merge_request_iid"?: number, "branch_name"?: string }`
+* `gitlab/get_merge_request_diffs` → `{ "project_id": string, "merge_request_iid"?: number, "branch_name"?: string }`
+* `gitlab/list_merge_request_diffs` → `{ "project_id": string, "merge_request_iid"?: number, "branch_name"?: string, "page"?: number, "per_page"?: number }`
+* `gitlab/get_branch_diffs` → `{ "project_id": string, "from": string, "to": string }`
+* `gitlab/update_merge_request` → `{ "project_id": string, "merge_request_iid"?: number, "branch_name"?: string, "title"?: string, "description"?: string, "labels"?: string[] }`
+* `gitlab/create_note` → { "project_id": string, "noteable_type": "issue" | "merge_request", "noteable_iid": number, "body": string }
+* `gitlab/create_merge_request_thread` → `{ "project_id": string, "merge_request_iid": number, "body": string }`
+* `gitlab/mr_discussions` → `{ "project_id": string, "merge_request_iid": number }`
+* `gitlab/update_merge_request_note` → `{ "project_id": string, "note_id": number, "body": string }`
+* `gitlab/create_merge_request_note` → `{ "project_id": string, "merge_request_iid": number, "body": string }`
+* `gitlab/update_issue_note` → `{ "project_id": string, "issue_iid": number, "note_id": number, "body": string }`
+* `gitlab/create_issue_note` → `{ "project_id": string, "issue_iid": number, "body": string }`
+* `gitlab/list_issues` → `{ "project_id": string, "state"?: string, "labels"?: string, "page"?: number, "per_page"?: number }`
+* `gitlab/get_issue` → `{ "project_id": string, "issue_iid": number }`
+* `gitlab/update_issue` → `{ "project_id": string, "issue_iid": number, "title"?: string, "description"?: string, "labels"?: string[], "state_event"?: string }`
+* `gitlab/delete_issue` → `{ "project_id": string, "issue_iid": number }`
+* `gitlab/list_issue_links` → `{ "project_id": string, "issue_iid": number }`
+* `gitlab/list_issue_discussions` → `{ "project_id": string, "issue_iid": number }`
+* `gitlab/get_issue_link` → `{ "project_id": string, "issue_link_id": number }`
+* `gitlab/create_issue_link` → `{ "project_id": string, "issue_iid": number, "target_project_id": string, "target_issue_iid": number }`
+* `gitlab/delete_issue_link` → `{ "project_id": string, "issue_link_id": number }`
+* `gitlab/list_namespaces` → `{ "page"?: number, "per_page"?: number }`
+* `gitlab/get_namespace` → `{ "namespace_id": number }`
+* `gitlab/verify_namespace` → `{ "namespace"?: string, "namespace_id"?: number }`
+* `gitlab/get_project` → `{ "project_id": string }`
+* `gitlab/list_projects` → `{ "page"?: number, "per_page"?: number }`
+* `gitlab/list_labels` → `{ "project_id": string, "page"?: number, "per_page"?: number }`
+* `gitlab/get_label` → `{ "project_id": string, "label_name": string }`
+* `gitlab/create_label` → `{ "project_id": string, "name": string, "color"?: string, "description"?: string }`
+* `gitlab/update_label` → `{ "project_id": string, "label_name": string, "new_name"?: string, "color"?: string, "description"?: string }`
+* `gitlab/delete_label` → `{ "project_id": string, "label_name": string }`
+* `gitlab/list_group_projects` → `{ "group_id": string, "include_subgroups"?: boolean, "page"?: number, "per_page"?: number, "order_by"?: string, "sort"?: string }`
+* `gitlab/list_wiki_pages` → `{ "project_id": string, "page"?: number, "per_page"?: number }`
+* `gitlab/get_wiki_page` → `{ "project_id": string, "title": string }`
+* `gitlab/create_wiki_page` → `{ "project_id": string, "title": string, "content": string }`
+* `gitlab/update_wiki_page` → `{ "project_id": string, "title": string, "content": string }`
+* `gitlab/delete_wiki_page` → `{ "project_id": string, "title": string }`
+* `gitlab/get_repository_tree` → `{ "project_id": string, "path"?: string, "ref"?: string }`
+* `gitlab/list_pipelines` → `{ "project_id": string, "page"?: number, "per_page"?: number, "scope"?: string }`
+* `gitlab/get_pipeline` → `{ "project_id": string, "pipeline_id": number }`
+* `gitlab/list_pipeline_jobs` → `{ "project_id": string, "pipeline_id": number }`
+* `gitlab/get_pipeline_job` → `{ "project_id": string, "pipeline_id": number, "job_id": number }`
+* `gitlab/get_pipeline_job_output` → `{ "project_id": string, "pipeline_id": number, "job_id": number }`
+* `gitlab/create_pipeline` → `{ "project_id": string, "ref"?: string, "variables"?: Record<string,string> }`
+* `gitlab/retry_pipeline` → `{ "project_id": string, "pipeline_id": number }`
+* `gitlab/cancel_pipeline` → `{ "project_id": string, "pipeline_id": number }`
+* `gitlab/list_merge_requests` → `{ "project_id": string, "state"?: string, "source_branch"?: string, "target_branch"?: string, "page"?: number, "per_page"?: number }`
+* `gitlab/list_milestones` → `{ "project_id": string, "page"?: number, "per_page"?: number }`
+* `gitlab/get_milestone` → `{ "project_id": string, "milestone_id": number }`
+* `gitlab/create_milestone` → `{ "project_id": string, "title": string, "description"?: string, "due_date"?: string }`
+* `gitlab/edit_milestone` → `{ "project_id": string, "milestone_id": number, "title"?: string, "description"?: string, "due_date"?: string }`
+* `gitlab/delete_milestone` → `{ "project_id": string, "milestone_id": number }`
+* `gitlab/get_milestone_issue` → `{ "project_id": string, "milestone_id": number, "page"?: number, "per_page"?: number }`
+* `gitlab/get_milestone_merge_requests` → `{ "project_id": string, "milestone_id": number, "page"?: number, "per_page"?: number }`
+* `gitlab/promote_milestone` → `{ "project_id": string, "milestone_id": number }`
+* `gitlab/get_milestone_burndown_events` → `{ "project_id": string, "milestone_id": number }`
+* `gitlab/get_users` → `{ "usernames"?: string[], "user_ids"?: number[] }`

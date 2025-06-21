@@ -33,7 +33,7 @@ class TaskHandler:
                     break
                 continue
             if 'command' in data:
-                task.comment(data['command'].get('comment', ''))
+                task.comment(data.get('comment', ''))
                 tool = data['command']['tool']
                 args = data['command']['args']
                 mcp_server, tool_name = tool.split('/', 1)
