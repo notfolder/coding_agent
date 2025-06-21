@@ -10,8 +10,19 @@ class TaskGitLabIssue:
         self.config = config
 
     def prepare(self):
-        # 必要に応じてラベルや状態変更を実装可能
-        pass
+        # ラベル付け変更: bot_label → processing_label
+        labels = self.issue.get('labels', [])
+        if self.config['gitlab']['bot_label'] in labels:
+            labels.remove(self.config['gitlab']['bot_label'])
+        if self.config['gitlab']['processing_label'] not in labels:
+            labels.append(self.config['gitlab']['processing_label'])
+        args = {
+            'project_id': f"{self.project_id}",
+            'issue_iid': self.issue_iid,
+            'labels': labels
+        }
+        self.issue['labels'] = labels
+        self.mcp_client.call_tool('gitlab/update_issue', args)
 
     def get_prompt(self):
         # issue本体取得
@@ -27,7 +38,13 @@ class TaskGitLabIssue:
             'issue_iid': self.issue_iid
         }
         comments = self.mcp_client.call_tool('gitlab/list_issue_discussions', note_args)
-        return f"ISSUE: {issue_detail}\nCOMMENTS: {comments}"
+        comments = [[note.get('body', '') for note in item.get('notes', [])] for item in comments.get('items', [])]
+        return (
+            f"ISSUE: {{'title': '{self.issue.get('title', '')}', "
+            f"'description': '{self.issue.get('description', '')}', "
+            f"'project_id': '{self.issue.get('project_id', '')}'}}\n"
+            f"COMMENTS: {comments}"
+        )
 
     def comment(self, text):
         args = {
@@ -39,8 +56,19 @@ class TaskGitLabIssue:
         self.mcp_client.call_tool('gitlab/create_note', args)
 
     def finish(self):
-        # 必要に応じてラベルや状態変更を実装可能
-        pass
+        # ラベル付け変更: processing_label → done_label
+        labels = self.issue.get('labels', [])
+        if self.config['gitlab']['processing_label'] in labels:
+            labels.remove(self.config['gitlab']['processing_label'])
+        if self.config['gitlab']['done_label'] not in labels:
+            labels.append(self.config['gitlab']['done_label'])
+        args = {
+            'project_id': f"{self.project_id}",
+            'issue_iid': self.issue_iid,
+            'labels': labels
+        }
+        self.issue['labels'] = labels
+        self.mcp_client.call_tool('gitlab/update_issue', args)
 
 class TaskGetterFromGitLab(TaskGetter):
     def __init__(self, config, mcp_clients):
