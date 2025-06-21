@@ -1,0 +1,42 @@
+mcp_servers:
+  - mcp_server_name: "github"
+    command:
+      - "docker"
+      - "run"
+      - "-i"
+      - "--rm"
+      - "-e"
+      - "GITHUB_PERSONAL_ACCESS_TOKEN"
+      - "-e"
+      - "GITHUB_TOOLSETS=all"
+      - "ghcr.io/github/github-mcp-server"
+    system_prompt: |
+      ### github mcp tools
+      * `github/get_issue`           → `{ "owner": string, "repo": string, "issue_number": int }`
+      * `github/get_file_contents`   → `{ "owner": string, "repo": string, "path": string, "ref": string }`
+      * `github/create_or_update_file` → `{ "owner": string, "repo": string, "path": string, "content": string, "branch": string, "message": string }`
+      * `github/create_pull_request` → `{ "owner": string, "repo": string, "title": string, "body": string, "head": string, "base": string }`
+      * `github/update_issue`        → `{ "owner": string, "repo": string, "issue_number": int, "remove_labels"?: [string], "add_labels"?: [string] }`
+
+llm:
+  provider: "lmstudio"    # "ollama" | "openai"
+  lmstudio:
+    base_url: "http://127.0.0.1:1234"
+    context_length: 32768
+    model: "qwen3-30b-a3b-mlx"
+  ollama:
+    endpoint: "http://localhost:11434"
+    model: "qwen3-30b-a3b-mlx"
+    max_token: 32768
+  openai:
+    api_key_env: "OPENAI_API_KEY"
+    model: "gpt-4o"
+    max_token: 32768
+max_llm_process_num: 1000
+github:
+  owner:     "notfolder"
+  bot_label: "coding agent"
+  query: 'is:issue state:open archived:false author:@me sort:updated-desc sort:updated-desc'
+
+scheduling:
+  interval: 300  # 秒

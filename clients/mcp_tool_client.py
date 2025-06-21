@@ -21,7 +21,7 @@ class MCPToolClient:
             if self.proc.poll() is not None:
                 raise RuntimeError("MCP process exited prematurely")
             
-            self.call_initialize()
+            # self.call_initialize()
 
         except Exception as e:
             logging.error(f"Failed to start MCP server process: {cmd}\nError: {e}")
@@ -59,16 +59,25 @@ class MCPToolClient:
                         raise RuntimeError(f"MCP error: {resp_obj['error']}")
                     return resp_obj.get("result", resp_obj)
 
-    def call_initialize(self, args=None):
+    def call_initialize(self):
         """MCPサーバー初期化用の専用メソッド。id管理・ロック・エラー処理はcall_toolと同様。"""
-        if args is None:
-            args = {}
         self._id_counter += 1
         req_obj = {
             "jsonrpc": "2.0",
             "id": self._id_counter,
             "method": "initialize",
-            "params": args
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "roots": {
+                        "listChanged": True
+                    }
+                }
+            },
+            "clientInfo": {
+                "name": "mcp_tool_client",
+                "version": "1.0.0"
+            }
         }
         req = json.dumps(req_obj) + "\n"
         with self.lock:

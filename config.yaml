@@ -1,23 +1,34 @@
 mcp_servers:
-  - mcp_server_name: "github"
+  - mcp_server_name: "gitlab"
     command:
       - "docker"
       - "run"
       - "-i"
       - "--rm"
+      - "--add-host=host.docker.internal:host-gateway"
       - "-e"
-      - "GITHUB_PERSONAL_ACCESS_TOKEN"
+      - "GITLAB_API_URL=http://host.docker.internal:8080/api/v4"
       - "-e"
-      - "GITHUB_TOOLSETS=all"
-      - "ghcr.io/github/github-mcp-server"
+      - "GITLAB_PERSONAL_ACCESS_TOKEN"
+      - "iwakitakuma/gitlab-mcp"
     system_prompt: |
-      ### github mcp tools
-      * `github/get_issue`           → `{ "owner": string, "repo": string, "issue_number": int }`
-      * `github/get_file_contents`   → `{ "owner": string, "repo": string, "path": string, "ref": string }`
-      * `github/create_or_update_file` → `{ "owner": string, "repo": string, "path": string, "content": string, "branch": string, "message": string }`
-      * `github/create_pull_request` → `{ "owner": string, "repo": string, "title": string, "body": string, "head": string, "base": string }`
-      * `github/update_issue`        → `{ "owner": string, "repo": string, "issue_number": int, "remove_labels"?: [string], "add_labels"?: [string] }`
-
+      ### gitlab mcp tools
+      * `gitlab/create_or_update_file` → `{ "project_id": string, "branch": string, "actions": list<object> }`
+      * `gitlab/search_repositories` → `{ "query": string, "per_page"?: number }`
+      * `gitlab/get_file_contents` → `{ "project_id": string, "file_path": string, "ref"?: string }`
+      * `gitlab/push_files` → `{ "project_id": string, "branch": string, "commit_message": string, "actions": list<object> }`
+      * `gitlab/create_issue` → `{ "project_id": string, "title": string, "description"?: string, "labels"?: list<string> }`
+      * `gitlab/list_issues` → `{ "project_id": string, "state"?: string, "labels"?: list<string>, "per_page"?: number }`
+      * `gitlab/get_issue` → `{ "project_id": string, "issue_iid": number }`
+      * `gitlab/update_issue` → `{ "project_id": string, "issue_iid": number, "title"?: string, "description"?: string, "labels"?: list<string> }`
+      * `gitlab/create_merge_request` → `{ "project_id": string, "source_branch": string, "target_branch": string, "title": string, "description"?: string }`
+      * `gitlab/list_merge_requests` → `{ "project_id": string, "state"?: string, "per_page"?: number }`
+      * `gitlab/get_merge_request` → `{ "project_id": string, "merge_request_iid": number }`
+      * `gitlab/create_branch` → `{ "project_id": string, "branch": string, "ref": string }`
+      * `gitlab/create_note` → `{ "project_id": string, "noteable_type": string, "noteable_iid": number, "body": string }`
+      * `gitlab/list_pipelines` → `{ "project_id": string, "ref"? : string, "status"?: string, "per_page"?: number }`
+      * `gitlab/get_pipeline` → `{ "project_id": string, "pipeline_id": number }`
+      * `gitlab/create_pipeline` → `{ "project_id": string, "ref": string, "variables"?: object }`
 llm:
   provider: "lmstudio"    # "ollama" | "openai"
   lmstudio:
@@ -33,10 +44,11 @@ llm:
     model: "gpt-4o"
     max_token: 32768
 max_llm_process_num: 1000
-github:
+gitlab:
   owner:     "notfolder"
   bot_label: "coding agent"
-  query: 'is:issue state:open archived:false author:@me sort:updated-desc sort:updated-desc'
+  project_id: "coding-agent-project"
+  query: 'state=opened&scope=all&labels=coding agent'
 
 scheduling:
   interval: 300  # 秒
