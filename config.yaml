@@ -8,7 +8,7 @@ mcp_servers:
       - "-e"
       - "GITHUB_PERSONAL_ACCESS_TOKEN"
       - "-e"
-      - "GITHUB_DYNAMIC_TOOLSETS=1"
+      - "GITHUB_TOOLSETS=all"
       - "ghcr.io/github/github-mcp-server"
     system_prompt: |
       ### github mcp tools
@@ -36,7 +36,7 @@ max_llm_process_num: 1000
 github:
   owner:     "my-org"
   bot_label: "coding agent"
-  query: 'label:"question"'
+  query: 'is:issue state:open archived:false author:@me sort:updated-desc sort:updated-desc'
 
 scheduling:
   interval: 300  # 秒

@@ -1,3 +1,4 @@
+import json
 from .task_getter import TaskGetter
 
 class TaskGitHubIssue:
@@ -54,9 +55,10 @@ class TaskGetterFromGitHub(TaskGetter):
     def get_task_list(self):
         # MCPサーバーでissue検索
         args = {
-            'query': f'label:"{self.config["github"]["bot_label"]}" {self.config["github"].get("query", "")}',
+            'q': f'label:"{self.config["github"]["bot_label"]}" {self.config["github"].get("query", "")}',
             'perPage': 20
         }
         result = self.mcp_client.call_tool('github/search_issues', args)
-        issues = result.get('items', [])
+        # result = self.mcp_client.call_tool('github/get_me', {})
+        issues = json.loads(result["content"][0]["text"]).get('items', [])
         return [TaskGitHubIssue(issue, self.mcp_client, self.config) for issue in issues]
