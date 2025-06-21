@@ -53,10 +53,9 @@ class TaskGetterFromGitLab(TaskGetter):
             'search': '',  # 空文字で全プロジェクト取得
             'per_page': 100
         })
-        projects = json.loads(projects_result["content"][0]["text"]).get('items', [])
+        projects = projects_result.get('items', [])
         all_issues = []
         for project in projects:
-            # project_id = project.get('name')
             project_id = project.get('id')
             if not project_id:
                 continue
@@ -67,7 +66,7 @@ class TaskGetterFromGitLab(TaskGetter):
                 'per_page': 20
             }
             result = self.mcp_client.call_tool('gitlab/list_issues', args)
-            issues = json.loads(result["content"][0]["text"])
+            issues = result
             for issue in issues:
                 all_issues.append(TaskGitLabIssue(issue, self.mcp_client, self.config))
         return all_issues

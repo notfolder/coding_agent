@@ -62,5 +62,5 @@ class TaskGetterFromGitHub(TaskGetter):
         }
         result = self.mcp_client.call_tool('github/search_issues', args)
         # result = self.mcp_client.call_tool('github/get_me', {})
-        issues = json.loads(result["content"][0]["text"]).get('items', [])
+        issues = result.get('items', [])
         return [TaskGitHubIssue(issue, self.mcp_client, self.config) for issue in issues]
