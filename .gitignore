@@ -1,4 +1,4 @@
+gitlab/
 .vscode/
 *.pyc
 *.log
-./gitlab/
