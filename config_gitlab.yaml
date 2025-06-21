@@ -97,6 +97,8 @@ max_llm_process_num: 1000
 gitlab:
   owner:     "notfolder"
   bot_label: "coding agent"
+  processing_label: "coding agent processing"
+  done_label: "coding agent done"
   project_id: "coding-agent-project"
   query: 'state=opened&scope=all&labels=coding agent'
 

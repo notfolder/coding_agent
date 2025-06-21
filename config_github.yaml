@@ -36,6 +36,8 @@ max_llm_process_num: 1000
 github:
   owner:     "notfolder"
   bot_label: "coding agent"
+  processing_label: "coding agent processing"
+  done_label: "coding agent done"
   query: 'is:issue state:open archived:false author:@me sort:updated-desc sort:updated-desc'
 
 scheduling:
