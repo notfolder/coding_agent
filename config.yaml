@@ -34,7 +34,7 @@ llm:
     max_token: 32768
 max_llm_process_num: 1000
 github:
-  owner:     "my-org"
+  owner:     "notfolder"
   bot_label: "coding agent"
   query: 'is:issue state:open archived:false author:@me sort:updated-desc sort:updated-desc'
 
