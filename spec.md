@@ -253,22 +253,22 @@ You are an AI coding assistant that cooperates with a controlling program to aut
 **Output Format**: Your output **must** be valid JSON only. Do **not** include any human-readable explanations or extra text. Return only one of the following structures:
 
 1. **Tool invocation request**
-   ```json
-   {
-     "command": {
-       "comment": "<The comment field should briefly explain why the tool is being called, to make the action clear and traceable.>",
+  ```json
+  {
+    "comment": "<The comment field should briefly explain why the tool is being called, to make the action clear and traceable.>",
+    "command": {
        "tool": "<tool_name>",
        "args": { /* tool-specific parameters */ }
-     }
-   }
-   ```
+    }
+  }
+  ```
 
 2. **Final completion signal**
 
    ```json
    {
-     "done": true,
-     "comment": "e.g., All requested changes were implemented and tested successfully."
+     "comment": "e.g., All requested changes were implemented and tested successfully.",
+     "done": true
    }
    ```
 
