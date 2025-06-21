@@ -1,15 +1,10 @@
 mcp_servers:
   - mcp_server_name: "github"
     command:
-      - "docker"
-      - "run"
-      - "-i"
-      - "--rm"
-      - "-e"
-      - "GITHUB_PERSONAL_ACCESS_TOKEN"
-      - "-e"
-      - "GITHUB_TOOLSETS=all"
-      - "ghcr.io/github/github-mcp-server"
+      - "./github-mcp-server.cmd"
+      - "stdio"
+    env:
+      GITHUB_TOOLSETS: "all"
     system_prompt: |
       ### github mcp tools
       * `github/get_issue`           → `{ "owner": string, "repo": string, "issue_number": int }`
