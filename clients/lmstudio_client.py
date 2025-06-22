@@ -3,6 +3,7 @@ from .llm_base import LLMClient
 class LMStudioClient(LLMClient):
     def __init__(self, config):
         import lmstudio as lms
+        lms.configure_default_client(config.get('base_url', 'localhost:1234'))
         self.model = lms.llm(config.get('model'))
         self.chat = lms.Chat()
         self.last_response = None
