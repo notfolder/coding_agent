@@ -21,6 +21,9 @@ RUN go build -o /bin/github-mcp-server main.go
 
 FROM condaforge/miniforge3
 
+ENV PYTHONUNBUFFERED=1
+RUN mkdir -p /logs
+
 # Python依存パッケージのインストール
 COPY condaenv.yaml /tmp/condaenv.yaml
 RUN conda env create -f /tmp/condaenv.yaml
@@ -42,4 +45,4 @@ RUN npm install @zereight/mcp-gitlab@latest
 COPY --from=build /bin/github-mcp-server ./github-mcp-server.cmd
 
 # npxで@zereight/mcp-gitlabを起動し、main.pyも起動
-ENTRYPOINT ["conda", "run", "-n", "coding-agent", "python", "main.py"]
+ENTRYPOINT ["conda", "run", "-n", "coding-agent", "python", "-u", "main.py"]

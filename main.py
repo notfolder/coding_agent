@@ -19,12 +19,14 @@ def load_config(config_file='config.yaml'):
 
 
 def main():
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+
     setup_logger()
     logger = logging.getLogger(__name__)
     task_source = os.environ.get('TASK_SOURCE', 'github')
     logger.info(f"TASK_SOURCE: {task_source}")
-    config_file = 'config_gitlab.yaml' if task_source == 'gitlab' else 'config_github.yaml'
-    logger.info(f"Using configuration file: {config_file}")
+    config_file = 'config.yaml'
     config = load_config(config_file)
 
     # LLMクライアント初期化
@@ -37,7 +39,7 @@ def main():
         mcp_clients[name] = MCPToolClient(server)
 
     # タスク取得
-    task_getter = TaskGetter.factory(config, mcp_clients)
+    task_getter = TaskGetter.factory(config, mcp_clients, task_source)
     tasks = task_getter.get_task_list()
 
     # タスク処理
@@ -47,6 +49,7 @@ def main():
             handler.handle(task)
         except Exception as e:
             logger.exception(f"Task処理中にエラー: {e}")
+            task.comment(f"処理中にエラーが発生しました: {e}")
 
 if __name__ == '__main__':
     main()
