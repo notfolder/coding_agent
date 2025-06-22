@@ -1,16 +1,12 @@
 mcp_servers:
   - mcp_server_name: "gitlab"
     command:
-      - "docker"
-      - "run"
-      - "-i"
-      - "--rm"
-      - "--add-host=host.docker.internal:host-gateway"
-      - "-e"
-      - "GITLAB_API_URL=http://host.docker.internal:8080/api/v4"
-      - "-e"
-      - "GITLAB_PERSONAL_ACCESS_TOKEN"
-      - "iwakitakuma/gitlab-mcp"
+      - "npx"
+      - "@zereight/mcp-gitlab"
+      - "stdio"
+    # env:
+      # GITLAB_API_URL: "http://host.docker.internal:8080/api/v4"
+      # GITLAB_API_URL: "http://localhost:8080/api/v4"
     system_prompt: |
       ### gitlab mcp tools
       * `gitlab/create_or_update_file` → `{ "project_id": string, "file_path": string, "branch": string, "content": string, "commit_message": string }`
@@ -82,11 +78,11 @@ mcp_servers:
 llm:
   provider: "lmstudio"    # "ollama" | "openai"
   lmstudio:
-    base_url: "http://127.0.0.1:1234"
+    base_url: "host.docker.internal:1234"
     context_length: 32768
     model: "qwen3-30b-a3b-mlx"
   ollama:
-    endpoint: "http://localhost:11434"
+    endpoint: "http://host.docker.internal:11434"
     model: "qwen3-30b-a3b-mlx"
     max_token: 32768
   openai:

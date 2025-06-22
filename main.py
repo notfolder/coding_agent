@@ -21,7 +21,10 @@ def load_config(config_file='config.yaml'):
 def main():
     setup_logger()
     logger = logging.getLogger(__name__)
-    config_file = sys.argv[1] if len(sys.argv) > 1 else 'config_github.yaml'
+    task_source = os.environ.get('TASK_SOURCE', 'github')
+    logger.info(f"TASK_SOURCE: {task_source}")
+    config_file = 'config_gitlab.yaml' if task_source == 'gitlab' else 'config_github.yaml'
+    logger.info(f"Using configuration file: {config_file}")
     config = load_config(config_file)
 
     # LLMクライアント初期化

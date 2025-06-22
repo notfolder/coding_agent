@@ -1,3 +1,4 @@
+import os
 import subprocess
 import threading
 import queue
@@ -15,6 +16,8 @@ class MCPToolClient:
 
     def _start_process(self):
         cmd = self.server_config['command']
+        env = self.server_config.get('env', {})
+        os.environ.update(env)
         try:
             self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
 
