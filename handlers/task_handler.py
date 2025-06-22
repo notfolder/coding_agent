@@ -21,7 +21,10 @@ class TaskHandler:
         while count < max_count:
             resp = self.llm_client.get_response()
             self.logger.info(f"LLM応答: {resp}")
-            # <think>...</think> を除去
+            # <think>...</think> の内容をコメントとして投稿し、除去
+            think_matches = re.findall(r'<think>(.*?)</think>', resp, flags=re.DOTALL)
+            for think_content in think_matches:
+                task.comment(think_content.strip())
             resp_clean = re.sub(r'<think>.*?</think>', '', resp, flags=re.DOTALL)
             try:
                 data = self._extract_json(resp_clean)
