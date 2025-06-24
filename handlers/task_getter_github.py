@@ -41,7 +41,11 @@ class TaskGitHubIssue:
             f"COMMENTS: {comments}"
         )
 
-    def comment(self, text):
+    def comment(self, text, mention=False):
+        if mention:
+            owner = self.issue.get('owner')
+            if owner:
+                text = f"@{owner} {text}"
         args = {
             'owner': self.config['github']['owner'],
             'repo': self.issue['repo'],

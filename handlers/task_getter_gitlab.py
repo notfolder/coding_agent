@@ -46,7 +46,11 @@ class TaskGitLabIssue:
             f"COMMENTS: {comments}"
         )
 
-    def comment(self, text):
+    def comment(self, text, mention=False):
+        if mention:
+            owner = self.issue.get('author', {}).get('username')
+            if owner:
+                text = f"@{owner} {text}"
         args = {
             'project_id': f"{self.project_id}",
             'noteable_type': 'issue',
