@@ -1,7 +1,8 @@
+import hashlib
 from mcp import StdioServerParameters
 from mcp.client.session import ClientSession
 from mcp.client.stdio import stdio_client
-from mcp.types import TextContent, Tool, ClientNotification, InitializedNotification
+from mcp.types import TextContent, Tool, ClientNotification, InitializedNotification,EmbeddedResource,TextResourceContents
 import threading
 import logging
 import json
@@ -61,6 +62,17 @@ class MCPToolClient:
                     return await coro_fn(session)
         return self._run_async(wrapper())
 
+    def _git_blob_sha1_from_str(self, s: str, encoding: str = 'utf-8') -> str:
+        """
+        Git blob SHA‑1 を文字列から計算する。
+        - s: テキスト文字列（例："Hello\n"）
+        - encoding: バイト化に使用するエンコーディング
+        """
+        data = s.encode(encoding)
+        header = f"blob {len(data)}\0".encode('utf-8')
+        full = header + data
+        return hashlib.sha1(full).hexdigest()
+
     def _call_tool_sync(self, tool, args):
         if '/' in tool:
             tool_name = tool.split('/', 1)[1]
@@ -80,6 +92,14 @@ class MCPToolClient:
                     results.append(obj)
                 except Exception:
                     results.append(content.text)
+            elif isinstance(content, EmbeddedResource):
+                resource = content.resource
+                if isinstance(resource, TextResourceContents):
+                    text = resource.text
+                    sha = self._git_blob_sha1_from_str(text)
+                    results.append({'text': text, 'sha': sha})
+                else:
+                    results.append(result)
             else:
                 results.append(content)
 
@@ -101,6 +121,7 @@ class MCPToolClient:
                     'name': tool.name,
                     'description': tool.description,
                     'inputSchema': tool.inputSchema if isinstance(tool.inputSchema, dict) else {},
+                    'required': tool.inputSchema.get('required', [])
                 }
             if not isinstance(tool, dict):
                 continue
@@ -109,7 +130,12 @@ class MCPToolClient:
             desc = desc.replace('\n', ' ').replace('\r', ' ').strip()
             input_schema = tool.get('inputSchema', {})
             params = input_schema.get('properties', {}) if isinstance(input_schema, dict) else {}
-            param_str = '{ ' + ', '.join(f'"{k}": {v.get("type", "any")}' for k, v in params.items()) + ' }'
+            required = tool.get('required', []) or []
+            param_str = '{ ' + ', '.join(
+                (f'"{k}"' if k in required else f'"{k}"?') +
+                (f': {v.get("type", "any")}' if k in required else f': [{v.get("type", "any")}]')
+                for k, v in params.items()
+            ) + ' }'
             prompt_lines.append(f"* `{tool_name}` → `{param_str}` --- {desc}")
 
         return '\n'.join(prompt_lines)

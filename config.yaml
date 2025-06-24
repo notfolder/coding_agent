@@ -12,11 +12,6 @@ mcp_servers:
       - "@zereight/mcp-gitlab"
       - "stdio"
 
-  - mcp_server_name: "hashing"
-    command:
-      - "python"
-      - "hashing.py"
-
 llm:
   provider: "lmstudio"    # "ollama" | "openai"
   lmstudio:
