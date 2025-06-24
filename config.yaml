@@ -14,14 +14,6 @@ mcp_servers:
 
   - mcp_server_name: "hashing"
     command:
-      # - "conda"
-      # - "run"
-      # - "-n"
-      # - "coding-agent"
-      # - "hashing-mcp-server"
-      # - "python"
-      # - "-m"
-      # - "hashing_mcp.cli"
       - "python"
       - "hashing.py"
 

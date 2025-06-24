@@ -6,7 +6,7 @@ mcp = FastMCP(name="Hasher")
 
 @mcp.tool()
 def hash_sha256(text: str) -> str:
-    """Calculate the SHA-256 hash of the input text.
+    """Calculate the SHA-256 hash of the input text.It is intended for use during file updates in workflows such as GitHub or GitLab,         where you need to verify or record the file’s SHA checksum as part of release version tracking.
 
     Args:
         text (str): The text to hash.
