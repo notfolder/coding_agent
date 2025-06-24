@@ -41,8 +41,7 @@ class TaskHandler:
                 args = data['command']['args']
                 mcp_server, tool_name = tool.split('/', 1)
                 output = self.mcp_clients[mcp_server].call_tool(tool_name, args)
-                prev_output = output.get('output', output)
-                self.llm_client.send_user_message(f"previous_output: {prev_output}")
+                self.llm_client.send_user_message(f"output: {output}")
             if data.get('done'):
                 task.comment(data.get('comment', ''))
                 task.finish()
@@ -50,12 +49,12 @@ class TaskHandler:
             count += 1
 
     def _make_system_prompt(self):
-        # system_prompt.txtを読み込み、mcp_promptを埋め込む
+        # system_prompt.txtを読み込み、mcp_promptをmcp_clientsから取得したsystem_promptで埋め込む
         with open('system_prompt.txt') as f:
             prompt = f.read()
         mcp_prompt = ''
-        for s in self.config.get('mcp_servers', []):
-            mcp_prompt += s.get('system_prompt', '') + '\n'
+        for name, client in self.mcp_clients.items():
+            mcp_prompt += client.system_prompt + '\n'
         return prompt.replace('{mcp_prompt}', mcp_prompt)
 
     def _extract_json(self, text):

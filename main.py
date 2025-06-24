@@ -10,12 +10,50 @@ from handlers.task_handler import TaskHandler
 
 
 def setup_logger():
-    logging.config.fileConfig('logging.conf', disable_existing_loggers=False)
+    import os
+    log_path = os.environ.get('LOGS', 'logs/agent.log')
+    loglevel = 'DEBUG' if os.environ.get('DEBUG', '').lower() == 'true' else 'INFO'
+    logging.config.fileConfig('logging.conf', defaults={'LOGS': log_path, 'loglevel': loglevel}, disable_existing_loggers=False)
 
 
 def load_config(config_file='config.yaml'):
     with open(config_file, 'r') as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+    # lmstudio
+    lmstudio_env_url = os.environ.get('LMSTUDIO_BASE_URL')
+    if lmstudio_env_url:
+        if 'llm' in config and 'lmstudio' in config['llm']:
+            config['llm']['lmstudio']['base_url'] = lmstudio_env_url
+    lmstudio_env_model = os.environ.get('LMSTUDIO_MODEL')
+    if lmstudio_env_model:
+        if 'llm' in config and 'lmstudio' in config['llm']:
+            config['llm']['lmstudio']['model'] = lmstudio_env_model
+    # ollama
+    ollama_env_endpoint = os.environ.get('OLLAMA_ENDPOINT')
+    if ollama_env_endpoint:
+        if 'llm' in config and 'ollama' in config['llm']:
+            config['llm']['ollama']['endpoint'] = ollama_env_endpoint
+    ollama_env_model = os.environ.get('OLLAMA_MODEL')
+    if ollama_env_model:
+        if 'llm' in config and 'ollama' in config['llm']:
+            config['llm']['ollama']['model'] = ollama_env_model
+    # openai
+    openai_env_model = os.environ.get('OPENAI_MODEL')
+    if openai_env_model:
+        if 'llm' in config and 'openai' in config['llm']:
+            config['llm']['openai']['model'] = openai_env_model
+    openai_env_key = os.environ.get('OPENAI_API_KEY')
+    if openai_env_key:
+        if 'llm' in config and 'openai' in config['llm']:
+            config['llm']['openai']['api_key'] = openai_env_key
+    # mcp_servers github command
+    github_cmd_env = os.environ.get('GITHUB_MCP_COMMAND')
+    if github_cmd_env:
+        for server in config.get('mcp_servers', []):
+            if server.get('mcp_server_name') == 'github':
+                # スペース区切りで分割
+                server['command'] = github_cmd_env.split()
+    return config
 
 
 def main():
@@ -37,6 +75,7 @@ def main():
     for server in config.get('mcp_servers', []):
         name = server['mcp_server_name']
         mcp_clients[name] = MCPToolClient(server)
+        logging.debug(f"{name}: {mcp_clients[name].system_prompt}")
 
     # タスク取得
     task_getter = TaskGetter.factory(config, mcp_clients, task_source)
