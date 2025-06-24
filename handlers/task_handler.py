@@ -2,6 +2,8 @@ import logging
 import json
 import re
 
+from mcp import McpError
+
 class TaskHandler:
     def __init__(self, llm_client, mcp_clients, config):
         self.llm_client = llm_client
@@ -18,6 +20,10 @@ class TaskHandler:
         prev_output = None
         count = 0
         max_count = self.config.get('max_llm_process_num', 1000)
+        # 連続ツールエラー管理用
+        last_tool = None
+        tool_error_count = 0
+        should_break = False
         while count < max_count:
             resp = self.llm_client.get_response()
             self.logger.info(f"LLM応答: {resp}")
@@ -40,22 +46,40 @@ class TaskHandler:
                 tool = data['command']['tool']
                 args = data['command']['args']
                 mcp_server, tool_name = tool.split('/', 1)
-                output = self.mcp_clients[mcp_server].call_tool(tool_name, args)
-                prev_output = output.get('output', output)
-                self.llm_client.send_user_message(f"previous_output: {prev_output}")
+                try:
+                    output = self.mcp_clients[mcp_server].call_tool(tool_name, args)
+                    # ツール呼び出し成功時はエラーカウントリセット
+                    if last_tool == tool:
+                        tool_error_count = 0
+                except* McpError as e:
+                    self.logger.error(f"ツール呼び出し失敗: {e.exceptions[0].exceptions[0]}")
+                    task.comment(f"ツール呼び出しエラー: {e.exceptions[0].exceptions[0]}")
+                    output = f"error: {str(e.exceptions[0].exceptions[0])}"
+                    # 連続ツールエラー判定
+                    if last_tool == tool:
+                        tool_error_count += 1
+                    else:
+                        tool_error_count = 1
+                        last_tool = tool
+                    if tool_error_count >= 3:
+                        task.comment(f"同じツール({tool})で3回連続エラーが発生したため処理を中止します。")
+                        should_break = True
+                self.llm_client.send_user_message(f"output: {output}")
             if data.get('done'):
                 task.comment(data.get('comment', ''))
                 task.finish()
                 break
+            if should_break:
+                break
             count += 1
 
     def _make_system_prompt(self):
-        # system_prompt.txtを読み込み、mcp_promptを埋め込む
+        # system_prompt.txtを読み込み、mcp_promptをmcp_clientsから取得したsystem_promptで埋め込む
         with open('system_prompt.txt') as f:
             prompt = f.read()
         mcp_prompt = ''
-        for s in self.config.get('mcp_servers', []):
-            mcp_prompt += s.get('system_prompt', '') + '\n'
+        for name, client in self.mcp_clients.items():
+            mcp_prompt += client.system_prompt + '\n'
         return prompt.replace('{mcp_prompt}', mcp_prompt)
 
     def _extract_json(self, text):

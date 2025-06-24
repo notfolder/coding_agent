@@ -1,117 +1,141 @@
-import os
-import subprocess
+import hashlib
+from mcp import StdioServerParameters
+from mcp.client.session import ClientSession
+from mcp.client.stdio import stdio_client
+from mcp.types import TextContent, Tool, ClientNotification, InitializedNotification,EmbeddedResource,TextResourceContents
 import threading
-import queue
-import json
-import uuid
 import logging
+import json
+import os
+import asyncio
 
 class MCPToolClient:
     def __init__(self, server_config):
         self.server_config = server_config
-        self.proc = None
         self.lock = threading.Lock()
-        self._id_counter = 0
-        self._start_process()
-
-    def _start_process(self):
-        cmd = self.server_config['command']
-        env = self.server_config.get('env', {})
-        os.environ.update(env)
-        try:
-            self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-
-            if self.proc.poll() is not None:
-                raise RuntimeError("MCP process exited prematurely")
-            
-            # self.call_initialize()
-
-        except Exception as e:
-            logging.error(f"Failed to start MCP server process: {cmd}\nError: {e}")
-            raise
+        self._system_prompt = None
 
     def call_tool(self, tool, args):
-        # toolがmcp_server/tool_name形式ならtool_nameだけにする
-        if '/' in tool:
-            tool = tool.split('/', 1)[1]
-        self._id_counter += 1
-        params = {
-            "name": tool,
-            "arguments": args
-        }
-        req_obj = {
-            "jsonrpc": "2.0",
-            "id": self._id_counter,
-            "method": "tools/call",
-            "params": params
-        }
-        req = json.dumps(req_obj) + "\n"
         with self.lock:
-            self.proc.stdin.write(req)
-            self.proc.stdin.flush()
-            while True:
-                resp = self.proc.stdout.readline()
-                if not resp:
-                    raise RuntimeError("MCP server closed pipe")
-                try:
-                    resp_obj = json.loads(resp)
-                except Exception:
-                    continue
-                if resp_obj.get("id") == self._id_counter:
-                    if "error" in resp_obj:
-                        raise RuntimeError(f"MCP error: {resp_obj['error']}")
-                    result = resp_obj.get("result", resp_obj)
-                    # contentフィールドがあれば0番目のtextをパースして返す
-                    if (
-                        isinstance(result, dict)
-                        and "content" in result
-                        and isinstance(result["content"], list)
-                        and len(result["content"]) > 0
-                        and "text" in result["content"][0]
-                    ):
-                        try:
-                            return json.loads(result["content"][0]["text"])
-                        except Exception:
-                            return result["content"][0]["text"]
-                    return result
+            return self._call_tool_sync(tool, args)
 
     def call_initialize(self):
-        """MCPサーバー初期化用の専用メソッド。id管理・ロック・エラー処理はcall_toolと同様。"""
-        self._id_counter += 1
-        req_obj = {
-            "jsonrpc": "2.0",
-            "id": self._id_counter,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "roots": {
-                        "listChanged": True
-                    }
-                }
-            },
-            "clientInfo": {
-                "name": "mcp_tool_client",
-                "version": "1.0.0"
-            }
-        }
-        req = json.dumps(req_obj) + "\n"
+        # MCPのClientSessionは自動でinitializeを呼ぶので何もしない
+        return None
+
+    def list_tools(self):
         with self.lock:
-            self.proc.stdin.write(req)
-            self.proc.stdin.flush()
-            while True:
-                resp = self.proc.stdout.readline()
-                if not resp:
-                    raise RuntimeError("MCP server closed pipe during initialize")
-                try:
-                    resp_obj = json.loads(resp)
-                except Exception:
-                    continue
-                if resp_obj.get("id") == self._id_counter:
-                    if "error" in resp_obj:
-                        raise RuntimeError(f"MCP error (initialize): {resp_obj['error']}")
-                    return resp_obj.get("result", resp_obj)
+            return self._list_tools_sync()
+
+    @property
+    def system_prompt(self):
+        return self._get_system_prompt_sync()
 
     def close(self):
-        if self.proc:
-            self.proc.terminate()
+        pass  # クライアントの状態管理が不要になったため何もしない
+
+    def _run_async(self, coro):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    def _run_with_session(self, coro_fn):
+        async def wrapper():
+            cmd = self.server_config['command'][0]
+            args = self.server_config['command'][1:]
+            env = self.server_config.get('env', {})
+            merged_env = dict(os.environ)
+            merged_env.update(env)
+            server_params = StdioServerParameters(command=cmd, args=args, env=merged_env)
+            async with stdio_client(server_params) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    # notifications/initialized送信
+                    notification = ClientNotification(
+                        InitializedNotification(
+                            method="notifications/initialized"
+                        )
+                    )
+                    await session.send_notification(notification)
+                    return await coro_fn(session)
+        return self._run_async(wrapper())
+
+    def _git_blob_sha1_from_str(self, s: str, encoding: str = 'utf-8') -> str:
+        """
+        Git blob SHA‑1 を文字列から計算する。
+        - s: テキスト文字列（例："Hello\n"）
+        - encoding: バイト化に使用するエンコーディング
+        """
+        data = s.encode(encoding)
+        header = f"blob {len(data)}\0".encode('utf-8')
+        full = header + data
+        return hashlib.sha1(full).hexdigest()
+
+    def _call_tool_sync(self, tool, args):
+        if '/' in tool:
+            tool_name = tool.split('/', 1)[1]
+        else:
+            tool_name = tool
+
+        async def coro_fn(session):
+            return await session.call_tool(tool_name, args)
+
+        result = self._run_with_session(coro_fn)
+
+        results = []
+        for content in result.content:
+            if isinstance(content, TextContent):
+                try:
+                    obj = json.loads(content.text)
+                    results.append(obj)
+                except Exception:
+                    results.append(content.text)
+            elif isinstance(content, EmbeddedResource):
+                resource = content.resource
+                if isinstance(resource, TextResourceContents):
+                    text = resource.text
+                    sha = self._git_blob_sha1_from_str(text)
+                    results.append({'text': text, 'sha': sha})
+                else:
+                    results.append(result)
+            else:
+                results.append(content)
+
+        return results[0] if len(results) == 1 else results
+
+    def _list_tools_sync(self):
+        async def coro_fn(session):
+            return await session.list_tools()
+        return self._run_with_session(coro_fn)
+
+    def _get_system_prompt_sync(self):
+        mcp_name = self.server_config.get('mcp_server_name', '')
+        tools = self.list_tools().tools
+
+        prompt_lines = [f"### {mcp_name} mcp tools"]
+        for tool in tools:
+            if isinstance(tool, Tool):
+                tool = {
+                    'name': tool.name,
+                    'description': tool.description,
+                    'inputSchema': tool.inputSchema if isinstance(tool.inputSchema, dict) else {},
+                    'required': tool.inputSchema.get('required', [])
+                }
+            if not isinstance(tool, dict):
+                continue
+            tool_name = f"{mcp_name}/{tool.get('name', '')}"
+            desc = tool.get('description', '') or ''
+            desc = desc.replace('\n', ' ').replace('\r', ' ').strip()
+            input_schema = tool.get('inputSchema', {})
+            params = input_schema.get('properties', {}) if isinstance(input_schema, dict) else {}
+            required = tool.get('required', []) or []
+            param_str = '{ ' + ', '.join(
+                (f'"{k}"' if k in required else f'"{k}"?') +
+                (f': {v.get("type", "any")}' if k in required else f': [{v.get("type", "any")}]')
+                for k, v in params.items()
+            ) + ' }'
+            prompt_lines.append(f"* `{tool_name}` → `{param_str}` --- {desc}")
+
+        return '\n'.join(prompt_lines)

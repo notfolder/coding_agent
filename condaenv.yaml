@@ -3,10 +3,16 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - python=3.10
+  - python=3.13
   - pip
+  - rust
+  - pyyaml
   - pip:
-      - pyyaml
+      - fastmcp
+      - pydantic==2.10.1
+      - pydantic-settings==2.10.0
+      - mcp[cli]
       - lmstudio
       - openai
       - ollama
+      # - hashing-mcp-server

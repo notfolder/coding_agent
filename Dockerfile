@@ -45,4 +45,4 @@ RUN npm install @zereight/mcp-gitlab@latest
 COPY --from=build /bin/github-mcp-server ./github-mcp-server.cmd
 
 # npxで@zereight/mcp-gitlabを起動し、main.pyも起動
-ENTRYPOINT ["conda", "run", "-n", "coding-agent", "python", "-u", "main.py"]
+ENTRYPOINT ["stdbuf", "-oL", "conda", "run", "-n", "coding-agent", "python", "-u", "main.py"]
