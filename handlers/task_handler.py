@@ -66,7 +66,8 @@ class TaskHandler:
                         should_break = True
                 self.llm_client.send_user_message(f"output: {output}")
             if data.get('done'):
-                task.comment(data.get('comment', ''))
+                comment_text = data.get('comment', '') or "処理が完了しました。"
+                task.comment(comment_text, mention=True)
                 task.finish()
                 break
             if should_break:
