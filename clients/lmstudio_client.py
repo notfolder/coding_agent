@@ -15,6 +15,9 @@ class LMStudioClient(LLMClient):
     def send_user_message(self, message: str) -> None:
         self.chat.add_user_message(message)
 
+    def send_function_result(self, name: str, result) -> None:
+        raise NotImplementedError("LMStudio does not support function calls. Use OpenAI compatible call instead.")
+
     def get_response(self) -> str:
         result = self.model.respond(self.chat)
         self.chat.add_assistant_response(result)

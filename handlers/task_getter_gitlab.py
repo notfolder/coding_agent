@@ -23,7 +23,7 @@ class TaskGitLabIssue(Task):
             'labels': labels
         }
         self.issue['labels'] = labels
-        self.mcp_client.call_tool('gitlab/update_issue', args)
+        self.mcp_client.call_tool('update_issue', args)
 
     def get_prompt(self):
         # issue本体取得
@@ -31,14 +31,14 @@ class TaskGitLabIssue(Task):
             'project_id': f"{self.project_id}",
             'issue_iid': self.issue_iid
         }
-        issue_detail = self.mcp_client.call_tool('gitlab/get_issue', args)
+        issue_detail = self.mcp_client.call_tool('get_issue', args)
         # コメント取得（GitLabはノートとして管理）
         comments = []
         note_args = {
             'project_id': f"{self.project_id}",
             'issue_iid': self.issue_iid
         }
-        comments = self.mcp_client.call_tool('gitlab/list_issue_discussions', note_args)
+        comments = self.mcp_client.call_tool('list_issue_discussions', note_args)
         comments = [[note.get('body', '') for note in item.get('notes', [])] for item in comments.get('items', [])]
         return (
             f"ISSUE: {{'title': '{self.issue.get('title', '')}', "
@@ -58,7 +58,7 @@ class TaskGitLabIssue(Task):
             'noteable_iid': self.issue_iid,
             'body': text
         }
-        self.mcp_client.call_tool('gitlab/create_note', args)
+        self.mcp_client.call_tool('create_note', args)
 
     def finish(self):
         # ラベル付け変更: processing_label → done_label
@@ -73,7 +73,7 @@ class TaskGitLabIssue(Task):
             'labels': labels
         }
         self.issue['labels'] = labels
-        self.mcp_client.call_tool('gitlab/update_issue', args)
+        self.mcp_client.call_tool('update_issue', args)
 
 class TaskGitLabMergeRequest(Task):
     def __init__(self, mr, mcp_client, config):
@@ -96,7 +96,7 @@ class TaskGitLabMergeRequest(Task):
             'labels': self.labels
         }
         self.mr['labels'] = self.labels
-        self.mcp_client.call_tool('gitlab/update_merge_request', args)
+        self.mcp_client.call_tool('update_merge_request', args)
 
     def get_prompt(self):
         # MR本体取得
@@ -104,13 +104,13 @@ class TaskGitLabMergeRequest(Task):
             'project_id': f"{self.project_id}",
             'merge_request_iid': self.merge_request_iid
         }
-        mr_detail = self.mcp_client.call_tool('gitlab/get_merge_request', args)
+        mr_detail = self.mcp_client.call_tool('get_merge_request', args)
         # コメント取得（GitLabはノートとして管理）
         note_args = {
             'project_id': f"{self.project_id}",
             'merge_request_iid': self.merge_request_iid
         }
-        comments = self.mcp_client.call_tool('gitlab/list_merge_request_notes', note_args)
+        comments = self.mcp_client.call_tool('list_merge_request_notes', note_args)
         comments = [note.get('body', '') for note in comments.get('items', [])]
         return (
             f"MERGE_REQUEST: {{'title': '{self.mr.get('title', '')}', "
@@ -129,7 +129,7 @@ class TaskGitLabMergeRequest(Task):
             'merge_request_iid': self.merge_request_iid,
             'body': text
         }
-        self.mcp_client.call_tool('gitlab/create_merge_request_note', args)
+        self.mcp_client.call_tool('create_merge_request_note', args)
 
     def finish(self):
         # ラベル付け変更: processing_label → done_label
@@ -143,7 +143,7 @@ class TaskGitLabMergeRequest(Task):
             'labels': self.labels
         }
         self.mr['labels'] = self.labels
-        self.mcp_client.call_tool('gitlab/update_merge_request', args)
+        self.mcp_client.call_tool('update_merge_request', args)
 
 class TaskGetterFromGitLab(TaskGetter):
     def __init__(self, config, mcp_clients):
@@ -152,7 +152,7 @@ class TaskGetterFromGitLab(TaskGetter):
 
     def get_task_list(self):
         # まず全プロジェクトを取得
-        projects_result = self.mcp_client.call_tool('gitlab/search_repositories', {
+        projects_result = self.mcp_client.call_tool('search_repositories', {
             'search': '',  # 空文字で全プロジェクト取得
             'per_page': 100
         })
@@ -168,7 +168,7 @@ class TaskGetterFromGitLab(TaskGetter):
                 'labels': [self.config['gitlab']['bot_label']],
                 'per_page': 200
             }
-            result = self.mcp_client.call_tool('gitlab/list_issues', args)
+            result = self.mcp_client.call_tool('list_issues', args)
             issues = result
             for issue in issues:
                 all_issues.append(TaskGitLabIssue(issue, self.mcp_client, self.config))
@@ -181,7 +181,7 @@ class TaskGetterFromGitLab(TaskGetter):
             #     'labels': [self.config['gitlab']['bot_label']],
             #     'per_page': 200
             # }
-            # merge_requests = self.mcp_client.call_tool('gitlab/list_merge_requests', merge_request_args)
+            # merge_requests = self.mcp_client.call_tool('list_merge_requests', merge_request_args)
             # for mr in merge_requests:
             #     all_issues.append(TaskGitLabMergeRequest(mr, self.mcp_client, self.config))
         return all_issues

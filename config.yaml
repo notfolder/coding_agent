@@ -13,7 +13,8 @@ mcp_servers:
       - "stdio"
 
 llm:
-  provider: "lmstudio"    # "ollama" | "openai"
+  provider: "openai"    # "ollama" | "openai"
+  function_calling: true
   lmstudio:
     base_url: "host.docker.internal:1234"
     # base_url: "localhost:1234"
@@ -24,9 +25,10 @@ llm:
     model: "qwen3-30b-a3b-mlx"
     max_token: 32768
   openai:
-    api_key_env: "OPENAI_API_KEY"
+    base_url: "https://api.openai.com/v1"
+    api_key: "OPENAI_API_KEY"
     model: "gpt-4o"
-    max_token: 32768
+    max_token: 40960
 max_llm_process_num: 1000
 github:
   owner:     "notfolder"

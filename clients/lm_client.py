@@ -14,16 +14,23 @@ class LLMClient(ABC):
         pass
 
     @abstractmethod
+    def send_function_result(self, name: str, result) -> None:
+        pass
+
+    @abstractmethod
     def get_response(self) -> str:
         pass
 
-def get_llm_client(config):
+def get_llm_client(config, functions=None, tools=None) -> LLMClient:
     prov = config['llm']['provider']
     if prov == 'lmstudio':
+        if functions is not None:
+            raise ValueError("LMStudio does not support functions. use openapi compatible call.")
         return LMStudioClient(config['llm']['lmstudio'])
     elif prov == 'ollama':
+        # Todo: functions support
         return OllamaClient(config['llm']['ollama'])
     elif prov == 'openai':
-        return OpenAIClient(config['llm']['openai'])
+        return OpenAIClient(config['llm']['openai'], functions, tools)
     else:
         raise ValueError(f"Unknown llm.provider: {prov}")
