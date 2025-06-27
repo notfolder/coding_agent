@@ -19,6 +19,9 @@ class OllamaClient(LLMClient):
             self.messages.pop(1)  # 最初のuserから削る
             total_chars = sum(len(m['content']) for m in self.messages)
 
+    def send_function_result(self, name: str, result) -> None:
+        raise NotImplementedError("Ollama does not support function calls. Use OpenAI compatible call instead.")
+
     def get_response(self) -> str:
         resp = self.chat(model=self.model, messages=self.messages)
         reply = resp['message']['content']

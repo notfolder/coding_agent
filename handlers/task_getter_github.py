@@ -23,7 +23,7 @@ class TaskGitHubIssue(Task):
             # 'remove_labels': [self.config['github']['bot_label']],
             'labels': self.labels
         }
-        self.mcp_client.call_tool('github/update_issue', args)
+        self.mcp_client.call_tool('update_issue', args)
 
     def get_prompt(self):
         # issue内容・コメント取得
@@ -32,8 +32,8 @@ class TaskGitHubIssue(Task):
             'repo': self.issue['repo'],
             'issue_number': self.issue['number']
         }
-        # issue = self.mcp_client.call_tool('github/get_issue', args)
-        comments = [comment.get('body', '') for comment in self.mcp_client.call_tool('github/get_issue_comments', args)]
+        # issue = self.mcp_client.call_tool('get_issue', args)
+        comments = [comment.get('body', '') for comment in self.mcp_client.call_tool('get_issue_comments', args)]
         return (
             f"ISSUE: {{'title': '{self.issue.get('title', '')}', "
             f"'body': '{self.issue.get('body', '')}', "
@@ -53,7 +53,7 @@ class TaskGitHubIssue(Task):
             'issue_number': self.issue['number'],
             'body': text
         }
-        self.mcp_client.call_tool('github/add_issue_comment', args)
+        self.mcp_client.call_tool('add_issue_comment', args)
 
     def finish(self):
         # ラベル付け変更
@@ -67,7 +67,7 @@ class TaskGitHubIssue(Task):
             'issue_number': self.issue['number'],
             'labels': self.labels
         }
-        self.mcp_client.call_tool('github/update_issue', args)
+        self.mcp_client.call_tool('update_issue', args)
 
 class TaskGitHubPullRequest(Task):
     def __init__(self, pr, mcp_client, config):
@@ -91,7 +91,7 @@ class TaskGitHubPullRequest(Task):
             'pullNumber': self.pr['number'],
             'labels': self.labels
         }
-        self.mcp_client.call_tool('github/update_pull_request', args)
+        self.mcp_client.call_tool('update_pull_request', args)
 
     def get_prompt(self):
         args = {
@@ -99,7 +99,7 @@ class TaskGitHubPullRequest(Task):
             'repo': self.pr['repo'],
             'pullNumber': self.pr['number']
         }
-        comments = [comment for comment in self.mcp_client.call_tool('github/get_pull_request_comments', args)]
+        comments = [comment for comment in self.mcp_client.call_tool('get_pull_request_comments', args)]
         return (
             f"PULL_REQUEST: {{'title': '{self.pr.get('title', '')}', "
             f"'body': '{self.pr.get('body', '')}', "
@@ -120,7 +120,7 @@ class TaskGitHubPullRequest(Task):
             'pull_number': self.pr['number'],
             'repo': self.pr['repo'],
         }
-        self.mcp_client.call_tool('github/create_pending_pull_request_review', args)
+        self.mcp_client.call_tool('create_pending_pull_request_review', args)
 
         # * `github/add_pull_request_review_comment_to_pending_review` → `{ "body": string, "line"?: [number], "owner": string, "path": string, "pullNumber": number, "repo": string, "side"?: [string], "startLine"?: [number], "startSide"?: [string], "subjectType": string }` --- Add a comment to the requester\'s latest pending pull request review, a pending review needs to already exist to call this (check with the user if not sure).
         args = {
@@ -131,7 +131,7 @@ class TaskGitHubPullRequest(Task):
             'path': '.',
             'subjectType': 'FILE',
         }
-        self.mcp_client.call_tool('github/add_pull_request_review_comment_to_pending_review', args)
+        self.mcp_client.call_tool('add_pull_request_review_comment_to_pending_review', args)
 
         # * `github/submit_pending_pull_request_review` → `{ "body"?: [string], "event": string, "owner": string, "pullNumber": number, "repo": string }` --- Submit the requester\'s latest pending pull request review, normally this is a final step after creating a pending review, adding comments first, unless you know that the user already did the first two steps, you should check before calling this.
         args = {
@@ -140,7 +140,7 @@ class TaskGitHubPullRequest(Task):
             'pull_number': self.pr['number'],
             'repo': self.pr['repo'],
         }
-        self.mcp_client.call_tool('github/submit_pending_pull_request_review', args)
+        self.mcp_client.call_tool('submit_pending_pull_request_review', args)
 
     def finish(self):
         label = self.config['github']['processing_label']
@@ -154,7 +154,7 @@ class TaskGitHubPullRequest(Task):
             'pull_number': self.pr['number'],
             'labels': self.labels
         }
-        self.mcp_client.call_tool('github/update_pull_request', args)
+        self.mcp_client.call_tool('update_pull_request', args)
 
 class TaskGetterFromGitHub(TaskGetter):
     def __init__(self, config, mcp_clients):
@@ -167,7 +167,7 @@ class TaskGetterFromGitHub(TaskGetter):
             'q': f'label:"{self.config["github"]["bot_label"]}" {self.config["github"].get("query", "")}',
             'perPage': 20
         }
-        result = self.mcp_client.call_tool('github/search_issues', args)
+        result = self.mcp_client.call_tool('search_issues', args)
         issues = result.get('items', [])
         tasks = [TaskGitHubIssue(issue, self.mcp_client, self.config) for issue in issues]
 
@@ -177,7 +177,7 @@ class TaskGetterFromGitHub(TaskGetter):
         #     'per_page': 100,
         #     'query': f"owner:{self.config['github']['owner']}"
         # }
-        # repos_result = self.mcp_client.call_tool('github/search_repositories', repo_args)
+        # repos_result = self.mcp_client.call_tool('search_repositories', repo_args)
         # repos = repos_result if isinstance(repos_result, list) else repos_result.get('items', [])
         # for repo in repos:
         #     repo_name = repo.get('name')
@@ -189,7 +189,7 @@ class TaskGetterFromGitHub(TaskGetter):
         #         'owner': self.config['github']['owner'],
         #         'repo': repo_name
         #     }
-        #     pr_result = self.mcp_client.call_tool('github/list_pull_requests', pr_args)
+        #     pr_result = self.mcp_client.call_tool('list_pull_requests', pr_args)
         #     prs = pr_result if isinstance(pr_result, list) else pr_result.get('items', [])
         #     for pr in prs:
         #         pr_labels = [label.get('name', '') for label in pr.get('labels', [])]

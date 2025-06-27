@@ -4,3 +4,5 @@ gitlab/
 .env
 *.pyc
 *.log
+*.log.*
+github-mcp-server.cmd

@@ -10,10 +10,11 @@ import os
 import asyncio
 
 class MCPToolClient:
-    def __init__(self, server_config):
+    def __init__(self, server_config, function_calling=True):
         self.server_config = server_config
         self.lock = threading.Lock()
         self._system_prompt = None
+        self.function_calling = function_calling
 
     def call_tool(self, tool, args):
         with self.lock:
@@ -74,10 +75,8 @@ class MCPToolClient:
         return hashlib.sha1(full).hexdigest()
 
     def _call_tool_sync(self, tool, args):
-        if '/' in tool:
-            tool_name = tool.split('/', 1)[1]
-        else:
-            tool_name = tool
+        # tool_name = tool.split('_', 1)[1]
+        tool_name = tool
 
         async def coro_fn(session):
             return await session.call_tool(tool_name, args)
@@ -110,10 +109,32 @@ class MCPToolClient:
             return await session.list_tools()
         return self._run_with_session(coro_fn)
 
-    def _get_system_prompt_sync(self):
+    def _get_tools_sync(self):
         mcp_name = self.server_config.get('mcp_server_name', '')
         tools = self.list_tools().tools
+        return mcp_name, tools
 
+    def get_function_calling_tools(self):
+        mcp_name, tools = self._get_tools_sync()
+        return [{
+            "type": "function",
+            "function": {
+                "name": f"{mcp_name}_{tool.name}",
+                "description": tool.description or '',
+                "parameters": tool.inputSchema
+            }
+            } for tool in tools]
+
+    def get_function_calling_functions(self):
+        mcp_name, tools = self._get_tools_sync()
+        return [{
+            "name": f"{mcp_name}_{tool.name}",
+            "description": tool.description or '',
+            "parameters": tool.inputSchema
+            } for tool in tools]
+
+    def _get_system_prompt_sync(self):
+        mcp_name, tools = self._get_tools_sync()
         prompt_lines = [f"### {mcp_name} mcp tools"]
         for tool in tools:
             if isinstance(tool, Tool):
@@ -125,7 +146,7 @@ class MCPToolClient:
                 }
             if not isinstance(tool, dict):
                 continue
-            tool_name = f"{mcp_name}/{tool.get('name', '')}"
+            tool_name = f"{mcp_name}_{tool.get('name', '')}"
             desc = tool.get('description', '') or ''
             desc = desc.replace('\n', ' ').replace('\r', ' ').strip()
             input_schema = tool.get('inputSchema', {})
