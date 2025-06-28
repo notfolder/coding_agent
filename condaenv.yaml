@@ -7,6 +7,7 @@ dependencies:
   - pip
   - rust
   - pyyaml
+  - requests
   - pip:
       - fastmcp
       - pydantic==2.10.1
