@@ -1,4 +1,6 @@
 import json
+
+from clients.github_client import GithubClient
 from .task_getter import TaskGetter
 from .task import Task
 
@@ -70,13 +72,14 @@ class TaskGitHubIssue(Task):
         self.mcp_client.call_tool('update_issue', args)
 
 class TaskGitHubPullRequest(Task):
-    def __init__(self, pr, mcp_client, config):
+    def __init__(self, pr, mcp_client, github_client, config):
         self.pr = pr
         self.pr['repo'] = pr['base']['repo']['name']
         self.pr['owner'] = pr['base']['repo']['owner']['login']
         self.mcp_client = mcp_client
+        self.github_client = github_client
         self.config = config
-        self.labels = [label.get('name', '') for label in pr.get('labels', [])]
+        self.labels = pr.get('labels', [])
 
     def prepare(self):
         # ラベル付け変更
@@ -85,62 +88,38 @@ class TaskGitHubPullRequest(Task):
         if self.config['github']['bot_label'] in self.labels:
             self.labels.remove(self.config['github']['bot_label'])
         self.pr['labels'] = self.labels
-        args = {
-            'owner': self.config['github']['owner'],
-            'repo': self.pr['repo'],
-            'pullNumber': self.pr['number'],
-            'labels': self.labels
-        }
-        self.mcp_client.call_tool('update_pull_request', args)
+        self.github_client.update_pull_request_labels(self.pr['owner'], self.pr['repo'], self.pr['number'], self.labels)
 
     def get_prompt(self):
-        args = {
-            'owner': self.config['github']['owner'],
-            'repo': self.pr['repo'],
-            'pullNumber': self.pr['number']
-        }
-        comments = [comment for comment in self.mcp_client.call_tool('get_pull_request_comments', args)]
-        return (
-            f"PULL_REQUEST: {{'title': '{self.pr.get('title', '')}', "
-            f"'body': '{self.pr.get('body', '')}', "
-            f"'owner': '{self.pr.get('owner', '')}', "
-            f"'repo': '{self.pr.get('repo', '')}'}}\n"
-            f"COMMENTS: {comments}"
+        comments = self.github_client.get_pull_request_comments(
+            owner=self.pr['owner'],
+            repo=self.pr['repo'],
+            pull_number=self.pr['number']
         )
+        pr_info = {
+            'pull_request': {
+                'title': self.pr.get('title', ''),
+                'body': self.pr.get('body', ''),
+                'owner': self.pr.get('owner', ''),
+                'repo': self.pr.get('repo', ''),
+                'pullNumber': self.pr.get('number', ''),
+                'branch': self.pr.get('head', {}).get('ref', '')
+            },
+            'comments': comments
+        }
+        return f"PULL_REQUEST: {json.dumps(pr_info, ensure_ascii=False)}\n"
 
     def comment(self, text, mention=False):
         if mention:
             owner = self.pr.get('owner')
             if owner:
                 text = f"@{owner} {text}"
-
-        # * `github/create_pending_pull_request_review` → `{ "commitID"?: [string], "owner": string, "pullNumber": number, "repo": string }` --- Create a pending review for a pull request. Call this first before attempting to add comments to a pending review, and ultimately submitting it. A pending pull request review means a pull request review, it is pending because you create it first and submit it later, and the PR author will not see it until it is submitted.
-        args = {
-            'owner': self.config['github']['owner'],
-            'pull_number': self.pr['number'],
-            'repo': self.pr['repo'],
-        }
-        self.mcp_client.call_tool('create_pending_pull_request_review', args)
-
-        # * `github/add_pull_request_review_comment_to_pending_review` → `{ "body": string, "line"?: [number], "owner": string, "path": string, "pullNumber": number, "repo": string, "side"?: [string], "startLine"?: [number], "startSide"?: [string], "subjectType": string }` --- Add a comment to the requester\'s latest pending pull request review, a pending review needs to already exist to call this (check with the user if not sure).
-        args = {
-            'owner': self.config['github']['owner'],
-            'pull_number': self.pr['number'],
-            'repo': self.pr['repo'],
-            'body': text,
-            'path': '.',
-            'subjectType': 'FILE',
-        }
-        self.mcp_client.call_tool('add_pull_request_review_comment_to_pending_review', args)
-
-        # * `github/submit_pending_pull_request_review` → `{ "body"?: [string], "event": string, "owner": string, "pullNumber": number, "repo": string }` --- Submit the requester\'s latest pending pull request review, normally this is a final step after creating a pending review, adding comments first, unless you know that the user already did the first two steps, you should check before calling this.
-        args = {
-            'event': 'COMMENT',
-            'owner': self.config['github']['owner'],
-            'pull_number': self.pr['number'],
-            'repo': self.pr['repo'],
-        }
-        self.mcp_client.call_tool('submit_pending_pull_request_review', args)
+        self.github_client.add_comment_to_pull_request(
+            owner=self.pr['owner'],
+            repo=self.pr['repo'],
+            pull_number=self.pr['number'],
+            body=text
+        )
 
     def finish(self):
         label = self.config['github']['processing_label']
@@ -154,12 +133,13 @@ class TaskGitHubPullRequest(Task):
             'pull_number': self.pr['number'],
             'labels': self.labels
         }
-        self.mcp_client.call_tool('update_pull_request', args)
+        self.github_client.update_pull_request_labels(self.pr['owner'], self.pr['repo'], self.pr['number'], self.labels)
 
 class TaskGetterFromGitHub(TaskGetter):
     def __init__(self, config, mcp_clients):
         self.config = config
         self.mcp_client = mcp_clients['github']
+        self.github_client = GithubClient()
 
     def get_task_list(self):
         # MCPサーバーでissue検索
@@ -171,28 +151,20 @@ class TaskGetterFromGitHub(TaskGetter):
         issues = result.get('items', [])
         tasks = [TaskGitHubIssue(issue, self.mcp_client, self.config) for issue in issues]
 
+        # リポジトリループ
+        repositories = self.mcp_client.call_tool('search_repositories', {
+            'query': "user:" + self.config['github']['owner'],
+            'per_page': 200
+        })
+        repositories = repositories.get('items', [])
         # Pull Requestの取得
-        # MCPサーバーの機能不足でgit hubのPull Request対応は断念
-        # repo_args = {
-        #     'per_page': 100,
-        #     'query': f"owner:{self.config['github']['owner']}"
-        # }
-        # repos_result = self.mcp_client.call_tool('search_repositories', repo_args)
-        # repos = repos_result if isinstance(repos_result, list) else repos_result.get('items', [])
-        # for repo in repos:
-        #     repo_name = repo.get('name')
-        #     if not repo_name:
-        #         continue
-        #     pr_args = {
-        #         'state': 'open',
-        #         'per_page': 20,
-        #         'owner': self.config['github']['owner'],
-        #         'repo': repo_name
-        #     }
-        #     pr_result = self.mcp_client.call_tool('list_pull_requests', pr_args)
-        #     prs = pr_result if isinstance(pr_result, list) else pr_result.get('items', [])
-        #     for pr in prs:
-        #         pr_labels = [label.get('name', '') for label in pr.get('labels', [])]
-        #         if self.config['github']['bot_label'] in pr_labels:
-        #             tasks.append(TaskGitHubPullRequest(pr, self.mcp_client, self.config))
+        for repo in repositories:
+            prs = self.github_client.list_pull_requests_with_label(
+                owner= repo['owner']['login'],
+                repo= repo['name'],
+                label=self.config['github']['bot_label']
+            )
+            for pr in prs:
+                tasks.append(TaskGitHubPullRequest(pr, self.mcp_client, self.github_client, self.config))
+
         return tasks
