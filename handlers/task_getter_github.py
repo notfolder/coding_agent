@@ -23,7 +23,6 @@ class TaskGitHubIssue(Task):
             'owner': self.config['github']['owner'],
             'repo': self.issue['repo'],
             'issue_number': self.issue['number'],
-            # 'remove_labels': [self.config['github']['bot_label']],
             'labels': self.labels
         }
         self.mcp_client.call_tool('update_issue', args)
@@ -156,8 +155,12 @@ class TaskGetterFromGitHub(TaskGetter):
 
     def get_task_list(self):
         # MCPサーバーでissue検索
+        query = f'label:"{self.config["github"]["bot_label"]}" {self.config["github"].get("query", "")}'
+        assignee = self.config['github'].get('assignee')
+        if assignee:
+            query += f' assignee:{assignee}'
         args = {
-            'q': f'label:"{self.config["github"]["bot_label"]}" {self.config["github"].get("query", "")}',
+            'q': query,
             'perPage': 20
         }
         result = self.mcp_client.call_tool('search_issues', args)
@@ -173,10 +176,16 @@ class TaskGetterFromGitHub(TaskGetter):
         # Pull Requestの取得
         for repo in repositories:
             prs = self.github_client.list_pull_requests_with_label(
-                owner= repo['owner']['login'],
-                repo= repo['name'],
+                owner=repo['owner']['login'],
+                repo=repo['name'],
                 label=self.config['github']['bot_label']
             )
+            # assignee条件があればフィルタ
+            if assignee:
+                prs = [pr for pr in prs if pr.get('assignee') and (
+                    pr['assignee'].get('login') == assignee or
+                    (isinstance(pr['assignee'], str) and pr['assignee'] == assignee)
+                )]
             for pr in prs:
                 tasks.append(TaskGitHubPullRequest(pr, self.mcp_client, self.github_client, self.config))
         return tasks
