@@ -95,6 +95,15 @@ def load_config(config_file='config.yaml'):
             config['rabbitmq']['port'] = 5672
     if 'queue' in config['rabbitmq'] and not config['rabbitmq']['queue']:
         config['rabbitmq']['queue'] = 'mcp_tasks'
+    # GITHUB_BOT_NAME, GITLAB_BOT_NAME
+    github_bot_name = os.environ.get('GITHUB_BOT_NAME')
+    if github_bot_name:
+        if 'github' in config and isinstance(config['github'], dict):
+            config['github']['assignee'] = github_bot_name
+    gitlab_bot_name = os.environ.get('GITLAB_BOT_NAME')
+    if gitlab_bot_name:
+        if 'gitlab' in config and isinstance(config['gitlab'], dict):
+            config['gitlab']['assignee'] = gitlab_bot_name
     return config
 
 

@@ -47,11 +47,13 @@ class GitlabClient:
         return resp.json()
 
     # マージリクエスト一覧取得（ラベル指定可）
-    def list_merge_requests(self, project_id, labels=None, state='opened', per_page=100):
+    def list_merge_requests(self, project_id, labels=None, assignee=None, state='opened', per_page=100):
         url = f"{self.api_url}/projects/{project_id}/merge_requests"
         params = {'state': state, 'per_page': per_page}
         if labels:
             params['labels'] = ','.join(labels)
+        if assignee:
+            params['assignee_username'] = assignee
         resp = requests.get(url, headers=self.headers, params=params)
         resp.raise_for_status()
         return resp.json()

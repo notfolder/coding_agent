@@ -50,6 +50,16 @@ class GithubClient:
         response.raise_for_status()
         return response.json()
 
+    def update_issue_labels(self, owner, repo, issue_number, labels):
+        """
+        指定したIssueのラベルを更新する
+        """
+        url = f"{self.api_url}/repos/{owner}/{repo}/issues/{issue_number}/labels"
+        data = labels
+        response = requests.put(url, headers=self.headers, json=data)
+        response.raise_for_status()
+        return response.json()
+
     def get_pull_request_comments(self, owner, repo, pull_number):
         """
         指定したPull Requestのレビューコメントとタイムラインコメントの両方を取得し、

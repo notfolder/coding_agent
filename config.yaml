@@ -30,12 +30,14 @@ llm:
     model: "gpt-4o"
     max_token: 40960
 max_llm_process_num: 1000
+
 github:
   owner:     "notfolder"
   bot_label: "coding agent"
   processing_label: "coding agent processing"
   done_label: "coding agent done"
-  query: 'is:issue state:open archived:false author:@me sort:updated-desc sort:updated-desc'
+  query: 'is:issue state:open archived:false sort:updated-desc sort:updated-desc'
+
 gitlab:
   owner:     "notfolder"
   bot_label: "coding agent"

@@ -180,6 +180,12 @@ class TaskGetterFromGitLab(TaskGetter):
                 'labels': [self.config['gitlab']['bot_label']],
                 'per_page': 200
             }
+            assignee = self.config['gitlab'].get('assignee')
+            if assignee:
+                args['assignee_username'] = [assignee]
+
+            # イシューの取得
+            # MCPサーバーでissue検索
             result = self.mcp_client.call_tool('list_issues', args)
             issues = result
             for issue in issues:
@@ -188,6 +194,7 @@ class TaskGetterFromGitLab(TaskGetter):
             merge_requests = self.gitlab_client.list_merge_requests(
                 project_id=project_id,
                 labels=[self.config['gitlab']['bot_label']],
+                assignee=assignee
             )
             for mr in merge_requests:
                 tasks.append(TaskGitLabMergeRequest(mr, self.mcp_client, self.gitlab_client, self.config))
