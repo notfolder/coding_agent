@@ -79,3 +79,10 @@ class GitlabClient:
         resp = requests.put(url, headers=self.headers, json=data)
         resp.raise_for_status()
         return resp.json()
+
+    # マージリクエスト単体取得
+    def get_merge_request(self, project_id, mr_iid):
+        url = f"{self.api_url}/projects/{project_id}/merge_requests/{mr_iid}"
+        resp = requests.get(url, headers=self.headers)
+        resp.raise_for_status()
+        return resp.json()

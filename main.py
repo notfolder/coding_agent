@@ -3,10 +3,18 @@ import logging.config
 import yaml
 import os
 import sys
+import threading
+import time
+import argparse
 from clients.lm_client import get_llm_client
 from clients.mcp_tool_client import MCPToolClient
 from handlers.task_getter import TaskGetter
 from handlers.task_handler import TaskHandler
+from handlers.task_factory import GitHubTaskFactory, GitLabTaskFactory
+from handlers.task_key import GitHubIssueTaskKey, GitHubPullRequestTaskKey, GitLabIssueTaskKey, GitLabMergeRequestTaskKey
+from queueing import InMemoryTaskQueue
+from filelock_util import FileLock
+import json
 
 
 def setup_logger():
@@ -66,10 +74,65 @@ def load_config(config_file='config.yaml'):
             if server.get('mcp_server_name') == 'github':
                 # スペース区切りで分割
                 server['command'] = github_cmd_env.split()
+    # RabbitMQ
+    rabbitmq_env = {
+        'host': os.environ.get('RABBITMQ_HOST'),
+        'port': os.environ.get('RABBITMQ_PORT'),
+        'user': os.environ.get('RABBITMQ_USER'),
+        'password': os.environ.get('RABBITMQ_PASSWORD'),
+        'queue': os.environ.get('RABBITMQ_QUEUE'),
+    }
+    if 'rabbitmq' not in config:
+        config['rabbitmq'] = {}
+    for k, v in rabbitmq_env.items():
+        if v is not None:
+            config['rabbitmq'][k] = v
+    # 型変換
+    if 'port' in config['rabbitmq'] and config['rabbitmq']['port'] is not None:
+        try:
+            config['rabbitmq']['port'] = int(config['rabbitmq']['port'])
+        except Exception:
+            config['rabbitmq']['port'] = 5672
+    if 'queue' in config['rabbitmq'] and not config['rabbitmq']['queue']:
+        config['rabbitmq']['queue'] = 'mcp_tasks'
     return config
 
 
+def produce_tasks(config, mcp_clients, task_source, task_queue, logger):
+    task_getter = TaskGetter.factory(config, mcp_clients, task_source)
+    tasks = task_getter.get_task_list()
+    for task in tasks:
+        task.prepare()
+        task_queue.put(task.get_task_key().to_dict())
+    logger.info(f"{len(tasks)}件のタスクをキューに追加しました")
+
+
+def consume_tasks(task_queue, handler, logger, mcp_clients, config, task_source):
+    task_getter = TaskGetter.factory(config, mcp_clients, task_source)
+    while True:
+        task_key_dict = task_queue.get(timeout=5)
+        if task_key_dict is None:
+            break
+        # TaskGetterのfrom_task_keyでTaskインスタンスを生成
+        task = task_getter.from_task_key(task_key_dict)
+        if task is None:
+            logger.error(f"Unknown or invalid task key: {task_key_dict}")
+            continue
+        if not hasattr(task, 'check') or not task.check():
+            logger.info(f"スキップ: processing_labelが付与されていないタスク {task_key_dict}")
+            continue
+        try:
+            handler.handle(task)
+        except Exception as e:
+            logger.exception(f"Task処理中にエラー: {e}")
+            task.comment(f"処理中にエラーが発生しました: {e}")
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', choices=['producer', 'consumer'], help='producer: タスク取得のみ, consumer: キューから実行のみ')
+    args = parser.parse_args()
+
     sys.stdout.reconfigure(line_buffering=True)
     sys.stderr.reconfigure(line_buffering=True)
 
@@ -95,25 +158,29 @@ def main():
         if config.get('llm', {}).get('function_calling', True):
             functions.extend(mcp_clients[name].get_function_calling_functions())
             tools.extend(mcp_clients[name].get_function_calling_tools())
-        # logging.debug(f"{name}: {mcp_clients[name].system_prompt}")
-
 
     # LLMクライアント初期化
     llm_client = get_llm_client(config, functions, tools)
 
-    # タスク取得
-    task_getter = TaskGetter.factory(config, mcp_clients, task_source)
-    tasks = task_getter.get_task_list()
-
-    # タスク処理
+    # タスクキュー初期化
+    from queueing import RabbitMQTaskQueue
+    if config.get('use_rabbitmq', False):
+        task_queue = RabbitMQTaskQueue(config)
+    else:
+        task_queue = InMemoryTaskQueue()
     handler = TaskHandler(llm_client, mcp_clients, config)
 
-    for task in tasks:
-        try:
-            handler.handle(task)
-        except Exception as e:
-            logger.exception(f"Task処理中にエラー: {e}")
-            task.comment(f"処理中にエラーが発生しました: {e}")
+    if args.mode == 'producer':
+        with FileLock('/tmp/produce_tasks.lock'):
+            produce_tasks(config, mcp_clients, task_source, task_queue, logger)
+        return
+    elif args.mode == 'consumer':
+        consume_tasks(task_queue, handler, logger, mcp_clients, config, task_source)
+    else:
+        # デフォルト: タスク取得→キュー→即時処理
+        with FileLock('/tmp/produce_tasks.lock'):
+            produce_tasks(config, mcp_clients, task_source, task_queue, logger)
+        consume_tasks(task_queue, handler, logger, mcp_clients, config, task_source)
 
 if __name__ == '__main__':
     main()

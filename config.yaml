@@ -46,3 +46,12 @@ gitlab:
 
 scheduling:
   interval: 300  # 秒
+
+# RabbitMQを使う場合はtrue、使わない場合はfalse
+use_rabbitmq: true
+rabbitmq:
+  host: host.docker.internal
+  port: 5672
+  user: guest
+  password: guest
+  queue: coding_agent_tasks

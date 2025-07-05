@@ -7,7 +7,7 @@ class OpenAIClient(LLMClient):
         import openai
         api_key = config.get('api_key', 'OPENAI_API_KEY')
         base_url = config.get('base_url', 'https://api.openai.com/')
-        self.openai = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=600)
+        self.openai = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=3600)
         self.model = config['model']
         self.max_token = config.get('max_token', 40960)
         self.messages = []

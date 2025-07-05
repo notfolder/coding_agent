@@ -12,20 +12,25 @@ class GithubClient:
             'Accept': 'application/vnd.github+json',
         }
 
+    def get_pull_request_labels(self, owner, repo, pull_number):
+        """
+        指定したPull Requestのラベル一覧を取得する
+        """
+        url = f"{self.api_url}/repos/{owner}/{repo}/issues/{pull_number}"
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+        issue = response.json()
+        return [l['name'] for l in issue.get('labels', [])]
+
     def list_pull_requests_with_label(self, owner, repo, label, state='open'):
         url = f"{self.api_url}/repos/{owner}/{repo}/pulls"
         params = {'state': state, 'per_page': 100}
         response = requests.get(url, headers=self.headers, params=params)
         response.raise_for_status()
         pulls = response.json()
-        # 各PRのラベルを取得するには、issues APIで取得
         result = []
         for pr in pulls:
-            issue_url = f"{self.api_url}/repos/{owner}/{repo}/issues/{pr['number']}"
-            issue_resp = requests.get(issue_url, headers=self.headers)
-            issue_resp.raise_for_status()
-            issue = issue_resp.json()
-            labels = [l['name'] for l in issue.get('labels', [])]
+            labels = self.get_pull_request_labels(owner, repo, pr['number'])
             if label in labels:
                 pr['labels'] = labels
                 result.append(pr)
@@ -119,3 +124,15 @@ class GithubClient:
             return {k: self.remove_url_fields(v) for k, v in obj.items() if not (is_url(v) and isinstance(v, str))}
         else:
             return obj
+
+    def get_pull_request(self, owner, repo, pull_number):
+        """Pull Request単体取得"""
+        url = f"{self.api_url}/repos/{owner}/{repo}/pulls/{pull_number}"
+        headers = self.headers.copy()
+        resp = requests.get(url, headers=headers)
+        resp.raise_for_status()
+        pr = resp.json()
+        # Pull Requestのラベルを取得して追加
+        labels = self.get_pull_request_labels(owner, repo, pr['number'])
+        pr['labels'] = labels if isinstance(labels, list) else []
+        return pr
