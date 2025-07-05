@@ -3,6 +3,7 @@ import json
 from clients.github_client import GithubClient
 from .task_getter import TaskGetter
 from .task import Task
+from .task_key import GitHubIssueTaskKey, GitHubPullRequestTaskKey
 
 class TaskGitHubIssue(Task):
     def __init__(self, issue, mcp_client, config):
@@ -71,6 +72,12 @@ class TaskGitHubIssue(Task):
         }
         self.mcp_client.call_tool('update_issue', args)
 
+    def get_task_key(self):
+        return GitHubIssueTaskKey(self.issue['owner'], self.issue['repo'], self.issue['number'])
+
+    def check(self):
+        return self.config['github']['processing_label'] in self.labels
+
 class TaskGitHubPullRequest(Task):
     def __init__(self, pr, mcp_client, github_client, config):
         self.pr = pr
@@ -135,6 +142,12 @@ class TaskGitHubPullRequest(Task):
         }
         self.github_client.update_pull_request_labels(self.pr['owner'], self.pr['repo'], self.pr['number'], self.labels)
 
+    def get_task_key(self):
+        return GitHubPullRequestTaskKey(self.pr['owner'], self.pr['repo'], self.pr['number'])
+
+    def check(self):
+        return self.config['github']['processing_label'] in self.labels
+
 class TaskGetterFromGitHub(TaskGetter):
     def __init__(self, config, mcp_clients):
         self.config = config
@@ -166,5 +179,27 @@ class TaskGetterFromGitHub(TaskGetter):
             )
             for pr in prs:
                 tasks.append(TaskGitHubPullRequest(pr, self.mcp_client, self.github_client, self.config))
-
         return tasks
+
+    def from_task_key(self, task_key_dict):
+        ttype = task_key_dict.get('type')
+        if ttype == 'github_issue':
+            from .task_key import GitHubIssueTaskKey
+            task_key = GitHubIssueTaskKey.from_dict(task_key_dict)
+            issue = self.mcp_client.call_tool('get_issue', {
+                'owner': task_key.owner,
+                'repo': task_key.repo,
+                'issue_number': task_key.number
+            })
+            return TaskGitHubIssue(issue, self.mcp_client, self.config)
+        elif ttype == 'github_pull_request':
+            from .task_key import GitHubPullRequestTaskKey
+            task_key = GitHubPullRequestTaskKey.from_dict(task_key_dict)
+            pr = self.github_client.get_pull_request(
+                owner=task_key.owner,
+                repo=task_key.repo,
+                pull_number=task_key.number
+            )
+            return TaskGitHubPullRequest(pr, self.mcp_client, self.github_client, self.config)
+        else:
+            return None
