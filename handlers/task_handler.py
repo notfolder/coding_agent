@@ -47,28 +47,46 @@ class TaskHandler:
                     functions = [functions] # 単一の関数呼び出しをリストに変換
             if len(functions) != 0:
                 # 関数呼び出しがある場合は、関数の結果をLLMに送信
+                comments = [function['name'] for function in functions if isinstance(function, dict) and 'name' in function]
+                task.comment(f"関数呼び出し: {', '.join([f for f in comments])}")
                 for function in functions:
                     name = function['name'] if isinstance(function, dict) else function.name
                     mcp_server, tool_name = name.split('_', 1)
                     args = function['arguments'] if isinstance(function, dict) else function.arguments
                     self.logger.info(f"関数呼び出し: {name} with args: {args}")
                     try:
-                        output = self.mcp_clients[mcp_server].call_tool(tool_name, args)
-                        # ツール呼び出し成功時はエラーカウントリセット
-                        if last_tool == tool_name:
-                            tool_error_count = 0
-                    except* McpError as e:
-                        self.logger.error(f"ツール呼び出し失敗: {e.exceptions[0].exceptions[0]}")
-                        task.comment(f"ツール呼び出しエラー: {e.exceptions[0].exceptions[0]}")
-                        output = f"error: {str(e.exceptions[0].exceptions[0])}"
+                        try:
+                            output = self.mcp_clients[mcp_server].call_tool(tool_name, args)
+                            # ツール呼び出し成功時はエラーカウントリセット
+                            if last_tool == tool_name:
+                                tool_error_count = 0
+                        except* McpError as e:
+                            self.logger.error(f"ツール呼び出し失敗: {e.exceptions[0].exceptions[0]}")
+                            task.comment(f"ツール呼び出しエラー: {e.exceptions[0].exceptions[0]}")
+                            output = f"error: {str(e.exceptions[0].exceptions[0])}"
+                            # 連続ツールエラー判定
+                            if last_tool == name:
+                                tool_error_count += 1
+                            else:
+                                tool_error_count = 1
+                                last_tool = name
+                            if tool_error_count >= 3:
+                                task.comment(f"同じツール({name})で3回連続エラーが発生したため処理を中止します。")
+                                should_break = True
+                    except BaseException as e:
+                        while isinstance(e, ExceptionGroup):
+                            e = e.exceptions[0]
+                        self.logger.error(f"ツール呼び出しエラー: {e}")
+                        task.comment(f"ツール呼び出しエラー: {e}")
+                        output = f"error: {str(e)}"
                         # 連続ツールエラー判定
-                        if last_tool == tool:
+                        if last_tool == name:
                             tool_error_count += 1
                         else:
                             tool_error_count = 1
-                            last_tool = tool
+                            last_tool = name
                         if tool_error_count >= 3:
-                            task.comment(f"同じツール({tool})で3回連続エラーが発生したため処理を中止します。")
+                            task.comment(f"同じツール({name})で3回連続エラーが発生したため処理を中止します。")
                             should_break = True
                     self.llm_client.send_function_result(name, output)
             if 'plan' in data:
