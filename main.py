@@ -74,6 +74,27 @@ def load_config(config_file='config.yaml'):
             if server.get('mcp_server_name') == 'github':
                 # スペース区切りで分割
                 server['command'] = github_cmd_env.split()
+    # RabbitMQ
+    rabbitmq_env = {
+        'host': os.environ.get('RABBITMQ_HOST'),
+        'port': os.environ.get('RABBITMQ_PORT'),
+        'user': os.environ.get('RABBITMQ_USER'),
+        'password': os.environ.get('RABBITMQ_PASSWORD'),
+        'queue': os.environ.get('RABBITMQ_QUEUE'),
+    }
+    if 'rabbitmq' not in config:
+        config['rabbitmq'] = {}
+    for k, v in rabbitmq_env.items():
+        if v is not None:
+            config['rabbitmq'][k] = v
+    # 型変換
+    if 'port' in config['rabbitmq'] and config['rabbitmq']['port'] is not None:
+        try:
+            config['rabbitmq']['port'] = int(config['rabbitmq']['port'])
+        except Exception:
+            config['rabbitmq']['port'] = 5672
+    if 'queue' in config['rabbitmq'] and not config['rabbitmq']['queue']:
+        config['rabbitmq']['queue'] = 'mcp_tasks'
     return config
 
 
@@ -142,7 +163,11 @@ def main():
     llm_client = get_llm_client(config, functions, tools)
 
     # タスクキュー初期化
-    task_queue = InMemoryTaskQueue()
+    from queueing import RabbitMQTaskQueue
+    if config.get('use_rabbitmq', False):
+        task_queue = RabbitMQTaskQueue(config)
+    else:
+        task_queue = InMemoryTaskQueue()
     handler = TaskHandler(llm_client, mcp_clients, config)
 
     if args.mode == 'producer':
