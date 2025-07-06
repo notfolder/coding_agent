@@ -163,6 +163,8 @@ def main():
         tools = []
     for server in config.get('mcp_servers', []):
         name = server['mcp_server_name']
+        if name in ['github', 'gitlab'] and name != task_source:
+            continue  # タスクソースに応じて除外
         mcp_clients[name] = MCPToolClient(server, config.get('llm', {}).get('function_calling', True))
         if config.get('llm', {}).get('function_calling', True):
             functions.extend(mcp_clients[name].get_function_calling_functions())

@@ -36,7 +36,7 @@ github:
   bot_label: "coding agent"
   processing_label: "coding agent processing"
   done_label: "coding agent done"
-  query: 'is:issue state:open archived:false sort:updated-desc sort:updated-desc'
+  query: 'state:open archived:false sort:updated-desc sort:updated-desc'
 
 gitlab:
   owner:     "notfolder"
@@ -44,7 +44,7 @@ gitlab:
   processing_label: "coding agent processing"
   done_label: "coding agent done"
   project_id: "coding-agent-project"
-  query: 'state=opened&scope=all&labels=coding agent'
+  query: ''
 
 scheduling:
   interval: 300  # 秒

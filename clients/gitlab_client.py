@@ -88,3 +88,21 @@ class GitlabClient:
         resp = requests.get(url, headers=self.headers)
         resp.raise_for_status()
         return resp.json()
+
+    # イシュー検索（インスタンス全体）
+    def search_issues(self, query, state='opened', per_page=200):
+        url = f"{self.api_url}/search"
+        params = {'scope': 'issues', 'search': query, 'state': state, 'per_page': per_page}
+        resp = requests.get(url, headers=self.headers, params=params)
+        resp.raise_for_status()
+        return resp.json()
+
+    # マージリクエスト検索（インスタンス全体）
+    def search_merge_requests(self, query, state=None, per_page=200):
+        url = f"{self.api_url}/search"
+        params = {'scope': 'merge_requests', 'search': query, 'per_page': per_page}
+        if state:
+            params['state'] = state
+        resp = requests.get(url, headers=self.headers, params=params)
+        resp.raise_for_status()
+        return resp.json()
