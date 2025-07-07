@@ -6,18 +6,19 @@ from .task import Task
 from .task_key import GitHubIssueTaskKey, GitHubPullRequestTaskKey
 
 class TaskGitHubIssue(Task):
-    def __init__(self, issue, mcp_client, config):
+    def __init__(self, issue, mcp_client, github_client, config):
         self.issue = issue
         self.issue['repo'] = issue['repository_url'].split('/')[-1]
         self.issue['owner'] = issue['repository_url'].split('/')[-2]
         self.mcp_client = mcp_client
+        self.github_client = github_client
         self.config = config
         self.labels = [label.get('name', '') for label in issue.get('labels', [])]
 
     def prepare(self):
         # ラベル付け変更
-        self.labels.append(self.config['github']['processing_label'])
         self.labels.remove(self.config['github']['bot_label']) if self.config['github']['bot_label'] in self.labels else None
+        self.labels.append(self.config['github']['processing_label']) if self.config['github']['processing_label'] not in self.labels else None
         self.issue['labels'] = self.labels
         args = {
             'owner': self.config['github']['owner'],
@@ -80,17 +81,20 @@ class TaskGitHubIssue(Task):
 class TaskGitHubPullRequest(Task):
     def __init__(self, pr, mcp_client, github_client, config):
         self.pr = pr
-        self.pr['repo'] = pr['base']['repo']['name']
-        self.pr['owner'] = pr['base']['repo']['owner']['login']
+        repository_url = pr.get('repository_url', None)
+        if repository_url is None:
+            repository_url = pr.get('base', {}).get('repo', {}).get('html_url', '')
+        self.pr['repo'] = repository_url.split('/')[-1]
+        self.pr['owner'] = repository_url.split('/')[-2]
         self.mcp_client = mcp_client
         self.github_client = github_client
         self.config = config
-        self.labels = pr.get('labels', [])
+        self.labels = [label.get('name', '')  if isinstance(label, dict) else label for label in pr.get('labels', [])]  # ラベルが辞書型であることを確認
 
     def prepare(self):
         # ラベル付け変更
-        self.labels.append(self.config['github']['processing_label'])
         self.labels = list(set(self.labels))
+        self.labels.append(self.config['github']['processing_label']) if self.config['github']['processing_label'] not in self.labels else None
         if self.config['github']['bot_label'] in self.labels:
             self.labels.remove(self.config['github']['bot_label'])
         self.pr['labels'] = self.labels
@@ -159,35 +163,20 @@ class TaskGetterFromGitHub(TaskGetter):
         assignee = self.config['github'].get('assignee')
         if assignee:
             query += f' assignee:{assignee}'
-        args = {
-            'q': query,
-            'perPage': 20
-        }
-        result = self.mcp_client.call_tool('search_issues', args)
-        issues = result.get('items', [])
-        tasks = [TaskGitHubIssue(issue, self.mcp_client, self.config) for issue in issues]
+        else:
+            query += '  author:@me'
+        issues = self.github_client.search_issues(query)
+        tasks = [TaskGitHubIssue(issue, self.mcp_client, self.github_client, self.config) for issue in issues]
 
-        # リポジトリループ
-        repositories = self.mcp_client.call_tool('search_repositories', {
-            'query': "user:" + self.config['github']['owner'],
-            'per_page': 200
-        })
-        repositories = repositories.get('items', [])
-        # Pull Requestの取得
-        for repo in repositories:
-            prs = self.github_client.list_pull_requests_with_label(
-                owner=repo['owner']['login'],
-                repo=repo['name'],
-                label=self.config['github']['bot_label']
-            )
-            # assignee条件があればフィルタ
-            if assignee:
-                prs = [pr for pr in prs if pr.get('assignee') and (
-                    pr['assignee'].get('login') == assignee or
-                    (isinstance(pr['assignee'], str) and pr['assignee'] == assignee)
-                )]
-            for pr in prs:
-                tasks.append(TaskGitHubPullRequest(pr, self.mcp_client, self.github_client, self.config))
+        query = f'label:"{self.config["github"]["bot_label"]}" {self.config["github"].get("query", "")}'
+        if assignee:
+            query += f' assignee:{assignee}'
+        else:
+            query += '  author:@me'
+        prs = self.github_client.search_pull_requests(query)
+        pr_tasks = [TaskGitHubPullRequest(pr, self.mcp_client, self.github_client, self.config) for pr in prs]
+        tasks.extend(pr_tasks)
+
         return tasks
 
     def from_task_key(self, task_key_dict):
@@ -200,7 +189,7 @@ class TaskGetterFromGitHub(TaskGetter):
                 'repo': task_key.repo,
                 'issue_number': task_key.number
             })
-            return TaskGitHubIssue(issue, self.mcp_client, self.config)
+            return TaskGitHubIssue(issue, self.mcp_client, self.github_client, self.config)
         elif ttype == 'github_pull_request':
             from .task_key import GitHubPullRequestTaskKey
             task_key = GitHubPullRequestTaskKey.from_dict(task_key_dict)

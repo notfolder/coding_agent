@@ -6,11 +6,12 @@ from .task_getter import TaskGetter
 from .task_key import GitLabIssueTaskKey, GitLabMergeRequestTaskKey
 
 class TaskGitLabIssue(Task):
-    def __init__(self, issue, mcp_client, config):
+    def __init__(self, issue, mcp_client, gitlab_client, config):
         self.issue = issue
         self.project_id = issue.get('project_id')
         self.issue_iid = issue.get('iid')
         self.mcp_client = mcp_client
+        self.gitlab_client = gitlab_client
         self.config = config
 
     def prepare(self):
@@ -163,41 +164,22 @@ class TaskGetterFromGitLab(TaskGetter):
         self.gitlab_client = GitlabClient()
 
     def get_task_list(self):
-        # まず全プロジェクトを取得
-        projects_result = self.mcp_client.call_tool('search_repositories', {
-            'search': '',  # 空文字で全プロジェクト取得
-            'per_page': 100
-        })
-        projects = projects_result.get('items', [])
         tasks = []
-        for project in projects:
-            project_id = project.get('id')
-            if not project_id:
-                continue
-            args = {
-                'project_id': f"{project_id}",
-                'state': 'opened',
-                'labels': [self.config['gitlab']['bot_label']],
-                'per_page': 200
-            }
-            assignee = self.config['gitlab'].get('assignee')
-            if assignee:
-                args['assignee_username'] = [assignee]
 
-            # イシューの取得
-            # MCPサーバーでissue検索
-            result = self.mcp_client.call_tool('list_issues', args)
-            issues = result
-            for issue in issues:
-                tasks.append(TaskGitLabIssue(issue, self.mcp_client, self.config))
-            # マージリクエストの取得
-            merge_requests = self.gitlab_client.list_merge_requests(
-                project_id=project_id,
-                labels=[self.config['gitlab']['bot_label']],
-                assignee=assignee
-            )
-            for mr in merge_requests:
-                tasks.append(TaskGitLabMergeRequest(mr, self.mcp_client, self.gitlab_client, self.config))
+        query = self.config["gitlab"].get("query", "")
+        assignee = self.config['github'].get('assignee')
+        if not assignee:
+            assignee = self.config['gitlab'].get('owner', '')
+        issues = self.gitlab_client.search_issues(query)
+        issues = [issue for issue in issues if self.config['gitlab']['bot_label'] in issue.get('labels') and issue.get('assignee',{}).get('username', '') == assignee]
+        for issue in issues:
+            tasks.append(TaskGitLabIssue(issue, self.mcp_client, self.gitlab_client, self.config))
+
+        merge_requests = self.gitlab_client.search_merge_requests(query)
+        merge_requests = [mr for mr in merge_requests if self.config['gitlab']['bot_label'] in mr.get('labels') and mr.get('assignee',{}).get('username', '') == assignee]
+        for mr in merge_requests:
+            tasks.append(TaskGitLabMergeRequest(mr, self.mcp_client, self.gitlab_client, self.config))
+
         return tasks
 
     def from_task_key(self, task_key_dict):
@@ -209,7 +191,7 @@ class TaskGetterFromGitLab(TaskGetter):
                 'project_id': str(task_key.project_id),
                 'issue_iid': task_key.issue_iid
             })
-            return TaskGitLabIssue(issue, self.mcp_client, self.config)
+            return TaskGitLabIssue(issue, self.mcp_client, self.gitlab_client, self.config)
         elif ttype == 'gitlab_merge_request':
             from .task_key import GitLabMergeRequestTaskKey
             task_key = GitLabMergeRequestTaskKey.from_dict(task_key_dict)

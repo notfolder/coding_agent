@@ -12,7 +12,6 @@ class TaskHandler:
         self.logger = logging.getLogger(__name__)
 
     def handle(self, task):
-        task.prepare()
         prompt = task.get_prompt()
         self.logger.info(f"LLMに送信するプロンプト: {prompt}")
         self.llm_client.send_system_prompt(self._make_system_prompt())

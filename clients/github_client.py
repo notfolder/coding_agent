@@ -146,3 +146,42 @@ class GithubClient:
         labels = self.get_pull_request_labels(owner, repo, pr['number'])
         pr['labels'] = labels if isinstance(labels, list) else []
         return pr
+
+    def search_issues_and_prs(self, query, sort=None, order=None, per_page=200, page=1):
+        """
+        GitHubのSearch APIでIssueとPull Request両方を検索する汎用メソッド
+        :param query: 検索クエリ
+        :param sort: ソート条件
+        :param order: asc/desc
+        :param per_page: 1ページあたりの件数
+        :param page: ページ番号
+        :return: 検索結果（全件）
+        """
+        url = f"{self.api_url}/search/issues"
+        params = {'q': query, 'per_page': per_page, 'page': page}
+        if sort:
+            params['sort'] = sort
+        if order:
+            params['order'] = order
+        response = requests.get(url, headers=self.headers, params=params)
+        response.raise_for_status()
+        data = response.json()
+        return data.get('items', [])
+
+    def search_pull_requests(self, query, sort=None, order=None, per_page=200, page=1):
+        """
+        Pull Requestのみを検索
+        """
+        if 'type:pr' not in query:
+            query = query.strip() + ' type:pr'
+        items = self.search_issues_and_prs(query, sort, order, per_page, page)
+        return [item for item in items if 'pull_request' in item]
+
+    def search_issues(self, query, sort=None, order=None, per_page=200, page=1):
+        """
+        Issueのみを検索
+        """
+        if 'type:issue' not in query:
+            query = query.strip() + ' type:issue'
+        items = self.search_issues_and_prs(query, sort, order, per_page, page)
+        return [item for item in items if 'pull_request' not in item]
