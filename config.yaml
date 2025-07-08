@@ -12,6 +12,18 @@ mcp_servers:
       - "@zereight/mcp-gitlab"
       - "stdio"
 
+  - mcp_server_name: "googlesearch"
+    command:
+      - "npx"
+      - "-y"
+      - "@adenot/mcp-google-search"
+
+  - mcp_server_name: "webfetch"
+    command:
+      - "python"
+      - "-m"
+      - "mcp_server_fetch"
+
 llm:
   provider: "openai"    # "ollama" | "openai"
   function_calling: true

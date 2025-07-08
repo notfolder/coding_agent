@@ -11,6 +11,24 @@ class TaskHandler:
         self.config = config
         self.logger = logging.getLogger(__name__)
 
+    def sanitize_arguments(self, arguments):
+        """
+        引数が dict でなければ JSON 文字列としてパースし、dict に変換する。
+        """
+        if isinstance(arguments, dict):
+            return arguments
+        elif isinstance(arguments, str):
+            try:
+                parsed = json.loads(arguments)
+                if isinstance(parsed, dict):
+                    return parsed
+                else:
+                    raise ValueError("Parsed JSON is not a dictionary.")
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON string for arguments: {e}")
+        else:
+            raise TypeError(f"Unsupported type for arguments: {type(arguments)}")
+
     def handle(self, task):
         prompt = task.get_prompt()
         self.logger.info(f"LLMに送信するプロンプト: {prompt}")
@@ -52,6 +70,7 @@ class TaskHandler:
                     name = function['name'] if isinstance(function, dict) else function.name
                     mcp_server, tool_name = name.split('_', 1)
                     args = function['arguments'] if isinstance(function, dict) else function.arguments
+                    args = self.sanitize_arguments(args)  # 引数を適切にサニタイズ
                     self.logger.info(f"関数呼び出し: {name} with args: {args}")
                     try:
                         try:
@@ -96,6 +115,7 @@ class TaskHandler:
                 task.comment(data.get('comment', ''))
                 tool = data['command']['tool']
                 args = data['command']['args']
+                args = self.sanitize_arguments(args)  # 引数を適切にサニタイズ
                 mcp_server, tool_name = tool.split('_', 1)
                 try:
                     output = self.mcp_clients[mcp_server].call_tool(tool_name, args)

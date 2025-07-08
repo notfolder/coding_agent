@@ -9,6 +9,7 @@ dependencies:
   - pyyaml
   - requests
   - pika
+  - mcp-server-fetch
   - pip:
       - fastmcp
       - pydantic==2.10.1

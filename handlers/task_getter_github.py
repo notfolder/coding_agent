@@ -42,6 +42,7 @@ class TaskGitHubIssue(Task):
             f"'body': '{self.issue.get('body', '')}', "
             f"'owner': '{self.issue.get('owner', '')}', "
             f"'repo': '{self.issue.get('repo', '')}'}}\n"
+            f"'issue_number': '{self.issue.get('number', '')}'}}\n"
             f"COMMENTS: {comments}"
         )
 
