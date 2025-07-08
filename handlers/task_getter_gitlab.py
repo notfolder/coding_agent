@@ -48,7 +48,7 @@ class TaskGitLabIssue(Task):
             f"ISSUE: {{'title': '{self.issue.get('title', '')}', "
             f"'description': '{self.issue.get('description', '')}', "
             f"'project_id': '{self.issue.get('project_id', '')}'\n"
-            f"'issue_iid': '{self.issue.issue_iid}'}}\n"
+            f"'issue_iid': '{self.issue.get('iid', '')}'}}\n"
             f"COMMENTS: {comments}"
         )
 
