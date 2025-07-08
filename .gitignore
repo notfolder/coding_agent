@@ -6,3 +6,9 @@ gitlab/
 *.log
 *.log.*
 github-mcp-server.cmd
+__pycache__/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.coverage

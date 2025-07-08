@@ -1,0 +1,42 @@
+# Configuration for real GitLab integration tests  
+# Requires environment variables: GITLAB_TOKEN, GITLAB_API_URL
+mcp_servers:
+  - mcp_server_name: "gitlab"
+    command:
+      - "npx"
+      - "@zereight/mcp-gitlab"
+      - "stdio"
+    env:
+      GITLAB_API_URL: "${GITLAB_API_URL:-https://gitlab.com/api/v4}"
+    system_prompt: |
+      ### gitlab mcp tools
+      * `gitlab/create_or_update_file` → `{ "project_id": string, "file_path": string, "branch": string, "content": string, "commit_message": string }`
+      * `gitlab/search_repositories` → `{ "search": string, "page"?: number, "per_page"?: number }`
+      * `gitlab/create_repository` → `{ "name": string, "namespace_id"?: number, "visibility"?: string }`
+      * `gitlab/get_file_contents` → `{ "project_id": string, "file_path": string, "ref"?: string }`
+      * `gitlab/list_issues` → `{ "project_id": string, "state"?: string, "labels"?: string, "page"?: number, "per_page"?: number }`
+      * `gitlab/get_issue` → `{ "project_id": string, "issue_iid": number }`
+      * `gitlab/update_issue` → `{ "project_id": string, "issue_iid": number, "title"?: string, "description"?: string, "labels"?: string[], "state_event"?: string }`
+      * `gitlab/list_issue_discussions` → `{ "project_id": string, "issue_iid": number }`
+      * `gitlab/create_issue_note` → `{ "project_id": string, "issue_iid": number, "body": string }`
+      * `gitlab/create_merge_request` → `{ "project_id": string, "source_branch": string, "target_branch": string, "title": string, "description"?: string, "labels"?: string[] }`
+      * `gitlab/get_merge_request` → `{ "project_id": string, "merge_request_iid"?: number, "branch_name"?: string }`
+      * `gitlab/list_merge_requests` → `{ "project_id": string, "state"?: string, "source_branch"?: string, "target_branch"?: string, "page"?: number, "per_page"?: number }`
+
+llm:
+  provider: "mock"
+  function_calling: true
+  mock:
+    model: "test-model"
+    max_token: 1000
+
+gitlab:
+  owner: "notfolder"  # Test project owner
+  project_id: "coding-agent-test"  # Test project name
+  bot_label: "coding agent"
+  processing_label: "coding agent processing"
+  done_label: "coding agent done"
+  query: 'state=opened&labels=coding agent'
+
+max_llm_process_num: 10
+use_rabbitmq: false
