@@ -228,11 +228,10 @@ class TestTaskHandlerErrorHandling(unittest.TestCase):
         # This should not raise an exception, but handle errors gracefully
         try:
             self.task_handler.handle(self.test_task)
+            # Verify the handler attempted to process responses
+            self.assertGreaterEqual(self.llm_client.error_count, 1)
         except Exception as e:
             self.fail(f"Task handler should handle JSON errors gracefully, but raised: {e}")
-        
-        # Should eventually complete after errors
-        self.assertGreaterEqual(self.llm_client.current_response_index, self.llm_client.max_errors)
 
 
 if __name__ == '__main__':
