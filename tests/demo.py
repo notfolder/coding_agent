@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Example usage of the coding agent test automation framework
+(GitHub/GitLab mocking removed per user request)
 """
 import os
 import sys
@@ -14,31 +15,24 @@ import yaml
 
 
 def demonstrate_mock_mcp_client():
-    """Demonstrate mock MCP client usage"""
+    """Demonstrate mock MCP client usage (GitHub/GitLab specifics removed)"""
     print("=== Mock MCP Client Demo ===")
     
-    # Create GitHub mock client
-    github_config = {'mcp_server_name': 'github', 'command': ['mock']}
-    github_client = MockMCPToolClient(github_config)
+    # Create generic mock client
+    test_config = {'mcp_server_name': 'test_server', 'command': ['mock']}
+    test_client = MockMCPToolClient(test_config)
     
-    # Show available tools
-    tools = github_client.list_tools()
-    print(f"GitHub tools: {[tool['name'] for tool in tools]}")
+    # Show available tools (should return empty list now)
+    tools = test_client.list_tools()
+    print(f"Test server tools: {[tool.get('name', 'unnamed') for tool in tools]}")
     
-    # Search for issues
-    issues = github_client.call_tool('search_issues', {'q': 'label:"coding agent"'})
-    print(f"Found {len(issues['items'])} mock issues")
+    # Test basic tool call (will return empty dict)
+    result = test_client.call_tool('test_tool', {'param': 'value'})
+    print(f"Tool call result: {result}")
     
-    # Get issue details
-    issue = github_client.call_tool('get_issue', {'issue_number': 1})
-    print(f"Issue: {issue['title']}")
-    
-    # Add comment
-    comment = github_client.call_tool('add_issue_comment', {
-        'issue_number': 1, 
-        'body': 'This is a test comment'
-    })
-    print(f"Added comment: {comment['body']}")
+    # Test system prompt
+    prompt = test_client.system_prompt
+    print(f"System prompt: {prompt}")
     print()
 
 
@@ -53,7 +47,7 @@ def demonstrate_mock_llm_client():
     llm_client.send_system_prompt("You are a helpful coding assistant.")
     
     # Send user message
-    llm_client.send_user_message("Please help me with issue #1")
+    llm_client.send_user_message("Please help me with a test task")
     
     # Get responses
     response1, _ = llm_client.get_response()
@@ -69,7 +63,7 @@ def demonstrate_mock_llm_client():
 
 
 def demonstrate_test_workflow():
-    """Demonstrate the complete test workflow"""
+    """Demonstrate the basic test workflow without GitHub/GitLab specifics"""
     print("=== Test Workflow Demo ===")
     
     # Load test config
@@ -79,18 +73,15 @@ def demonstrate_test_workflow():
     
     print("Test configuration loaded:")
     print(f"  LLM Provider: {config['llm']['provider']}")
-    print(f"  GitHub Bot Label: {config['github']['bot_label']}")
-    print(f"  GitLab Bot Label: {config['gitlab']['bot_label']}")
+    # Note: GitHub/GitLab specific config removed per user request
     print()
     
-    # Create mock clients
-    github_client = MockMCPToolClient({'mcp_server_name': 'github', 'command': ['mock']})
-    gitlab_client = MockMCPToolClient({'mcp_server_name': 'gitlab', 'command': ['mock']})
+    # Create mock clients (generic, not service-specific)
+    test_client = MockMCPToolClient({'mcp_server_name': 'test_server', 'command': ['mock']})
     llm_client = MockLLMClient(config)
     
     print("Mock clients created successfully!")
-    print(f"  GitHub client has {len(github_client.mock_data['issues'])} mock issues")
-    print(f"  GitLab client has {len(gitlab_client.mock_data['issues'])} mock issues")
+    print(f"  Test MCP client initialized with server: {test_client.server_name}")
     print(f"  LLM client has {len(llm_client.response_queue)} default responses")
     print()
 
@@ -118,6 +109,7 @@ def run_sample_tests():
 def main():
     """Main demo function"""
     print("Coding Agent Test Automation Framework Demo")
+    print("(GitHub/GitLab mocking removed per user request)")
     print("=" * 50)
     print()
     
@@ -133,6 +125,9 @@ def main():
         print("  python3 -m tests.run_tests")
         print("  python3 -m tests.run_tests --unit")
         print("  python3 -m tests.run_tests --integration")
+        print()
+        print("Note: GitHub and GitLab mocking has been removed per user request.")
+        print("Tests now focus on LLM client mocking and general framework functionality.")
         
     except Exception as e:
         print(f"❌ Demo failed: {e}")
