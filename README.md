@@ -93,53 +93,94 @@ Docker ビルド時に自動的に `/bin/github-mcp-server` にビルドされ�
 
 ## 設定
 
-### 基本設定ファイル
-メインの設定は `config.yaml` で行います：
-
-```yaml
-# LLM プロバイダの設定
-llm:
-  provider: "openai"  # "openai" | "lmstudio" | "ollama"
-  function_calling: true
-  openai:
-    api_key: "your-api-key"
-    model: "gpt-4o"
-    max_token: 40960
-
-# GitHub 設定
-github:
-  owner: "your-username"
-  bot_label: "coding agent"
-  processing_label: "coding agent processing"
-  done_label: "coding agent done"
-
-# MCP サーバー設定
-mcp_servers:
-  - mcp_server_name: "github"
-    command: ["./github-mcp-server.cmd", "stdio"]
-    env:
-      GITHUB_TOOLSETS: "all"
-```
-
-### 環境変数
-`.env` ファイルまたは環境変数で以下を設定：
+### .env ファイルの作成
+メインの設定は環境変数で行います。`.env` ファイルを作成して設定してください：
 
 ```bash
-# GitHub アクセストークン（GitHub 使用時）
-GITHUB_TOKEN=your_github_token
+# 必須設定
+TASK_SOURCE=github                                    # タスクソース: "github" または "gitlab"
+GITHUB_PERSONAL_ACCESS_TOKEN=your_github_token_here  # GitHub Personal Access Token
+GITLAB_PERSONAL_ACCESS_TOKEN=your_gitlab_token_here  # GitLab Personal Access Token (GitLab使用時)
 
-# GitLab アクセストークン（GitLab 使用時）
-GITLAB_TOKEN=your_gitlab_token
+# LLM プロバイダ設定
+LLM_PROVIDER=openai                     # LLMプロバイダ: "openai", "lmstudio", "ollama"
+FUNCTION_CALLING=true                   # 関数呼び出し機能の有効/無効
 
-# OpenAI API キー（OpenAI 使用時）
-OPENAI_API_KEY=your_openai_api_key
+# OpenAI 設定
+OPENAI_API_KEY=your_openai_api_key     # OpenAI API キー
+OPENAI_BASE_URL=https://api.openai.com/v1  # OpenAI API ベースURL
+OPENAI_MODEL=gpt-4o                    # 使用するモデル
 
-# ログレベル
-DEBUG=true
+# LM Studio 設定 (LM Studio使用時)
+LMSTUDIO_BASE_URL=localhost:1234       # LM Studio ベースURL
+LMSTUDIO_MODEL=qwen3-30b-a3b-mlx      # 使用するモデル
 
-# MCP サーバーコマンド（GitHub用）
-GITHUB_MCP_COMMAND="./github-mcp-server stdio"
+# Ollama 設定 (Ollama使用時)
+OLLAMA_ENDPOINT=http://localhost:11434 # Ollama エンドポイント
+OLLAMA_MODEL=qwen3-30b-a3b-mlx        # 使用するモデル
+
+# GitHub/GitLab 設定
+GITHUB_BOT_NAME=your_bot_name          # GitHubボット名
+GITLAB_BOT_NAME=your_bot_name          # GitLabボット名
+GITLAB_API_URL=https://gitlab.com/api/v4  # GitLab API URL
+
+# MCP サーバー設定
+GITHUB_MCP_COMMAND="./github-mcp-server.cmd stdio"  # GitHub MCP サーバーコマンド
+
+# RabbitMQ 設定 (オプション)
+RABBITMQ_HOST=localhost                # RabbitMQ ホスト
+RABBITMQ_PORT=5672                     # RabbitMQ ポート
+RABBITMQ_USER=guest                    # RabbitMQ ユーザー
+RABBITMQ_PASSWORD=guest                # RabbitMQ パスワード
+RABBITMQ_QUEUE=coding_agent_tasks      # RabbitMQ キュー名
+
+# ログ設定
+LOGS=./logs/agent.log                  # ログファイルパス
+DEBUG=false                            # デバッグモード（true/false）
 ```
+
+### 設定可能な環境変数一覧
+
+#### 必須環境変数
+- `TASK_SOURCE`: タスクソース（"github" または "gitlab"）
+- `GITHUB_PERSONAL_ACCESS_TOKEN`: GitHub Personal Access Token
+- `GITLAB_PERSONAL_ACCESS_TOKEN`: GitLab Personal Access Token（GitLab使用時）
+
+#### LLM設定
+- `LLM_PROVIDER`: LLMプロバイダ（"openai", "lmstudio", "ollama"）
+- `FUNCTION_CALLING`: 関数呼び出し機能（true/false、デフォルト: true）
+
+#### OpenAI設定
+- `OPENAI_API_KEY`: OpenAI APIキー
+- `OPENAI_BASE_URL`: OpenAI APIベースURL（デフォルト: https://api.openai.com/v1）
+- `OPENAI_MODEL`: 使用するOpenAIモデル（デフォルト: gpt-4o）
+
+#### LM Studio設定
+- `LMSTUDIO_BASE_URL`: LM StudioベースURL（デフォルト: localhost:1234）
+- `LMSTUDIO_MODEL`: 使用するLM Studioモデル
+
+#### Ollama設定
+- `OLLAMA_ENDPOINT`: Ollamaエンドポイント（デフォルト: http://localhost:11434）
+- `OLLAMA_MODEL`: 使用するOllamaモデル
+
+#### プラットフォーム設定
+- `GITHUB_BOT_NAME`: GitHubボット名
+- `GITLAB_BOT_NAME`: GitLabボット名  
+- `GITLAB_API_URL`: GitLab APIURL（デフォルト: https://gitlab.com/api/v4）
+
+#### MCP設定
+- `GITHUB_MCP_COMMAND`: GitHub MCPサーバーコマンド
+
+#### RabbitMQ設定（オプション）
+- `RABBITMQ_HOST`: RabbitMQホスト
+- `RABBITMQ_PORT`: RabbitMQポート
+- `RABBITMQ_USER`: RabbitMQユーザー
+- `RABBITMQ_PASSWORD`: RabbitMQパスワード
+- `RABBITMQ_QUEUE`: RabbitMQキュー名
+
+#### ログ設定
+- `LOGS`: ログファイルパス（デフォルト: logs/agent.log）
+- `DEBUG`: デバッグモード（true/false、デフォルト: false）
 
 ### プラットフォーム別設定ファイル
 プロジェクトには複数の設定ファイルが用意されています：
@@ -230,15 +271,6 @@ classDiagram
 1. 上記のインストール手順を実行
 2. 開発用設定ファイルを作成
 3. ログレベルを DEBUG に設定
-
-### テスト
-```bash
-# テスト実行（テストが実装されている場合）
-python -m pytest
-
-# または個別のコンポーネントテスト
-python -c "from clients.mcp_tool_client import MCPToolClient; print('MCP client loaded successfully')"
-```
 
 ### ログの確認
 ```bash
