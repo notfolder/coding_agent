@@ -150,12 +150,6 @@ class TaskGitHubPullRequest(Task):
             self.labels.remove(label)
         self.labels.append(self.config["github"]["done_label"])
         self.pr["labels"] = self.labels
-        args = {
-            "owner": self.config["github"]["owner"],
-            "repo": self.pr["repo"],
-            "pull_number": self.pr["number"],
-            "labels": self.labels,
-        }
         self.github_client.update_pull_request_labels(
             self.pr["owner"], self.pr["repo"], self.pr["number"], self.labels,
         )

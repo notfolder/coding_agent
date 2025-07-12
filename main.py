@@ -17,15 +17,10 @@ import yaml
 from clients.lm_client import get_llm_client
 from clients.mcp_tool_client import MCPToolClient
 from filelock_util import FileLock
-from handlers.task_factory import GitHubTaskFactory, GitLabTaskFactory
+
 from handlers.task_getter import TaskGetter
 from handlers.task_handler import TaskHandler
-from handlers.task_key import (
-    GitHubIssueTaskKey,
-    GitHubPullRequestTaskKey,
-    GitLabIssueTaskKey,
-    GitLabMergeRequestTaskKey,
-)
+
 from queueing import InMemoryTaskQueue
 
 

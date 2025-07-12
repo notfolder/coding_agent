@@ -98,7 +98,6 @@ class TaskHandler:
         self.llm_client.send_user_message(prompt)
 
         # 処理ループの初期化
-        prev_output: str | None = None
         count = 0
         max_count = self.config.get("max_llm_process_num", 1000)
 

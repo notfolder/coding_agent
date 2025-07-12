@@ -1,7 +1,6 @@
 """Comprehensive mock MCP client for testing GitHub and GitLab functionality."""
 
-import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class MockTool:

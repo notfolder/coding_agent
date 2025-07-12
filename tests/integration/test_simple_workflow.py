@@ -3,7 +3,7 @@
 import os
 import sys
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -12,8 +12,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.modules["mcp"] = MagicMock()
 sys.modules["mcp"].McpError = Exception
 
-from handlers.task_getter_github import TaskGetterFromGitHub, TaskGitHubIssue
-from handlers.task_getter_gitlab import TaskGetterFromGitLab, TaskGitLabIssue
+from handlers.task_getter_github import TaskGitHubIssue
+
 from handlers.task_handler import TaskHandler
 from tests.mocks.mock_llm_client import MockLLMClient
 from tests.mocks.mock_mcp_client import MockMCPToolClient

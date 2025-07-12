@@ -89,8 +89,6 @@ def run_mock_tests():
 
     # Import test modules to ensure they're available
     try:
-        from tests.mocks.mock_llm_client import MockLLMClient
-        from tests.mocks.mock_mcp_client import MockMCPToolClient
 
         # Run comprehensive test suite
         loader = unittest.TestLoader()

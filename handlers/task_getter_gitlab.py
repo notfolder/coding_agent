@@ -29,7 +29,7 @@ class TaskGitLabIssue(Task):
     def get_prompt(self) -> str:
         # issue本体取得
         args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid}
-        issue_detail = self.mcp_client.call_tool("get_issue", args)
+        self.mcp_client.call_tool("get_issue", args)
         # コメント取得(GitLabはノートとして管理)
         comments = []
         note_args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid}

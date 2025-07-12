@@ -65,7 +65,7 @@ class GithubClient:
         url = f"{self.api_url}/repos/{owner}/{repo}/issues/{pull_number}"
 
         # APIリクエストの実行
-        response = requests.get(url, headers=self.headers)
+        response = requests.get(url, headers=self.headers, timeout=30)
         response.raise_for_status()
 
         # レスポンスからラベル名を抽出
@@ -95,7 +95,7 @@ class GithubClient:
         params = {"state": state, "per_page": 100}
 
         # Pull Request一覧を取得
-        response = requests.get(url, headers=self.headers, params=params)
+        response = requests.get(url, headers=self.headers, params=params, timeout=30)
         response.raise_for_status()
         pulls = response.json()
 
@@ -135,7 +135,7 @@ class GithubClient:
         data = {"body": body}
 
         # コメントを投稿
-        response = requests.post(url, headers=self.headers, json=data)
+        response = requests.post(url, headers=self.headers, json=data, timeout=30)
         response.raise_for_status()
 
         return response.json()
@@ -163,7 +163,7 @@ class GithubClient:
         data = labels
 
         # ラベルを更新
-        response = requests.put(url, headers=self.headers, json=data)
+        response = requests.put(url, headers=self.headers, json=data, timeout=30)
         response.raise_for_status()
         return response.json()
 
@@ -190,7 +190,7 @@ class GithubClient:
         data = labels
 
         # ラベルを更新
-        response = requests.put(url, headers=self.headers, json=data)
+        response = requests.put(url, headers=self.headers, json=data, timeout=30)
         response.raise_for_status()
         return response.json()
 
@@ -219,7 +219,7 @@ class GithubClient:
         # タイムラインコメント(Issueコメント)を取得
         url_issue = f"{self.api_url}/repos/{owner}/{repo}/issues/{pull_number}/comments"
         resp_issue = requests.get(
-            url_issue, headers=self.headers, params={"per_page": 200},
+            url_issue, headers=self.headers, params={"per_page": 200}, timeout=30,
         )
         resp_issue.raise_for_status()
         issue_comments_raw = resp_issue.json()
@@ -262,7 +262,7 @@ class GithubClient:
         # レビュー一覧を取得
         url_reviews = f"{self.api_url}/repos/{owner}/{repo}/pulls/{pull_number}/reviews"
         resp_reviews = requests.get(
-            url_reviews, headers=self.headers, params={"per_page": 100},
+            url_reviews, headers=self.headers, params={"per_page": 100}, timeout=30,
         )
         resp_reviews.raise_for_status()
         reviews_raw = resp_reviews.json()
@@ -271,7 +271,7 @@ class GithubClient:
         # レビューコメント一覧を取得
         url_comments = f"{self.api_url}/repos/{owner}/{repo}/pulls/{pull_number}/comments"
         resp_comments = requests.get(
-            url_comments, headers=self.headers, params={"per_page": 200},
+            url_comments, headers=self.headers, params={"per_page": 200}, timeout=30,
         )
         resp_comments.raise_for_status()
         comments_raw = resp_comments.json()
@@ -339,7 +339,7 @@ class GithubClient:
         headers = self.headers.copy()
 
         # Pull Request情報を取得
-        resp = requests.get(url, headers=headers)
+        resp = requests.get(url, headers=headers, timeout=30)
         resp.raise_for_status()
         pr = resp.json()
 
@@ -384,7 +384,7 @@ class GithubClient:
             params["order"] = order
 
         # 検索実行
-        response = requests.get(url, headers=self.headers, params=params)
+        response = requests.get(url, headers=self.headers, params=params, timeout=30)
         response.raise_for_status()
         data = response.json()
 

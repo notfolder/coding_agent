@@ -13,7 +13,6 @@ import pytest
 from handlers.task_factory import GitHubTaskFactory
 from handlers.task_getter_github import TaskGetterFromGitHub, TaskGitHubIssue
 from handlers.task_key import GitHubIssueTaskKey, GitHubPullRequestTaskKey
-from tests.mocks.mock_llm_client import MockLLMClient
 from tests.mocks.mock_mcp_client import MockMCPToolClient
 
 
@@ -350,7 +349,7 @@ class TestGitHubTaskFactory(unittest.TestCase):
         # We'll patch TaskGitHubIssue to work around this
         with patch("handlers.task_getter_github.TaskGitHubIssue") as mock_task_class:
             task_key = GitHubIssueTaskKey("testorg", "testrepo", 1)
-            task = factory.create_task(task_key)
+            factory.create_task(task_key)
 
             # Verify that the factory attempted to create the task
             # (even though the real implementation has a bug)

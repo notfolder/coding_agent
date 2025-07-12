@@ -4,7 +4,7 @@ import json
 import os
 import sys
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from mcp import McpError
 
@@ -200,7 +200,7 @@ class TestTaskHandler(unittest.TestCase):
 
         # Handle the task (should handle errors gracefully)
         try:
-            result = task_handler.handle(self.github_task)
+            task_handler.handle(self.github_task)
             # If it completes, that's good error handling
         except Exception as e:
             # Should not raise unhandled exceptions
@@ -249,7 +249,7 @@ class TestTaskHandler(unittest.TestCase):
 
         # Handle the task (should handle invalid JSON gracefully)
         try:
-            result = task_handler.handle(self.github_task)
+            task_handler.handle(self.github_task)
             # Should eventually complete with valid response
         except Exception as e:
             # Should not crash on invalid JSON
@@ -317,7 +317,7 @@ class TestTaskHandler(unittest.TestCase):
 
         # Handle the task
         try:
-            result = task_handler.handle(self.github_task)
+            task_handler.handle(self.github_task)
             # Should eventually succeed after retries
         except Exception as e:
             # May fail due to tool errors, which is acceptable

@@ -13,7 +13,6 @@ import pytest
 from handlers.task_factory import GitLabTaskFactory
 from handlers.task_getter_gitlab import TaskGetterFromGitLab, TaskGitLabIssue
 from handlers.task_key import GitLabIssueTaskKey, GitLabMergeRequestTaskKey
-from tests.mocks.mock_llm_client import MockLLMClient
 from tests.mocks.mock_mcp_client import MockMCPToolClient
 
 
@@ -357,7 +356,7 @@ class TestGitLabTaskFactory(unittest.TestCase):
         # Similar to GitHub factory, there might be parameter issues
         with patch("handlers.task_getter_gitlab.TaskGitLabIssue") as mock_task_class:
             task_key = GitLabIssueTaskKey(123, 1)
-            task = factory.create_task(task_key)
+            factory.create_task(task_key)
 
             # Verify that the factory attempted to create the task
             mock_task_class.assert_called_once()
