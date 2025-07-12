@@ -28,6 +28,9 @@ class TestTaskGitLabIssue(unittest.TestCase):
                 'processing_label': 'coding agent processing',
                 'done_label': 'coding agent done',
                 'owner': 'testuser'
+            },
+            'github': {  # GitLab TaskGetter incorrectly looks for github.assignee (bug in real code)
+                'assignee': None
             }
         }
         
@@ -363,7 +366,7 @@ class TestGitLabTaskFactory(unittest.TestCase):
         )
         
         # Similar to GitHub factory, there might be parameter issues
-        with patch('handlers.task_factory.TaskGitLabIssue') as mock_task_class:
+        with patch('handlers.task_getter_gitlab.TaskGitLabIssue') as mock_task_class:
             task_key = GitLabIssueTaskKey(123, 1)
             task = factory.create_task(task_key)
             

@@ -50,7 +50,7 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
         """Test complete GitHub issue processing workflow"""
         # 1. Get tasks from GitHub
         task_getter = TaskGetterFromGitHub(config=self.config, mcp_clients={"github": 
-            self.github_mcp_client},
+            self.github_mcp_client})
             
             config=self.config
         )
@@ -80,7 +80,7 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
         # 5. Handle task with LLM
         task_handler = TaskHandler(
             llm_client=self.llm_client,
-            mcp_clients={"github": self.github_mcp_client},
+            mcp_clients={"github": self.github_mcp_client})
             config=self.config
         )
         
@@ -97,8 +97,8 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
     def test_github_task_factory_integration(self):
         """Test GitHub task factory integration"""
         factory = GitHubTaskFactory(
-            self.github_mcp_client},
-            
+            mcp_client=self.github_mcp_client,
+            github_client=self.github_client,
             config=self.config
         )
         
@@ -154,7 +154,7 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
     def test_github_multiple_issues_workflow(self):
         """Test processing multiple GitHub issues"""
         task_getter = TaskGetterFromGitHub(config=self.config, mcp_clients={"github": 
-            self.github_mcp_client},
+            self.github_mcp_client})
             
             config=self.config
         )
@@ -178,7 +178,7 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
             
             task_handler = TaskHandler(
                 llm_client=self.llm_client,
-                mcp_clients={"github": self.github_mcp_client},
+                mcp_clients={"github": self.github_mcp_client})
                 config=self.config
             )
             
@@ -188,7 +188,7 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
     def test_github_comment_workflow(self):
         """Test GitHub comment creation workflow"""
         tasks = TaskGetterFromGitHub(config=self.config, mcp_clients={"github": 
-            self.github_mcp_client},
+            self.github_mcp_client})
             
             config=self.config
         ).get_tasks()
@@ -244,7 +244,7 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
         """Test complete GitLab issue processing workflow"""
         # 1. Get tasks from GitLab
         task_getter = TaskGetterFromGitLab(config=self.config, mcp_clients={"gitlab": 
-            self.gitlab_mcp_client},
+            self.gitlab_mcp_client})
             
             config=self.config
         )
@@ -274,7 +274,7 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
         # 5. Handle task with LLM
         task_handler = TaskHandler(
             llm_client=self.llm_client,
-            mcp_clients={"gitlab": self.gitlab_mcp_client},
+            mcp_clients={"gitlab": self.gitlab_mcp_client})
             config=self.config
         )
         
@@ -291,7 +291,7 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
     def test_gitlab_task_factory_integration(self):
         """Test GitLab task factory integration"""
         factory = GitLabTaskFactory(
-            self.gitlab_mcp_client},
+            self.gitlab_mcp_client})
             
             config=self.config
         )
@@ -311,7 +311,7 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
     def test_gitlab_discussions_workflow(self):
         """Test GitLab discussions handling"""
         tasks = TaskGetterFromGitLab(config=self.config, mcp_clients={"gitlab": 
-            self.gitlab_mcp_client},
+            self.gitlab_mcp_client})
             
             config=self.config
         ).get_tasks()
@@ -330,7 +330,7 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
     def test_gitlab_label_transitions(self):
         """Test GitLab label transition workflow"""
         task_getter = TaskGetterFromGitLab(config=self.config, mcp_clients={"gitlab": 
-            self.gitlab_mcp_client},
+            self.gitlab_mcp_client})
             
             config=self.config
         )
@@ -388,13 +388,13 @@ class TestMixedPlatformWorkflow(unittest.TestCase):
         """Test TaskHandler with both GitHub and GitLab MCP clients"""
         # Get tasks from both platforms
         github_tasks = TaskGetterFromGitHub(config=self.config, mcp_clients={"github": 
-            self.github_mcp_client},
+            self.github_mcp_client})
             
             config=self.config
         ).get_tasks()
         
         gitlab_tasks = TaskGetterFromGitLab(config=self.config, mcp_clients={"gitlab": 
-            self.gitlab_mcp_client},
+            self.gitlab_mcp_client})
             
             config=self.config
         ).get_tasks()
@@ -402,7 +402,7 @@ class TestMixedPlatformWorkflow(unittest.TestCase):
         # Create task handler with both MCP clients
         task_handler = TaskHandler(
             llm_client=self.llm_client,
-            mcp_clients={"github": self.github_mcp_client, "gitlab": self.gitlab_mcp_client},
+            mcp_clients={"github": self.github_mcp_client, "gitlab": self.gitlab_mcp_client})
             config=self.config
         )
         
@@ -428,7 +428,7 @@ class TestMixedPlatformWorkflow(unittest.TestCase):
         """Test that platform-specific configurations are respected"""
         # Test GitHub configuration
         github_task_getter = TaskGetterFromGitHub(config=self.config, mcp_clients={"github": 
-            self.github_mcp_client},
+            self.github_mcp_client})
             
             config=self.config
         )
@@ -436,7 +436,7 @@ class TestMixedPlatformWorkflow(unittest.TestCase):
         
         # Test GitLab configuration
         gitlab_task_getter = TaskGetterFromGitLab(config=self.config, mcp_clients={"gitlab": 
-            self.gitlab_mcp_client},
+            self.gitlab_mcp_client})
             
             config=self.config
         )
@@ -479,7 +479,7 @@ class TestErrorHandlingIntegration(unittest.TestCase):
         
         # Create task
         tasks = TaskGetterFromGitHub(config=self.config, mcp_clients={"github": 
-            self.github_mcp_client},
+            self.github_mcp_client})
             
             config=self.config
         ).get_tasks()
@@ -490,7 +490,7 @@ class TestErrorHandlingIntegration(unittest.TestCase):
             # Test with error-prone LLM
             task_handler = TaskHandler(
                 llm_client=error_llm,
-                mcp_clients={"github": self.github_mcp_client},
+                mcp_clients={"github": self.github_mcp_client})
                 config=self.config
             )
             

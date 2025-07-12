@@ -360,7 +360,7 @@ class TestGitHubTaskFactory(unittest.TestCase):
         
         # The factory has a bug - it doesn't pass github_client to TaskGitHubIssue
         # We'll patch TaskGitHubIssue to work around this
-        with patch('handlers.task_factory.TaskGitHubIssue') as mock_task_class:
+        with patch('handlers.task_getter_github.TaskGitHubIssue') as mock_task_class:
             task_key = GitHubIssueTaskKey('testorg', 'testrepo', 1)
             task = factory.create_task(task_key)
             
