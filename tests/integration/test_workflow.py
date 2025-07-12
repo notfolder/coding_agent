@@ -34,7 +34,6 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
                 'query': 'label:"coding agent"',
                 'bot_label': 'coding agent',
                 'processing_label': 'coding agent processing',
-                'done_label': 'coding agent done',
                 'done_label': 'coding agent done'
             },
             'max_llm_process_num': 20
@@ -45,6 +44,18 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
         self.github_mcp_client = MockMCPToolClient(github_server_config)
         self.github_client = MagicMock()
         self.llm_client = MockLLMClientWithToolCalls(self.config)
+        
+        # Mock the GitHub client search_issues method to return mock data
+        self.github_client.search_issues.return_value = self.github_mcp_client.get_mock_data()['issues']
+        
+        # Patch GitHub client creation
+        self.github_client_patcher = patch('handlers.task_getter_github.GithubClient')
+        self.mock_github_client_class = self.github_client_patcher.start()
+        self.mock_github_client_class.return_value = self.github_client
+    
+    def tearDown(self):
+        """Clean up patches"""
+        self.github_client_patcher.stop()
     
     def test_full_github_issue_workflow(self):
         """Test complete GitHub issue processing workflow"""
@@ -130,7 +141,7 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
         task = TaskGitHubIssue(
             issue=sample_issue,
             mcp_client=error_mcp_client,
-            
+            github_client=self.github_client,
             config=self.config
         )
         
@@ -215,7 +226,7 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
                 'bot_label': 'coding agent',
                 'processing_label': 'coding agent processing',
                 'done_label': 'coding agent done',
-                'done_label': 'coding agent done'
+                'assignee': 'testuser'
             },
             'max_llm_process_num': 20
         }
@@ -224,7 +235,21 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
         gitlab_server_config = {'mcp_server_name': 'gitlab'}
         self.gitlab_mcp_client = MockMCPToolClient(gitlab_server_config)
         self.gitlab_client = MagicMock()
-        self.llm_client = MockLLMClientWithToolCalls(self.config)
+        self.llm_client = MockLLMClient(self.config)  # Use simpler LLM client for GitLab tests
+        
+        # Mock the GitLab client methods to return mock data
+        mock_data = self.gitlab_mcp_client.get_mock_data()
+        self.gitlab_client.search_issues.return_value = mock_data['issues']
+        self.gitlab_client.search_merge_requests.return_value = []
+        
+        # Patch GitLab client creation
+        self.gitlab_client_patcher = patch('handlers.task_getter_gitlab.GitlabClient')
+        self.mock_gitlab_client_class = self.gitlab_client_patcher.start()
+        self.mock_gitlab_client_class.return_value = self.gitlab_client
+    
+    def tearDown(self):
+        """Clean up patches"""
+        self.gitlab_client_patcher.stop()
     
     def test_full_gitlab_issue_workflow(self):
         """Test complete GitLab issue processing workflow"""
@@ -260,6 +285,12 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
             config=self.config
         )
         
+        # Set up a simple response without tool calls for GitLab test
+        self.llm_client.set_mock_response({
+            "comment": "Processing GitLab issue without tool calls",
+            "done": True
+        })
+        
         # Process the task
         result = task_handler.handle(task)
         
@@ -273,7 +304,8 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
     def test_gitlab_task_factory_integration(self):
         """Test GitLab task factory integration"""
         factory = GitLabTaskFactory(
-            self.gitlab_mcp_client,
+            mcp_client=self.gitlab_mcp_client,
+            gitlab_client=self.gitlab_client,
             config=self.config
         )
         

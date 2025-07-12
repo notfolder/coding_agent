@@ -150,6 +150,16 @@ class MockLLMClientWithToolCalls(MockLLMClient):
     
     def _setup_tool_call_responses(self):
         """Setup responses that include tool calls"""
+        # Determine if we're working with GitHub or GitLab based on config
+        if 'github' in self.config:
+            self._setup_github_responses()
+        elif 'gitlab' in self.config:
+            self._setup_gitlab_responses()
+        else:
+            self._setup_generic_responses()
+    
+    def _setup_github_responses(self):
+        """Setup GitHub-specific tool call responses"""
         self.response_queue = [
             # Initial analysis with tool call
             (json.dumps({
@@ -157,7 +167,7 @@ class MockLLMClientWithToolCalls(MockLLMClient):
                     "tool": "github_search_issues",
                     "args": {"q": "label:\"coding agent\""}
                 },
-                "comment": "Searching for issues to work on",
+                "comment": "Searching for GitHub issues to work on",
                 "done": False
             }), []),
             
@@ -167,7 +177,7 @@ class MockLLMClientWithToolCalls(MockLLMClient):
                     "tool": "github_get_issue",
                     "args": {"owner": "testorg", "repo": "testrepo", "issue_number": 1}
                 },
-                "comment": "Getting issue details",
+                "comment": "Getting GitHub issue details",
                 "done": False
             }), []),
             
@@ -182,7 +192,67 @@ class MockLLMClientWithToolCalls(MockLLMClient):
                         "labels": ["coding agent processing", "bug"]
                     }
                 },
-                "comment": "Updating issue status",
+                "comment": "Updating GitHub issue status",
+                "done": False
+            }), []),
+            
+            # Complete the task
+            (json.dumps({
+                "comment": "GitHub task completed successfully",
+                "done": True
+            }), [])
+        ]
+    
+    def _setup_gitlab_responses(self):
+        """Setup GitLab-specific tool call responses"""
+        self.response_queue = [
+            # Initial analysis with tool call
+            (json.dumps({
+                "command": {
+                    "tool": "gitlab_list_issues",
+                    "args": {"project_id": "123", "labels": "coding agent"}
+                },
+                "comment": "Searching for GitLab issues to work on",
+                "done": False
+            }), []),
+            
+            # Get specific issue details
+            (json.dumps({
+                "command": {
+                    "tool": "gitlab_get_issue",
+                    "args": {"project_id": "123", "issue_iid": 1}
+                },
+                "comment": "Getting GitLab issue details",
+                "done": False
+            }), []),
+            
+            # Update issue labels
+            (json.dumps({
+                "command": {
+                    "tool": "gitlab_update_issue",
+                    "args": {
+                        "project_id": "123",
+                        "issue_iid": 1,
+                        "labels": ["coding agent processing", "bug"]
+                    }
+                },
+                "comment": "Updating GitLab issue status",
+                "done": False
+            }), []),
+            
+            # Complete the task
+            (json.dumps({
+                "comment": "GitLab task completed successfully",
+                "done": True
+            }), [])
+        ]
+    
+    def _setup_generic_responses(self):
+        """Setup generic responses without specific tool calls"""
+        self.response_queue = [
+            # Initial analysis with tool call
+            (json.dumps({
+                "comment": "Analyzing the task",
                 "done": False
             }), []),
             

@@ -19,7 +19,7 @@ class GitHubTaskFactory(TaskFactory):
                 'issue_number': task_key.number
             })
             from .task_getter_github import TaskGitHubIssue
-            return TaskGitHubIssue(issue, self.mcp_client, self.config)
+            return TaskGitHubIssue(issue, self.mcp_client, self.github_client, self.config)
         elif isinstance(task_key, GitHubPullRequestTaskKey):
             pr = self.github_client.get_pull_request(
                 owner=task_key.owner,
@@ -43,7 +43,7 @@ class GitLabTaskFactory(TaskFactory):
                 'issue_iid': task_key.issue_iid
             })
             from .task_getter_gitlab import TaskGitLabIssue
-            return TaskGitLabIssue(issue, self.mcp_client, self.config)
+            return TaskGitLabIssue(issue, self.mcp_client, self.gitlab_client, self.config)
         elif isinstance(task_key, GitLabMergeRequestTaskKey):
             mr = self.gitlab_client.get_merge_request(
                 project_id=task_key.project_id,
