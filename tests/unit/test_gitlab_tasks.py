@@ -1,14 +1,16 @@
 """Comprehensive unit tests for GitLab task components using mocks."""
 
-import os
 import sys
+import time
 import unittest
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
 import pytest
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from handlers.task_factory import GitLabTaskFactory
 from handlers.task_getter_gitlab import TaskGetterFromGitLab, TaskGitLabIssue
@@ -19,17 +21,49 @@ from tests.mocks.mock_mcp_client import MockMCPToolClient
 class TestTaskGitLabIssue(unittest.TestCase):
     """Test TaskGitLabIssue functionality with mock data."""
 
+    # Test constants
+    TEST_PROJECT_ID = 123
+    TEST_ISSUE_IID = 1
+    TEST_TASK_KEY_ISSUE_IID = 123
+    TEST_TASK_KEY_MR_IID = 456
+
+    def _verify_equal(self, actual: object, expected: object, msg: str = "") -> None:
+        """Verify that actual equals expected."""
+        if actual != expected:
+            pytest.fail(f"Expected {expected}, got {actual}. {msg}")
+
+    def _verify_true(self, *, condition: bool, msg: str = "") -> None:
+        """Verify that condition is True."""
+        if not condition:
+            pytest.fail(f"Condition was False. {msg}")
+
+    def _verify_in(self, item: object, container: object, msg: str = "") -> None:
+        """Verify that item is in container."""
+        if item not in container:
+            pytest.fail(f"{item} not found in {container}. {msg}")
+
+    def _verify_not_in(self, item: object, container: object, msg: str = "") -> None:
+        """Verify that item is not in container."""
+        if item in container:
+            pytest.fail(f"{item} found in {container} but should not be. {msg}")
+
+    def _verify_isinstance(self, obj: object, cls: type, msg: str = "") -> None:
+        """Verify that obj is instance of cls."""
+        if not isinstance(obj, cls):
+            pytest.fail(f"Expected {obj} to be instance of {cls}. {msg}")
+
     def setUp(self) -> None:
         """Set up test environment."""
         self.config = {
             "gitlab": {
-                "project_id": 123,
+                "project_id": self.TEST_PROJECT_ID,
                 "bot_label": "coding agent",
                 "processing_label": "coding agent processing",
                 "done_label": "coding agent done",
                 "owner": "testuser",
             },
-            "github": {  # GitLab TaskGetter incorrectly looks for github.assignee (bug in real code)
+            # GitLab TaskGetter incorrectly looks for github.assignee (bug in real code)
+            "github": {
                 "assignee": None,
             },
         }
@@ -43,11 +77,11 @@ class TestTaskGitLabIssue(unittest.TestCase):
 
         # Sample issue data
         self.sample_issue = {
-            "iid": 1,
+            "iid": self.TEST_ISSUE_IID,
             "title": "Test GitLab Issue",
             "description": "This is a test GitLab issue",
             "state": "opened",
-            "project_id": 123,
+            "project_id": self.TEST_PROJECT_ID,
             "labels": ["coding agent", "bug"],
             "author": {"username": "testuser"},
         }
@@ -62,10 +96,10 @@ class TestTaskGitLabIssue(unittest.TestCase):
         )
 
         # Test basic properties
-        assert task.issue["iid"] == 1
-        assert task.issue["title"] == "Test GitLab Issue"
-        assert task.project_id == 123
-        assert task.issue_iid == 1
+        self._verify_equal(task.issue["iid"], self.TEST_ISSUE_IID)
+        self._verify_equal(task.issue["title"], "Test GitLab Issue")
+        self._verify_equal(task.project_id, self.TEST_PROJECT_ID)
+        self._verify_equal(task.issue_iid, self.TEST_ISSUE_IID)
 
     def test_task_prepare_label_update(self) -> None:
         """Test task preparation and label updates."""
@@ -81,16 +115,16 @@ class TestTaskGitLabIssue(unittest.TestCase):
 
         # Check that labels were updated in the issue
         updated_labels = task.issue["labels"]
-        assert "coding agent" not in updated_labels
-        assert "coding agent processing" in updated_labels
-        assert "bug" in updated_labels  # Other labels should remain
+        self._verify_not_in("coding agent", updated_labels)
+        self._verify_in("coding agent processing", updated_labels)
+        self._verify_in("bug", updated_labels)  # Other labels should remain
 
         # Check that MCP client received update call
         mock_data = self.mcp_client.get_mock_data()
-        assert 1 in mock_data["updated_issues"]
+        self._verify_in(1, mock_data["updated_issues"])
         mcp_updated_labels = mock_data["updated_issues"][1]["labels"]
-        assert "coding agent processing" in mcp_updated_labels
-        assert "coding agent" not in mcp_updated_labels
+        self._verify_in("coding agent processing", mcp_updated_labels)
+        self._verify_not_in("coding agent", mcp_updated_labels)
 
     def test_get_prompt_generation(self) -> None:
         """Test prompt generation with issue and discussions."""
@@ -105,11 +139,11 @@ class TestTaskGitLabIssue(unittest.TestCase):
         prompt = task.get_prompt()
 
         # Verify prompt contains expected information
-        assert isinstance(prompt, str)
-        assert "ISSUE:" in prompt
-        assert "Test GitLab Issue" in prompt
-        assert "This is a test GitLab issue" in prompt
-        assert "123" in prompt  # Project ID
+        self._verify_isinstance(prompt, str)
+        self._verify_in("ISSUE:", prompt)
+        self._verify_in("Test GitLab Issue", prompt)
+        self._verify_in("This is a test GitLab issue", prompt)
+        self._verify_in("123", prompt)  # Project ID
 
     def test_issue_with_missing_labels(self) -> None:
         """Test handling of issue with missing or empty labels."""
@@ -165,7 +199,6 @@ class TestTaskGitLabIssue(unittest.TestCase):
 
         # 3. Complete task (would normally be done by TaskHandler)
         # For now, just test that we can call complete methods
-        # task.complete()  # This method would be implemented
 
     def test_comment_creation(self) -> None:
         """Test comment creation functionality."""
@@ -229,7 +262,7 @@ class TestTaskGetterFromGitLab(unittest.TestCase):
             assert isinstance(tasks, list)
             if tasks:  # If issues are found
                 assert isinstance(tasks[0], TaskGitLabIssue)
-                assert tasks[0].project_id == 123
+                assert tasks[0].project_id == self.TEST_PROJECT_ID
 
     def test_get_tasks_with_empty_results(self) -> None:
         """Test task retrieval when no issues match criteria."""
@@ -288,34 +321,34 @@ class TestGitLabTaskKey(unittest.TestCase):
 
     def test_gitlab_issue_task_key_creation(self) -> None:
         """Test GitLab issue task key creation."""
-        task_key = GitLabIssueTaskKey("test-group/test-project", 123)
+        task_key = GitLabIssueTaskKey("test-group/test-project", self.TEST_TASK_KEY_ISSUE_IID)
 
         assert task_key.project_id == "test-group/test-project"
-        assert task_key.issue_iid == 123
+        assert task_key.issue_iid == self.TEST_TASK_KEY_ISSUE_IID
 
         # Test to_dict method
         key_dict = task_key.to_dict()
         assert key_dict["type"] == "gitlab_issue"
         assert key_dict["project_id"] == "test-group/test-project"
-        assert key_dict["issue_iid"] == 123
+        assert key_dict["issue_iid"] == self.TEST_TASK_KEY_ISSUE_IID
 
         # Test from_dict method
         recreated_key = GitLabIssueTaskKey.from_dict(key_dict)
         assert recreated_key.project_id == "test-group/test-project"
-        assert recreated_key.issue_iid == 123
+        assert recreated_key.issue_iid == self.TEST_TASK_KEY_ISSUE_IID
 
     def test_gitlab_mr_task_key_creation(self) -> None:
         """Test GitLab MR task key creation."""
-        task_key = GitLabMergeRequestTaskKey("test-group/test-project", 456)
+        task_key = GitLabMergeRequestTaskKey("test-group/test-project", self.TEST_TASK_KEY_MR_IID)
 
         assert task_key.project_id == "test-group/test-project"
-        assert task_key.mr_iid == 456
+        assert task_key.mr_iid == self.TEST_TASK_KEY_MR_IID
 
         # Test to_dict method
         key_dict = task_key.to_dict()
         assert key_dict["type"] == "gitlab_merge_request"
         assert key_dict["project_id"] == "test-group/test-project"
-        assert key_dict["mr_iid"] == 456
+        assert key_dict["mr_iid"] == self.TEST_TASK_KEY_MR_IID
 
     def test_task_key_equality(self) -> None:
         """Test task key equality comparison."""
@@ -368,18 +401,22 @@ class TestGitLabTaskFactory(unittest.TestCase):
         )
 
         # Test with invalid key type
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=".*"):
             factory.create_task("invalid_key")
 
 
 class TestGitLabErrorHandling(unittest.TestCase):
     """Test error handling in GitLab components."""
 
+    # Test constants
+    TEST_PROJECT_ID = 123
+    TEST_ISSUE_IID = 1
+
     def setUp(self) -> None:
         """Set up test environment."""
         self.config = {
             "gitlab": {
-                "project_id": 123,
+                "project_id": self.TEST_PROJECT_ID,
                 "bot_label": "coding agent",
                 "processing_label": "coding agent processing",
             },
@@ -394,20 +431,20 @@ class TestGitLabErrorHandling(unittest.TestCase):
         # Override call_tool to simulate errors
         original_call_tool = mcp_client.call_tool
 
-        def error_call_tool(tool, args):
+        def error_call_tool(tool: str, args: dict[str, Any]) -> object:
             if tool == "update_issue":
                 msg = "MCP connection error"
-                raise Exception(msg)
+                raise RuntimeError(msg)
             return original_call_tool(tool, args)
 
         mcp_client.call_tool = error_call_tool
 
         gitlab_client = MagicMock()
         sample_issue = {
-            "iid": 1,
+            "iid": self.TEST_ISSUE_IID,
             "title": "Test Issue",
             "description": "Test description",
-            "project_id": 123,
+            "project_id": self.TEST_PROJECT_ID,
             "labels": ["coding agent"],
         }
 
@@ -419,12 +456,8 @@ class TestGitLabErrorHandling(unittest.TestCase):
         )
 
         # prepare() should handle the error gracefully
-        try:
+        with pytest.raises(RuntimeError, match="MCP connection error"):
             task.prepare()
-            # If it doesn't crash, that's good error handling
-        except Exception as e:
-            # Check that it's the expected error, not an unhandled one
-            assert "MCP connection error" in str(e)
 
     def test_task_with_missing_config(self) -> None:
         """Test task creation with missing configuration."""
@@ -435,10 +468,10 @@ class TestGitLabErrorHandling(unittest.TestCase):
         gitlab_client = MagicMock()
 
         sample_issue = {
-            "iid": 1,
+            "iid": self.TEST_ISSUE_IID,
             "title": "Test Issue",
             "description": "Test description",
-            "project_id": 123,
+            "project_id": self.TEST_PROJECT_ID,
             "labels": ["coding agent"],
         }
 
@@ -461,11 +494,9 @@ class TestGitLabErrorHandling(unittest.TestCase):
         mcp_client = MockMCPToolClient(server_config)
 
         # Simulate timeout by making call_tool take too long
-        import time
-
         original_call_tool = mcp_client.call_tool
 
-        def slow_call_tool(tool, args):
+        def slow_call_tool(tool: str, args: dict[str, Any]) -> object:
             if tool == "get_issue":
                 # Simulate a slow response
                 time.sleep(0.1)  # Short sleep to simulate delay
@@ -475,10 +506,10 @@ class TestGitLabErrorHandling(unittest.TestCase):
 
         gitlab_client = MagicMock()
         sample_issue = {
-            "iid": 1,
+            "iid": self.TEST_ISSUE_IID,
             "title": "Test Issue",
             "description": "Test description",
-            "project_id": 123,
+            "project_id": self.TEST_PROJECT_ID,
             "labels": ["coding agent"],
         }
 
