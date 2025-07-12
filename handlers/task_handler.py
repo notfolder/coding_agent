@@ -8,12 +8,17 @@ from __future__ import annotations
 import json
 import logging
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from mcp import McpError
 
 if TYPE_CHECKING:
     from handlers.task import Task
+
+# 定数定義
+MAX_JSON_PARSE_ERRORS = 5
+MAX_CONSECUTIVE_TOOL_ERRORS = 3
 
 
 class TaskHandler:
@@ -25,8 +30,8 @@ class TaskHandler:
 
     def __init__(
         self,
-        llm_client: Any,  # LLMClientの具象クラス
-        mcp_clients: dict[str, Any],  # MCPToolClientの辞書
+        llm_client: object,  # LLMClientの具象クラス
+        mcp_clients: dict[str, object],  # MCPToolClientの辞書
         config: dict[str, Any],
     ) -> None:
         """タスクハンドラーを初期化する.
@@ -42,7 +47,7 @@ class TaskHandler:
         self.config = config
         self.logger = logging.getLogger(__name__)
 
-    def sanitize_arguments(self, arguments: Any) -> dict[str, Any]:
+    def sanitize_arguments(self, arguments: str | dict | list) -> dict[str, Any]:
         """引数をサニタイズして辞書形式に変換する.
 
         引数がdict型でない場合はJSON文字列としてパースし、
@@ -91,7 +96,7 @@ class TaskHandler:
         """
         # タスクからプロンプトを取得
         prompt = task.get_prompt()
-        self.logger.info(f"LLMに送信するプロンプト: {prompt}")
+        self.logger.info("LLMに送信するプロンプト: %s", prompt)
 
         # システムプロンプトとユーザーメッセージを送信
         self.llm_client.send_system_prompt(self._make_system_prompt())
@@ -110,7 +115,7 @@ class TaskHandler:
         while count < max_count:
             # LLMからレスポンスを取得
             resp, functions = self.llm_client.get_response()
-            self.logger.info(f"LLM応答: {resp}")
+            self.logger.info("LLM応答: %s", resp)
 
             # <think>...</think>の内容をコメントとして投稿し、レスポンスから除去
             think_matches = re.findall(r"<think>(.*?)</think>", resp, flags=re.DOTALL)
@@ -118,15 +123,17 @@ class TaskHandler:
                 # 思考内容をタスクにコメントとして追加
                 task.comment(think_content.strip())
 
+            # <think>タグを除去したクリーンなレスポンス
+            resp_clean = re.sub(r"<think>.*?</think>", "", resp, flags=re.DOTALL).strip()
 
             # JSON応答の解析
             try:
                 data = self._extract_json(resp_clean)
-            except Exception as e:
-                self.logger.exception(f"LLM応答JSONパース失敗: {e}")
+            except Exception:
+                self.logger.exception("LLM応答JSONパース失敗")
                 count += 1
                 # 5回連続でJSONパースに失敗した場合は処理を中断
-                if count >= 5:
+                if count >= MAX_JSON_PARSE_ERRORS:
                     task.comment("LLM応答エラーでスキップ")
                     break
                 continue
@@ -161,7 +168,7 @@ class TaskHandler:
                         function["arguments"] if isinstance(function, dict) else function.arguments
                     )
                     args = self.sanitize_arguments(args)
-                    self.logger.info(f"関数呼び出し: {name} with args: {args}")
+                    self.logger.info("関数呼び出し: %s with args: %s", name, args)
 
                     # ツールの実行とエラーハンドリング
                     try:
@@ -174,11 +181,10 @@ class TaskHandler:
                                 tool_error_count = 0
                         except* McpError as e:
                             # MCPエラーの処理
-                            self.logger.exception(
-                                f"ツール呼び出し失敗: {e.exceptions[0].exceptions[0]}",
-                            )
-                            task.comment(f"ツール呼び出しエラー: {e.exceptions[0].exceptions[0]}")
-                            output = f"error: {e.exceptions[0].exceptions[0]!s}"
+                            error_detail = str(e.exceptions[0].exceptions[0])
+                            self.logger.exception("ツール呼び出し失敗: %s", error_detail)
+                            task.comment(f"ツール呼び出しエラー: {error_detail}")
+                            output = f"error: {error_detail}"
 
                             # 連続ツールエラーの判定と処理
                             if last_tool == name:
@@ -188,18 +194,20 @@ class TaskHandler:
                                 last_tool = name
 
                             # 3回連続エラーの場合は処理を中止
-                            if tool_error_count >= 3:
+                            if tool_error_count >= MAX_CONSECUTIVE_TOOL_ERRORS:
                                 task.comment(
                                     f"同じツール({name})で3回連続エラーが発生したため処理を中止します。",
                                 )
                                 should_break = True
                     except BaseException as e:
                         # その他の例外の処理
-                        while isinstance(e, ExceptionGroup):
-                            e = e.exceptions[0]
-                        self.logger.exception(f"ツール呼び出しエラー: {e}")
-                        task.comment(f"ツール呼び出しエラー: {e}")
-                        output = f"error: {e!s}"
+                        # ExceptionGroup handling for compatibility
+                        error_msg = str(e)
+                        if hasattr(e, "exceptions") and e.exceptions:
+                            error_msg = str(e.exceptions[0])
+                        self.logger.exception("ツール呼び出しエラー: %s", error_msg)
+                        task.comment(f"ツール呼び出しエラー: {error_msg}")
+                        output = f"error: {error_msg}"
 
                         # 連続ツールエラーの判定と処理
                         if last_tool == name:
@@ -209,7 +217,7 @@ class TaskHandler:
                             last_tool = name
 
                         # 3回連続エラーの場合は処理を中止
-                        if tool_error_count >= 3:
+                        if tool_error_count >= MAX_CONSECUTIVE_TOOL_ERRORS:
                             task.comment(
                                 f"同じツール({name})で3回連続エラーが発生したため処理を中止します。",
                             )
@@ -225,7 +233,7 @@ class TaskHandler:
                 task.comment(str(data["plan"]))
                 self.llm_client.send_user_message(str(data["plan"]))
 
-            # commandフィールドの処理(レガシー形式)
+            # レガシー形式のcommandフィールドの処理
             if "command" in data:
                 task.comment(data.get("comment", ""))
                 tool = data["command"]["tool"]
@@ -238,29 +246,21 @@ class TaskHandler:
                     if last_tool == tool:
                         tool_error_count = 0
                 except* McpError as e:
-                    self.logger.exception(f"ツール呼び出し失敗: {e.exceptions[0].exceptions[0]}")
-                    task.comment(f"ツール呼び出しエラー: {e.exceptions[0].exceptions[0]}")
-                    output = f"error: {e.exceptions[0].exceptions[0]!s}"
+                    error_detail = str(e.exceptions[0].exceptions[0])
+                    self.logger.exception("ツール呼び出し失敗: %s", error_detail)
+                    task.comment(f"ツール呼び出しエラー: {error_detail}")
+                    output = f"error: {error_detail}"
                     # 連続ツールエラー判定
                     if last_tool == tool:
                         tool_error_count += 1
                     else:
                         tool_error_count = 1
                         last_tool = tool
-                    if tool_error_count >= 3:
-                        # 連続ツールエラーの判定と処理
-                        if last_tool == tool:
-                            tool_error_count += 1
-                        else:
-                            tool_error_count = 1
-                            last_tool = tool
-
-                        # 3回連続エラーの場合は処理を中止
-                        if tool_error_count >= 3:
-                            task.comment(
-                                f"同じツール({tool})で3回連続エラーが発生したため処理を中止します。",
-                            )
-                            should_break = True
+                    if tool_error_count >= MAX_CONSECUTIVE_TOOL_ERRORS:
+                        task.comment(
+                            f"同じツール({tool})で3回連続エラーが発生したため処理を中止します。",
+                        )
+                        should_break = True
 
                 # ツール実行結果をLLMに送信
                 self.llm_client.send_user_message(f"output: {output}")
@@ -293,11 +293,11 @@ class TaskHandler:
         """
         if self.config.get("llm", {}).get("function_calling", True):
             # function callingが有効な場合
-            with open("system_prompt_function_call.txt") as f:
+            with Path("system_prompt_function_call.txt").open() as f:
                 prompt = f.read()
         else:
             # function callingが無効な場合
-            with open("system_prompt.txt") as f:
+            with Path("system_prompt.txt").open() as f:
                 prompt = f.read()
 
         # MCPクライアントからシステムプロンプトを取得して結合
