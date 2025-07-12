@@ -6,8 +6,13 @@
 """
 from __future__ import annotations
 
+import contextlib
 import sys
-from typing import Any, TextIO
+from pathlib import Path
+from typing import TYPE_CHECKING, TextIO
+
+if TYPE_CHECKING:
+    import types
 
 import portalocker
 from typing_extensions import Self
@@ -41,14 +46,12 @@ class FileLock:
             SystemExit: 他のプロセスがロックを保持している場合
 
         """
-        # ロックファイルを書き込みモードで開く
-        self.fp = open(self.lockfile, "w")
+        lockfile_path = Path(self.lockfile)
+        self.fp = lockfile_path.open("w")
 
         try:
-            # 排他ロック + ノンブロッキングでロックを取得
             portalocker.lock(self.fp, portalocker.LOCK_EX | portalocker.LOCK_NB)
         except portalocker.LockException:
-            # ロックの取得に失敗した場合(他のプロセスが保持中)
             sys.exit(1)
 
     def release(self) -> None:
@@ -58,15 +61,9 @@ class FileLock:
         エラーが発生してもプログラムの実行は継続されます。
         """
         if self.fp:
-            try:
-                # ロックを解放
+            with contextlib.suppress(portalocker.LockException):
                 portalocker.unlock(self.fp)
-            except Exception:
-                # エラーが発生してもプログラムを継続
-                # (プロセス終了時に自動的にロックは解放される)
-                pass
 
-            # ファイルハンドルを閉じる
             self.fp.close()
             self.fp = None
 
@@ -84,9 +81,9 @@ class FileLock:
 
     def __exit__(
         self,
-        exc_type: type | None,
-        exc_val: Exception | None,
-        exc_tb: Any | None,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: types.TracebackType | None,
     ) -> None:
         """コンテキストマネージャーの終了処理.
 

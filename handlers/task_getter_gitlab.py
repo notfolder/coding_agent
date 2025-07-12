@@ -43,7 +43,6 @@ class TaskGitLabIssue(Task):
         # issue本体取得
         args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid}
         self.mcp_client.call_tool("get_issue", args)
-        # コメント取得(GitLabはノートとして管理)
         comments = []
         note_args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid}
         comments = self.mcp_client.call_tool("list_issue_discussions", note_args)
@@ -59,7 +58,7 @@ class TaskGitLabIssue(Task):
             f"COMMENTS: {comments}"
         )
 
-    def comment(self, text, mention=False) -> None:
+    def comment(self, text: str, *, mention: bool = False) -> None:
         if mention:
             owner = self.issue.get("author", {}).get("username")
             if owner:
@@ -133,7 +132,7 @@ class TaskGitLabMergeRequest(Task):
             f"COMMENTS: {comments}"
         )
 
-    def comment(self, text, mention=False) -> None:
+    def comment(self, text: str, *, mention: bool = False) -> None:
         if mention:
             owner = self.mr.get("author", {}).get("username")
             if owner:
@@ -202,8 +201,6 @@ class TaskGetterFromGitLab(TaskGetter):
     def from_task_key(self, task_key_dict: dict[str, Any]) -> Task | None:
         ttype = task_key_dict.get("type")
         if ttype == "gitlab_issue":
-            from .task_key import GitLabIssueTaskKey
-
             task_key = GitLabIssueTaskKey.from_dict(task_key_dict)
             issue = self.mcp_client.call_tool(
                 "get_issue",
@@ -211,8 +208,6 @@ class TaskGetterFromGitLab(TaskGetter):
             )
             return TaskGitLabIssue(issue, self.mcp_client, self.gitlab_client, self.config)
         if ttype == "gitlab_merge_request":
-            from .task_key import GitLabMergeRequestTaskKey
-
             task_key = GitLabMergeRequestTaskKey.from_dict(task_key_dict)
             mr = self.gitlab_client.get_merge_request(
                 project_id=task_key.project_id, mr_iid=task_key.mr_iid,

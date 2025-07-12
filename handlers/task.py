@@ -39,7 +39,7 @@ class Task(ABC):
         """
 
     @abstractmethod
-    def comment(self, text: str, mention: bool = False) -> None:
+    def comment(self, text: str, *, mention: bool = False) -> None:
         """タスクにコメントを追加する.
 
         Args:

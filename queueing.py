@@ -114,9 +114,6 @@ class RabbitMQTaskQueue(TaskQueue):
             config: アプリケーション設定辞書(rabbitmq設定を含む)
 
         """
-        import pika
-
-        # RabbitMQ設定を取得(デフォルト値を設定)
         mq_conf = config.get("rabbitmq", {})
         self.queue_name = mq_conf.get("queue", "coding_agent_tasks")
         self.host = mq_conf.get("host", "localhost")
@@ -148,7 +145,6 @@ class RabbitMQTaskQueue(TaskQueue):
         # タスクをJSONにシリアライズ
         body = json.dumps(task)
 
-        # メッセージをキューに送信(永続化設定あり)
         self.channel.basic_publish(
             exchange="",
             routing_key=self.queue_name,
@@ -156,11 +152,11 @@ class RabbitMQTaskQueue(TaskQueue):
             properties=pika.BasicProperties(delivery_mode=2),  # メッセージを永続化
         )
 
-    def get(self, timeout: float | None = None) -> dict[str, Any] | None:
+    def get(self, _timeout: float | None = None) -> dict[str, Any] | None:
         """RabbitMQキューからタスクを取得する.
 
         Args:
-            timeout: タイムアウト時間(秒)。現在の実装では使用されません
+            _timeout: タイムアウト時間(秒)。現在の実装では使用されません
 
         Returns:
             取得したタスクの辞書。メッセージがない場合はNone
@@ -170,7 +166,6 @@ class RabbitMQTaskQueue(TaskQueue):
             必要に応じて将来のバージョンで実装予定です。
 
         """
-        # キューからメッセージを取得(自動確認応答)
         method_frame, header_frame, body = self.channel.basic_get(
             queue=self.queue_name, auto_ack=True,
         )
@@ -189,7 +184,6 @@ class RabbitMQTaskQueue(TaskQueue):
             キューが空の場合True、そうでなければFalse
 
         """
-        # キューの状態を確認(passive=Trueで既存キューの情報のみ取得)
         queue_info = self.channel.queue_declare(queue=self.queue_name, passive=True)
 
         # メッセージ数が0かどうかを返す

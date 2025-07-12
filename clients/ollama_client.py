@@ -1,10 +1,14 @@
+from __future__ import annotations
+
+from typing import Any
+
+from ollama import chat
+
 from .llm_base import LLMClient
 
 
 class OllamaClient(LLMClient):
-    def __init__(self, config) -> None:
-        from ollama import chat
-
+    def __init__(self, config: dict[str, Any]) -> None:
         self.chat = chat
         self.model = config["model"]
         self.max_token = config.get("max_token", 32768)
@@ -21,7 +25,7 @@ class OllamaClient(LLMClient):
             self.messages.pop(1)  # 最初のuserから削る
             total_chars = sum(len(m["content"]) for m in self.messages)
 
-    def send_function_result(self, name: str, result) -> None:
+    def send_function_result(self, name: str, result: object) -> None:
         msg = "Ollama does not support function calls. Use OpenAI compatible call instead."
         raise NotImplementedError(
             msg,
