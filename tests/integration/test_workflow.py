@@ -1,28 +1,59 @@
 """Comprehensive integration tests using GitHub and GitLab mocks."""
 
-import os
+import contextlib
 import sys
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Mock the mcp module before importing TaskHandler
 sys.modules["mcp"] = MagicMock()
 sys.modules["mcp"].McpError = Exception
 
-from handlers.task_factory import GitHubTaskFactory, GitLabTaskFactory
-from handlers.task_getter_github import TaskGetterFromGitHub, TaskGitHubIssue
-from handlers.task_getter_gitlab import TaskGetterFromGitLab, TaskGitLabIssue
-from handlers.task_handler import TaskHandler
-from handlers.task_key import GitHubIssueTaskKey, GitLabIssueTaskKey
-from tests.mocks.mock_llm_client import MockLLMClient, MockLLMClientWithToolCalls
-from tests.mocks.mock_mcp_client import MockMCPToolClient
+from handlers.task_factory import GitHubTaskFactory, GitLabTaskFactory  # noqa: E402
+from handlers.task_getter_github import TaskGetterFromGitHub, TaskGitHubIssue  # noqa: E402
+from handlers.task_getter_gitlab import TaskGetterFromGitLab, TaskGitLabIssue  # noqa: E402
+from handlers.task_handler import TaskHandler  # noqa: E402
+from handlers.task_key import GitHubIssueTaskKey, GitLabIssueTaskKey  # noqa: E402
+from tests.mocks.mock_llm_client import MockLLMClient, MockLLMClientWithToolCalls  # noqa: E402
+from tests.mocks.mock_mcp_client import MockMCPToolClient  # noqa: E402
 
 
 class TestGitHubWorkflowIntegration(unittest.TestCase):
     """End-to-end GitHub workflow tests with comprehensive mocks."""
+
+    # Test constants
+    MAX_RETRY_ATTEMPTS = 2
+
+    def _verify_equal(self, actual: object, expected: object, msg: str = "") -> None:
+        """Verify that actual equals expected."""
+        if actual != expected:
+            pytest.fail(f"Expected {expected}, got {actual}. {msg}")
+
+    def _verify_true(self, *, condition: bool, msg: str = "") -> None:
+        """Verify that condition is True."""
+        if not condition:
+            pytest.fail(f"Condition was False. {msg}")
+
+    def _verify_in(self, item: object, container: object, msg: str = "") -> None:
+        """Verify that item is in container."""
+        if item not in container:
+            pytest.fail(f"{item} not found in {container}. {msg}")
+
+    def _verify_not_in(self, item: object, container: object, msg: str = "") -> None:
+        """Verify that item is not in container."""
+        if item in container:
+            pytest.fail(f"{item} found in {container} but should not be. {msg}")
+
+    def _verify_isinstance(self, obj: object, cls: type, msg: str = "") -> None:
+        """Verify that obj is instance of cls."""
+        if not isinstance(obj, cls):
+            pytest.fail(f"Expected {obj} to be instance of {cls}. {msg}")
 
     def setUp(self) -> None:
         """Set up test environment."""
@@ -65,26 +96,25 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
             config=self.config, mcp_clients={"github": self.github_mcp_client},
         )
         tasks = task_getter.get_task_list()
-        assert isinstance(tasks, list)
-        assert len(tasks) > 0, "Should find mock GitHub issues"
+        self._verify_isinstance(tasks, list)
+        self._verify_true(condition=len(tasks) > 0, msg="Should find mock GitHub issues")
 
         # 2. Process first task
         task = tasks[0]
-        assert isinstance(task, TaskGitHubIssue)
+        self._verify_isinstance(task, TaskGitHubIssue)
 
         # 3. Prepare task (updates labels)
-        original_labels = task.labels.copy()
         task.prepare()
 
         # Verify label changes
-        assert "coding agent" not in task.labels
-        assert "coding agent processing" in task.labels
+        self._verify_not_in("coding agent", task.labels)
+        self._verify_in("coding agent processing", task.labels)
 
         # 4. Generate prompt
         prompt = task.get_prompt()
-        assert isinstance(prompt, str)
-        assert "ISSUE:" in prompt
-        assert "COMMENTS:" in prompt
+        self._verify_isinstance(prompt, str)
+        self._verify_in("ISSUE:", prompt)
+        self._verify_in("COMMENTS:", prompt)
 
         # 5. Handle task with LLM
         task_handler = TaskHandler(
@@ -97,11 +127,11 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
         result = task_handler.handle(task)
 
         # Verify completion
-        assert result is None  # Should complete without errors
+        self._verify_true(condition=result is None)  # Should complete without errors
 
         # Verify MCP interactions occurred
         mock_data = self.github_mcp_client.get_mock_data()
-        assert task.issue["number"] in mock_data["updated_issues"]
+        self._verify_in(task.issue["number"], mock_data["updated_issues"])
 
     def test_github_task_factory_integration(self) -> None:
         """Test GitHub task factory integration."""
@@ -113,13 +143,13 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
         task_key = GitHubIssueTaskKey("testorg", "testrepo", 1)
         task = factory.create_task(task_key)
 
-        assert isinstance(task, TaskGitHubIssue)
-        assert task.issue["number"] == 1
+        self._verify_isinstance(task, TaskGitHubIssue)
+        self._verify_equal(task.issue["number"], 1)
 
         # Test task workflow
         task.prepare()
         prompt = task.get_prompt()
-        assert "Test GitHub Issue 1" in prompt
+        self._verify_in("Test GitHub Issue 1", prompt)
 
     def test_github_error_recovery_workflow(self) -> None:
         """Test GitHub workflow error recovery."""
@@ -128,12 +158,12 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
         call_count = 0
         original_call_tool = error_mcp_client.call_tool
 
-        def intermittent_failure_tool(tool, args):
+        def intermittent_failure_tool(tool: str, args: dict[str, object]) -> object:
             nonlocal call_count
             call_count += 1
-            if tool == "update_issue" and call_count <= 2:
+            if tool == "update_issue" and call_count <= self.MAX_RETRY_ATTEMPTS:
                 msg = "Temporary network error"
-                raise Exception(msg)
+                raise RuntimeError(msg)
             return original_call_tool(tool, args)
 
         error_mcp_client.call_tool = intermittent_failure_tool
@@ -148,16 +178,12 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
         )
 
         # Should handle errors gracefully
-        try:
+        with contextlib.suppress(RuntimeError):
             task.prepare()  # First call may fail
-        except Exception:
-            pass  # Expected for this test
 
         # Retry should work
-        try:
+        with contextlib.suppress(RuntimeError):
             task.prepare()  # Subsequent calls should succeed
-        except Exception:
-            pass  # May still fail, which is acceptable
 
     def test_github_multiple_issues_workflow(self) -> None:
         """Test processing multiple GitHub issues."""
@@ -173,7 +199,7 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
 
             # Generate prompt for each
             prompt = task.get_prompt()
-            assert isinstance(prompt, str)
+            self._verify_isinstance(prompt, str)
 
             # Simple completion test
             self.llm_client.set_mock_response(
@@ -187,7 +213,7 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
             )
 
             result = task_handler.handle(task)
-            assert result is None
+            self._verify_true(condition=result is None)
 
     def test_github_comment_workflow(self) -> None:
         """Test GitHub comment creation workflow."""
@@ -203,7 +229,7 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
                 original_comment = task.comment
                 comments_posted = []
 
-                def mock_comment(text, mention=False):
+                def mock_comment(text: str, *, mention: bool = False) -> object:
                     comments_posted.append({"text": text, "mention": mention})
                     return original_comment(text, mention) if original_comment else None
 
@@ -214,14 +240,39 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
                 task.comment("Test comment with mention", mention=True)
 
                 # Verify comments were tracked
-                assert len(comments_posted) == 2
-                assert comments_posted[0]["text"] == "Test comment without mention"
-                assert not comments_posted[0]["mention"]
-                assert comments_posted[1]["mention"]
+                self._verify_equal(len(comments_posted), 2)
+                self._verify_equal(comments_posted[0]["text"], "Test comment without mention")
+                self._verify_true(condition=not comments_posted[0]["mention"])
+                self._verify_true(condition=comments_posted[1]["mention"])
 
 
 class TestGitLabWorkflowIntegration(unittest.TestCase):
     """End-to-end GitLab workflow tests with comprehensive mocks."""
+
+    def _verify_equal(self, actual: object, expected: object, msg: str = "") -> None:
+        """Verify that actual equals expected."""
+        if actual != expected:
+            pytest.fail(f"Expected {expected}, got {actual}. {msg}")
+
+    def _verify_true(self, *, condition: bool, msg: str = "") -> None:
+        """Verify that condition is True."""
+        if not condition:
+            pytest.fail(f"Condition was False. {msg}")
+
+    def _verify_in(self, item: object, container: object, msg: str = "") -> None:
+        """Verify that item is in container."""
+        if item not in container:
+            pytest.fail(f"{item} not found in {container}. {msg}")
+
+    def _verify_not_in(self, item: object, container: object, msg: str = "") -> None:
+        """Verify that item is not in container."""
+        if item in container:
+            pytest.fail(f"{item} found in {container} but should not be. {msg}")
+
+    def _verify_isinstance(self, obj: object, cls: type, msg: str = "") -> None:
+        """Verify that obj is instance of cls."""
+        if not isinstance(obj, cls):
+            pytest.fail(f"Expected {obj} to be instance of {cls}. {msg}")
 
     def setUp(self) -> None:
         """Set up test environment."""
@@ -264,26 +315,25 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
         )
 
         tasks = task_getter.get_task_list()
-        assert isinstance(tasks, list)
-        assert len(tasks) > 0, "Should find mock GitLab issues"
+        self._verify_isinstance(tasks, list)
+        self._verify_true(condition=len(tasks) > 0, msg="Should find mock GitLab issues")
 
         # 2. Process first task
         task = tasks[0]
-        assert isinstance(task, TaskGitLabIssue)
+        self._verify_isinstance(task, TaskGitLabIssue)
 
         # 3. Prepare task (updates labels)
-        original_labels = task.issue.get("labels", []).copy()
         task.prepare()
 
         # Verify label changes
         updated_labels = task.issue["labels"]
-        assert "coding agent" not in updated_labels
-        assert "coding agent processing" in updated_labels
+        self._verify_not_in("coding agent", updated_labels)
+        self._verify_in("coding agent processing", updated_labels)
 
         # 4. Generate prompt
         prompt = task.get_prompt()
-        assert isinstance(prompt, str)
-        assert "ISSUE:" in prompt
+        self._verify_isinstance(prompt, str)
+        self._verify_in("ISSUE:", prompt)
 
         # 5. Handle task with LLM
         task_handler = TaskHandler(
@@ -301,11 +351,11 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
         result = task_handler.handle(task)
 
         # Verify completion
-        assert result is None  # Should complete without errors
+        self._verify_true(condition=result is None)  # Should complete without errors
 
         # Verify MCP interactions occurred
         mock_data = self.gitlab_mcp_client.get_mock_data()
-        assert task.issue_iid in mock_data["updated_issues"]
+        self._verify_in(task.issue_iid, mock_data["updated_issues"])
 
     def test_gitlab_task_factory_integration(self) -> None:
         """Test GitLab task factory integration."""
@@ -317,13 +367,13 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
         task_key = GitLabIssueTaskKey(123, 1)
         task = factory.create_task(task_key)
 
-        assert isinstance(task, TaskGitLabIssue)
-        assert task.issue_iid == 1
+        self._verify_isinstance(task, TaskGitLabIssue)
+        self._verify_equal(task.issue_iid, 1)
 
         # Test task workflow
         task.prepare()
         prompt = task.get_prompt()
-        assert "Test GitLab Issue 1" in prompt
+        self._verify_in("Test GitLab Issue 1", prompt)
 
     def test_gitlab_discussions_workflow(self) -> None:
         """Test GitLab discussions handling."""
@@ -338,7 +388,7 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
             prompt = task.get_prompt()
 
             # Should include discussion content from mock data
-            assert isinstance(prompt, str)
+            self._verify_isinstance(prompt, str)
             # Verify discussions are included in some form
             # (The exact format depends on implementation)
 
@@ -360,13 +410,13 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
 
             # Verify label transition
             if "coding agent" in original_labels:
-                assert "coding agent" not in current_labels
-                assert "coding agent processing" in current_labels
+                self._verify_not_in("coding agent", current_labels)
+                self._verify_in("coding agent processing", current_labels)
 
             # Other labels should be preserved
             for label in original_labels:
                 if label != "coding agent":
-                    assert label in current_labels
+                    self._verify_in(label, current_labels)
 
 
 if __name__ == "__main__":

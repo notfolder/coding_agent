@@ -160,7 +160,7 @@ class TestTaskGitLabIssue(unittest.TestCase):
         # Test prepare doesn't crash with no labels
         task.prepare()
         updated_labels = task.issue["labels"]
-        assert "coding agent processing" in updated_labels
+        self._verify_in("coding agent processing", updated_labels)
 
     def test_issue_with_different_project_id_types(self) -> None:
         """Test handling of different project ID types (string vs int)."""
@@ -175,7 +175,7 @@ class TestTaskGitLabIssue(unittest.TestCase):
         )
 
         # Should handle string project IDs
-        assert str(task.project_id) == "123"
+        self._verify_equal(str(task.project_id), "123")
 
         # prepare() should still work
         task.prepare()
@@ -191,11 +191,11 @@ class TestTaskGitLabIssue(unittest.TestCase):
 
         # 1. Prepare task
         task.prepare()
-        assert "coding agent processing" in task.issue["labels"]
+        self._verify_in("coding agent processing", task.issue["labels"])
 
         # 2. Get prompt
         prompt = task.get_prompt()
-        assert "ISSUE:" in prompt
+        self._verify_in("ISSUE:", prompt)
 
         # 3. Complete task (would normally be done by TaskHandler)
         # For now, just test that we can call complete methods
@@ -259,10 +259,10 @@ class TestTaskGetterFromGitLab(unittest.TestCase):
             tasks = task_getter.get_task_list()
 
             # Should return list of TaskGitLabIssue objects
-            assert isinstance(tasks, list)
+            self._verify_isinstance(tasks, list)
             if tasks:  # If issues are found
-                assert isinstance(tasks[0], TaskGitLabIssue)
-                assert tasks[0].project_id == self.TEST_PROJECT_ID
+                self._verify_isinstance(tasks[0], TaskGitLabIssue)
+                self._verify_equal(tasks[0].project_id, self.TEST_PROJECT_ID)
 
     def test_get_tasks_with_empty_results(self) -> None:
         """Test task retrieval when no issues match criteria."""
@@ -283,8 +283,8 @@ class TestTaskGetterFromGitLab(unittest.TestCase):
             task_getter = TaskGetterFromGitLab(config=self.config, mcp_clients=mcp_clients)
 
             tasks = task_getter.get_task_list()
-            assert isinstance(tasks, list)
-            assert len(tasks) == 0
+            self._verify_isinstance(tasks, list)
+            self._verify_equal(len(tasks), 0)
 
     def test_get_tasks_filters_by_label(self) -> None:
         """Test that task getter properly filters by label."""
@@ -313,7 +313,7 @@ class TestTaskGetterFromGitLab(unittest.TestCase):
             # All returned tasks should have the 'coding agent' label
             for task in tasks:
                 labels = task.issue.get("labels", [])
-                assert "coding agent" in labels
+                self._verify_in("coding agent", labels)
 
 
 class TestGitLabTaskKey(unittest.TestCase):
@@ -323,32 +323,32 @@ class TestGitLabTaskKey(unittest.TestCase):
         """Test GitLab issue task key creation."""
         task_key = GitLabIssueTaskKey("test-group/test-project", self.TEST_TASK_KEY_ISSUE_IID)
 
-        assert task_key.project_id == "test-group/test-project"
-        assert task_key.issue_iid == self.TEST_TASK_KEY_ISSUE_IID
+        self._verify_equal(task_key.project_id, "test-group/test-project")
+        self._verify_equal(task_key.issue_iid, self.TEST_TASK_KEY_ISSUE_IID)
 
         # Test to_dict method
         key_dict = task_key.to_dict()
-        assert key_dict["type"] == "gitlab_issue"
-        assert key_dict["project_id"] == "test-group/test-project"
-        assert key_dict["issue_iid"] == self.TEST_TASK_KEY_ISSUE_IID
+        self._verify_equal(key_dict["type"], "gitlab_issue")
+        self._verify_equal(key_dict["project_id"], "test-group/test-project")
+        self._verify_equal(key_dict["issue_iid"], self.TEST_TASK_KEY_ISSUE_IID)
 
         # Test from_dict method
         recreated_key = GitLabIssueTaskKey.from_dict(key_dict)
-        assert recreated_key.project_id == "test-group/test-project"
-        assert recreated_key.issue_iid == self.TEST_TASK_KEY_ISSUE_IID
+        self._verify_equal(recreated_key.project_id, "test-group/test-project")
+        self._verify_equal(recreated_key.issue_iid, self.TEST_TASK_KEY_ISSUE_IID)
 
     def test_gitlab_mr_task_key_creation(self) -> None:
         """Test GitLab MR task key creation."""
         task_key = GitLabMergeRequestTaskKey("test-group/test-project", self.TEST_TASK_KEY_MR_IID)
 
-        assert task_key.project_id == "test-group/test-project"
-        assert task_key.mr_iid == self.TEST_TASK_KEY_MR_IID
+        self._verify_equal(task_key.project_id, "test-group/test-project")
+        self._verify_equal(task_key.mr_iid, self.TEST_TASK_KEY_MR_IID)
 
         # Test to_dict method
         key_dict = task_key.to_dict()
-        assert key_dict["type"] == "gitlab_merge_request"
-        assert key_dict["project_id"] == "test-group/test-project"
-        assert key_dict["mr_iid"] == self.TEST_TASK_KEY_MR_IID
+        self._verify_equal(key_dict["type"], "gitlab_merge_request")
+        self._verify_equal(key_dict["project_id"], "test-group/test-project")
+        self._verify_equal(key_dict["mr_iid"], self.TEST_TASK_KEY_MR_IID)
 
     def test_task_key_equality(self) -> None:
         """Test task key equality comparison."""
@@ -357,13 +357,14 @@ class TestGitLabTaskKey(unittest.TestCase):
         key3 = GitLabIssueTaskKey("test-group/test-project", 124)
 
         # Test dict representation equality
-        assert key1.to_dict() == key2.to_dict()
-        assert key1.to_dict() != key3.to_dict()
+        self._verify_equal(key1.to_dict(), key2.to_dict())
+        if key1.to_dict() == key3.to_dict():
+            pytest.fail(f"Expected {key1.to_dict()} != {key3.to_dict()}")
 
         # Test recreation from dict
         recreated = GitLabIssueTaskKey.from_dict(key1.to_dict())
-        assert recreated.project_id == key1.project_id
-        assert recreated.issue_iid == key1.issue_iid
+        self._verify_equal(recreated.project_id, key1.project_id)
+        self._verify_equal(recreated.issue_iid, key1.issue_iid)
 
 
 class TestGitLabTaskFactory(unittest.TestCase):
@@ -522,7 +523,7 @@ class TestGitLabErrorHandling(unittest.TestCase):
 
         # get_prompt() should complete even with slow responses
         prompt = task.get_prompt()
-        assert isinstance(prompt, str)
+        self._verify_isinstance(prompt, str)
 
 
 class TestGitLabLabelManipulation(unittest.TestCase):
@@ -538,10 +539,10 @@ class TestGitLabLabelManipulation(unittest.TestCase):
             labels.remove("coding agent")
         labels.append("coding agent processing")
 
-        assert "coding agent" not in labels
-        assert "coding agent processing" in labels
-        assert "bug" in labels
-        assert "enhancement" in labels
+        self._verify_not_in("coding agent", labels)
+        self._verify_in("coding agent processing", labels)
+        self._verify_in("bug", labels)
+        self._verify_in("enhancement", labels)
 
     def test_description_formatting(self) -> None:
         """Test description formatting."""
@@ -551,10 +552,10 @@ class TestGitLabLabelManipulation(unittest.TestCase):
 
         prompt = f"ISSUE: {title}\n\n{description}\n\nDISCUSSIONS:\n"
 
-        assert "ISSUE:" in prompt
-        assert title in prompt
-        assert description in prompt
-        assert "DISCUSSIONS:" in prompt
+        self._verify_in("ISSUE:", prompt)
+        self._verify_in(title, prompt)
+        self._verify_in(description, prompt)
+        self._verify_in("DISCUSSIONS:", prompt)
 
 
 if __name__ == "__main__":

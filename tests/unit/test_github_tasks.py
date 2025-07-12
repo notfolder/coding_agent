@@ -1,14 +1,14 @@
 """Comprehensive unit tests for GitHub task components using mocks."""
 
-import os
 import sys
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
 import pytest
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from handlers.task_factory import GitHubTaskFactory
 from handlers.task_getter_github import TaskGetterFromGitHub, TaskGitHubIssue
@@ -18,6 +18,35 @@ from tests.mocks.mock_mcp_client import MockMCPToolClient
 
 class TestTaskGitHubIssue(unittest.TestCase):
     """Test TaskGitHubIssue functionality with mock data."""
+
+    # Test constants
+    TEST_ISSUE_NUMBER = 123
+    TEST_PR_NUMBER = 456
+
+    def _verify_equal(self, actual: object, expected: object, msg: str = "") -> None:
+        """Verify that actual equals expected."""
+        if actual != expected:
+            pytest.fail(f"Expected {expected}, got {actual}. {msg}")
+
+    def _verify_true(self, *, condition: bool, msg: str = "") -> None:
+        """Verify that condition is True."""
+        if not condition:
+            pytest.fail(f"Condition was False. {msg}")
+
+    def _verify_in(self, item: object, container: object, msg: str = "") -> None:
+        """Verify that item is in container."""
+        if item not in container:
+            pytest.fail(f"{item} not found in {container}. {msg}")
+
+    def _verify_not_in(self, item: object, container: object, msg: str = "") -> None:
+        """Verify that item is not in container."""
+        if item in container:
+            pytest.fail(f"{item} found in {container} but should not be. {msg}")
+
+    def _verify_isinstance(self, obj: object, cls: type, msg: str = "") -> None:
+        """Verify that obj is instance of cls."""
+        if not isinstance(obj, cls):
+            pytest.fail(f"Expected {obj} to be instance of {cls}. {msg}")
 
     def setUp(self) -> None:
         """Set up test environment."""
@@ -59,15 +88,15 @@ class TestTaskGitHubIssue(unittest.TestCase):
         )
 
         # Test basic properties
-        assert task.issue["number"] == 1
-        assert task.issue["title"] == "Test GitHub Issue"
-        assert task.issue["repo"] == "testrepo"
-        assert task.issue["owner"] == "testorg"
+        self._verify_equal(task.issue["number"], 1)
+        self._verify_equal(task.issue["title"], "Test GitHub Issue")
+        self._verify_equal(task.issue["repo"], "testrepo")
+        self._verify_equal(task.issue["owner"], "testorg")
 
         # Test labels extraction
-        assert "coding agent" in task.labels
-        assert "bug" in task.labels
-        assert len(task.labels) == 2
+        self._verify_in("coding agent", task.labels)
+        self._verify_in("bug", task.labels)
+        self._verify_equal(len(task.labels), 2)
 
     def test_task_prepare_label_update(self) -> None:
         """Test task preparation and label updates."""
@@ -82,16 +111,16 @@ class TestTaskGitHubIssue(unittest.TestCase):
         task.prepare()
 
         # Check that labels were updated
-        assert "coding agent" not in task.labels
-        assert "coding agent processing" in task.labels
-        assert "bug" in task.labels  # Other labels should remain
+        self._verify_not_in("coding agent", task.labels)
+        self._verify_in("coding agent processing", task.labels)
+        self._verify_in("bug", task.labels)  # Other labels should remain
 
         # Check that MCP client received update call
         mock_data = self.mcp_client.get_mock_data()
-        assert 1 in mock_data["updated_issues"]
+        self._verify_in(1, mock_data["updated_issues"])
         updated_labels = mock_data["updated_issues"][1]["labels"]
-        assert "coding agent processing" in updated_labels
-        assert "coding agent" not in updated_labels
+        self._verify_in("coding agent processing", updated_labels)
+        self._verify_not_in("coding agent", updated_labels)
 
     def test_get_prompt_generation(self) -> None:
         """Test prompt generation with issue and comments."""
@@ -106,14 +135,14 @@ class TestTaskGitHubIssue(unittest.TestCase):
         prompt = task.get_prompt()
 
         # Verify prompt contains expected information
-        assert isinstance(prompt, str)
-        assert "ISSUE:" in prompt
-        assert "COMMENTS:" in prompt
-        assert "Test GitHub Issue" in prompt
-        assert "This is a test issue" in prompt
-        assert "testorg" in prompt
-        assert "testrepo" in prompt
-        assert "1" in prompt  # Issue number
+        self._verify_isinstance(prompt, str)
+        self._verify_in("ISSUE:", prompt)
+        self._verify_in("COMMENTS:", prompt)
+        self._verify_in("Test GitHub Issue", prompt)
+        self._verify_in("This is a test issue", prompt)
+        self._verify_in("testorg", prompt)
+        self._verify_in("testrepo", prompt)
+        self._verify_in("1", prompt)  # Issue number
 
     def test_comment_creation(self) -> None:
         """Test comment creation functionality."""
@@ -143,11 +172,11 @@ class TestTaskGitHubIssue(unittest.TestCase):
             config=self.config,
         )
 
-        assert len(task.labels) == 0
+        self._verify_equal(len(task.labels), 0)
 
         # Test prepare doesn't crash with no labels
         task.prepare()
-        assert "coding agent processing" in task.labels
+        self._verify_in("coding agent processing", task.labels)
 
     def test_issue_with_malformed_repository_url(self) -> None:
         """Test handling of malformed repository URL."""
@@ -163,8 +192,8 @@ class TestTaskGitHubIssue(unittest.TestCase):
                 config=self.config,
             )
             # If it doesn't crash, check that it handles the error gracefully
-            assert task.issue["owner"] is not None
-            assert task.issue["repo"] is not None
+            self._verify_true(condition=task.issue["owner"] is not None)
+            self._verify_true(condition=task.issue["repo"] is not None)
         except (IndexError, AttributeError):
             # Expected behavior for malformed URL
             pass
@@ -213,11 +242,11 @@ class TestTaskGetterFromGitHub(unittest.TestCase):
             tasks = task_getter.get_task_list()
 
             # Should return list of TaskGitHubIssue objects
-            assert isinstance(tasks, list)
+            self._verify_isinstance(tasks, list)
             if tasks:  # If issues are found
-                assert isinstance(tasks[0], TaskGitHubIssue)
-                assert tasks[0].issue["owner"] == "testorg"
-                assert tasks[0].issue["repo"] == "testrepo"
+                self._verify_isinstance(tasks[0], TaskGitHubIssue)
+                self._verify_equal(tasks[0].issue["owner"], "testorg")
+                self._verify_equal(tasks[0].issue["repo"], "testrepo")
 
     def test_get_tasks_with_empty_results(self) -> None:
         """Test task retrieval when no issues match criteria."""
@@ -238,8 +267,8 @@ class TestTaskGetterFromGitHub(unittest.TestCase):
             task_getter = TaskGetterFromGitHub(config=self.config, mcp_clients=mcp_clients)
 
             tasks = task_getter.get_task_list()
-            assert isinstance(tasks, list)
-            assert len(tasks) == 0
+            self._verify_isinstance(tasks, list)
+            self._verify_equal(len(tasks), 0)
 
     def test_get_tasks_filters_by_label(self) -> None:
         """Test that task getter properly filters by label."""
@@ -264,7 +293,7 @@ class TestTaskGetterFromGitHub(unittest.TestCase):
 
             # All returned tasks should have the 'coding agent' label
             for task in tasks:
-                assert "coding agent" in task.labels
+                self._verify_in("coding agent", task.labels)
 
 
 class TestGitHubTaskKey(unittest.TestCase):
@@ -274,37 +303,37 @@ class TestGitHubTaskKey(unittest.TestCase):
         """Test GitHub issue task key creation."""
         task_key = GitHubIssueTaskKey("testorg", "testrepo", 123)
 
-        assert task_key.owner == "testorg"
-        assert task_key.repo == "testrepo"
-        assert task_key.number == 123
+        self._verify_equal(task_key.owner, "testorg")
+        self._verify_equal(task_key.repo, "testrepo")
+        self._verify_equal(task_key.number, 123)
 
         # Test to_dict method
         key_dict = task_key.to_dict()
-        assert key_dict["type"] == "github_issue"
-        assert key_dict["owner"] == "testorg"
-        assert key_dict["repo"] == "testrepo"
-        assert key_dict["number"] == 123
+        self._verify_equal(key_dict["type"], "github_issue")
+        self._verify_equal(key_dict["owner"], "testorg")
+        self._verify_equal(key_dict["repo"], "testrepo")
+        self._verify_equal(key_dict["number"], 123)
 
         # Test from_dict method
         recreated_key = GitHubIssueTaskKey.from_dict(key_dict)
-        assert recreated_key.owner == "testorg"
-        assert recreated_key.repo == "testrepo"
-        assert recreated_key.number == 123
+        self._verify_equal(recreated_key.owner, "testorg")
+        self._verify_equal(recreated_key.repo, "testrepo")
+        self._verify_equal(recreated_key.number, 123)
 
     def test_github_pr_task_key_creation(self) -> None:
         """Test GitHub PR task key creation."""
         task_key = GitHubPullRequestTaskKey("testorg", "testrepo", 456)
 
-        assert task_key.owner == "testorg"
-        assert task_key.repo == "testrepo"
-        assert task_key.number == 456
+        self._verify_equal(task_key.owner, "testorg")
+        self._verify_equal(task_key.repo, "testrepo")
+        self._verify_equal(task_key.number, 456)
 
         # Test to_dict method
         key_dict = task_key.to_dict()
-        assert key_dict["type"] == "github_pull_request"
-        assert key_dict["owner"] == "testorg"
-        assert key_dict["repo"] == "testrepo"
-        assert key_dict["number"] == 456
+        self._verify_equal(key_dict["type"], "github_pull_request")
+        self._verify_equal(key_dict["owner"], "testorg")
+        self._verify_equal(key_dict["repo"], "testrepo")
+        self._verify_equal(key_dict["number"], 456)
 
     def test_task_key_equality(self) -> None:
         """Test task key equality comparison."""
@@ -313,14 +342,15 @@ class TestGitHubTaskKey(unittest.TestCase):
         key3 = GitHubIssueTaskKey("testorg", "testrepo", 124)
 
         # Test dict representation equality
-        assert key1.to_dict() == key2.to_dict()
-        assert key1.to_dict() != key3.to_dict()
+        self._verify_equal(key1.to_dict(), key2.to_dict())
+        if key1.to_dict() == key3.to_dict():
+            pytest.fail(f"Expected {key1.to_dict()} != {key3.to_dict()}")
 
         # Test recreation from dict
         recreated = GitHubIssueTaskKey.from_dict(key1.to_dict())
-        assert recreated.owner == key1.owner
-        assert recreated.repo == key1.repo
-        assert recreated.number == key1.number
+        self._verify_equal(recreated.owner, key1.owner)
+        self._verify_equal(recreated.repo, key1.repo)
+        self._verify_equal(recreated.number, key1.number)
 
 
 class TestGitHubTaskFactory(unittest.TestCase):
@@ -362,7 +392,7 @@ class TestGitHubTaskFactory(unittest.TestCase):
         )
 
         # Test with invalid key type
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=".*"):
             factory.create_task("invalid_key")
 
 
@@ -389,10 +419,10 @@ class TestGitHubErrorHandling(unittest.TestCase):
         # Override call_tool to simulate errors
         original_call_tool = mcp_client.call_tool
 
-        def error_call_tool(tool, args):
+        def error_call_tool(tool: str, args: dict[str, object]) -> object:
             if tool == "update_issue":
                 msg = "MCP connection error"
-                raise Exception(msg)
+                raise RuntimeError(msg)
             return original_call_tool(tool, args)
 
         mcp_client.call_tool = error_call_tool
@@ -414,12 +444,8 @@ class TestGitHubErrorHandling(unittest.TestCase):
         )
 
         # prepare() should handle the error gracefully
-        try:
+        with pytest.raises(RuntimeError, match="MCP connection error"):
             task.prepare()
-            # If it doesn't crash, that's good error handling
-        except Exception as e:
-            # Check that it's the expected error, not an unhandled one
-            assert "MCP connection error" in str(e)
 
     def test_task_with_missing_config(self) -> None:
         """Test task creation with missing configuration."""
