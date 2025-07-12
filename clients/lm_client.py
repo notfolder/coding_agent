@@ -1,8 +1,18 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from .llm_base import LLMClient
+from typing import Any
+
 from .lmstudio_client import LMStudioClient
 from .ollama_client import OllamaClient
 from .openai_client import OpenAIClient
+
+# Conditional import for mock client to avoid circular imports in testing
+try:
+    from tests.mocks.mock_llm_client import get_mock_llm_client
+except ImportError:
+    get_mock_llm_client = None
+
 
 class LLMClient(ABC):
     @abstractmethod
@@ -14,30 +24,33 @@ class LLMClient(ABC):
         pass
 
     @abstractmethod
-    def send_function_result(self, name: str, result) -> None:
+    def send_function_result(self, name: str, result: object) -> None:
         pass
 
     @abstractmethod
     def get_response(self) -> str:
         pass
 
-def get_llm_client(config, functions=None, tools=None) -> LLMClient:
-    prov = config['llm']['provider']
-    if prov == 'lmstudio':
+
+def get_llm_client(
+    config: dict[str, Any],
+    functions: list[dict[str, Any]] | None = None,
+    tools: list[dict[str, Any]] | None = None,
+) -> LLMClient:
+    prov = config["llm"]["provider"]
+    if prov == "lmstudio":
         if functions is not None:
-            raise ValueError("LMStudio does not support functions. use openapi compatible call.")
-        return LMStudioClient(config['llm']['lmstudio'])
-    elif prov == 'ollama':
-        # Todo: functions support
-        return OllamaClient(config['llm']['ollama'])
-    elif prov == 'openai':
-        return OpenAIClient(config['llm']['openai'], functions, tools)
-    elif prov == 'mock':
-        # Import here to avoid circular import during testing
-        try:
-            from tests.mocks.mock_llm_client import get_mock_llm_client
-            return get_mock_llm_client(config, functions, tools)
-        except ImportError:
-            raise ValueError("Mock LLM client not available - this should only be used in tests")
-    else:
-        raise ValueError(f"Unknown llm.provider: {prov}")
+            msg = "LMStudio does not support functions. use openapi compatible call."
+            raise ValueError(msg)
+        return LMStudioClient(config["llm"]["lmstudio"])
+    if prov == "ollama":
+        return OllamaClient(config["llm"]["ollama"])
+    if prov == "openai":
+        return OpenAIClient(config["llm"]["openai"], functions, tools)
+    if prov == "mock":
+        if get_mock_llm_client is None:
+            msg = "Mock LLM client not available - this should only be used in tests"
+            raise ValueError(msg)
+        return get_mock_llm_client(config, functions, tools)
+    msg = f"Unknown llm.provider: {prov}"
+    raise ValueError(msg)
