@@ -231,7 +231,7 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
 
                 def mock_comment(text: str, *, mention: bool = False) -> object:
                     comments_posted.append({"text": text, "mention": mention})
-                    return original_comment(text, mention) if original_comment else None
+                    return original_comment(text, mention=mention) if original_comment else None
 
                 task.comment = mock_comment
 

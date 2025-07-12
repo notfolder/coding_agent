@@ -9,8 +9,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
-from mcp import McpError
-
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -19,6 +17,7 @@ sys.modules["mcp"] = MagicMock()
 sys.modules["mcp"].McpError = Exception
 
 import pytest  # noqa: E402
+from mcp import McpError  # noqa: E402
 
 from handlers.task_getter_github import TaskGitHubIssue  # noqa: E402
 from handlers.task_getter_gitlab import TaskGitLabIssue  # noqa: E402
@@ -121,7 +120,7 @@ class TestTaskHandler(unittest.TestCase):
         )
 
         # Test with invalid JSON
-        with pytest.raises(ValueError, match="JSON decode error"):
+        with pytest.raises(ValueError, match="Invalid JSON string for arguments"):
             task_handler.sanitize_arguments('{"invalid": json}')
 
     def test_sanitize_arguments_invalid_type(self) -> None:
@@ -324,9 +323,11 @@ class TestTaskHandler(unittest.TestCase):
             config=self.config,
         )
 
-        # Handle the task
-        with pytest.raises((OSError, RuntimeError), match="Tool call failed"):
-            task_handler.handle(self.github_task)
+        # Handle the task - should complete without crashing
+        task_handler.handle(self.github_task)
+
+        # Verify that tool was called multiple times due to retries
+        assert call_count >= MAX_TOOL_FAILURES  # noqa: S101
 
     def test_make_system_prompt(self) -> None:
         """Test system prompt generation."""

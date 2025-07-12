@@ -16,12 +16,8 @@ from handlers.task_key import GitHubIssueTaskKey, GitHubPullRequestTaskKey
 from tests.mocks.mock_mcp_client import MockMCPToolClient
 
 
-class TestTaskGitHubIssue(unittest.TestCase):
-    """Test TaskGitHubIssue functionality with mock data."""
-
-    # Test constants
-    TEST_ISSUE_NUMBER = 123
-    TEST_PR_NUMBER = 456
+class BaseTestCase(unittest.TestCase):
+    """Base test case with common helper methods."""
 
     def _verify_equal(self, actual: object, expected: object, msg: str = "") -> None:
         """Verify that actual equals expected."""
@@ -47,6 +43,14 @@ class TestTaskGitHubIssue(unittest.TestCase):
         """Verify that obj is instance of cls."""
         if not isinstance(obj, cls):
             pytest.fail(f"Expected {obj} to be instance of {cls}. {msg}")
+
+
+class TestTaskGitHubIssue(BaseTestCase):
+    """Test TaskGitHubIssue functionality with mock data."""
+
+    # Test constants
+    TEST_ISSUE_NUMBER = 123
+    TEST_PR_NUMBER = 456
 
     def setUp(self) -> None:
         """Set up test environment."""
@@ -199,7 +203,7 @@ class TestTaskGitHubIssue(unittest.TestCase):
             pass
 
 
-class TestTaskGetterFromGitHub(unittest.TestCase):
+class TestTaskGetterFromGitHub(BaseTestCase):
     """Test TaskGetterFromGitHub functionality."""
 
     def setUp(self) -> None:
@@ -296,7 +300,7 @@ class TestTaskGetterFromGitHub(unittest.TestCase):
                 self._verify_in("coding agent", task.labels)
 
 
-class TestGitHubTaskKey(unittest.TestCase):
+class TestGitHubTaskKey(BaseTestCase):
     """Test GitHub task key functionality."""
 
     def test_github_issue_task_key_creation(self) -> None:
@@ -353,7 +357,7 @@ class TestGitHubTaskKey(unittest.TestCase):
         self._verify_equal(recreated.number, key1.number)
 
 
-class TestGitHubTaskFactory(unittest.TestCase):
+class TestGitHubTaskFactory(BaseTestCase):
     """Test GitHub task factory functionality."""
 
     def setUp(self) -> None:
@@ -377,7 +381,7 @@ class TestGitHubTaskFactory(unittest.TestCase):
 
         # The factory has a bug - it doesn't pass github_client to TaskGitHubIssue
         # We'll patch TaskGitHubIssue to work around this
-        with patch("handlers.task_getter_github.TaskGitHubIssue") as mock_task_class:
+        with patch("handlers.task_factory.TaskGitHubIssue") as mock_task_class:
             task_key = GitHubIssueTaskKey("testorg", "testrepo", 1)
             factory.create_task(task_key)
 
@@ -396,7 +400,7 @@ class TestGitHubTaskFactory(unittest.TestCase):
             factory.create_task("invalid_key")
 
 
-class TestGitHubErrorHandling(unittest.TestCase):
+class TestGitHubErrorHandling(BaseTestCase):
     """Test error handling in GitHub components."""
 
     def setUp(self) -> None:

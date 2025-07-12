@@ -313,8 +313,12 @@ class TaskHandler:
             output = self.mcp_clients[mcp_server].call_tool(tool_name, args)
             if error_state["last_tool"] == tool:
                 error_state["tool_error_count"] = 0
-        except* McpError as e:
-            error_detail = str(e.exceptions[0].exceptions[0])
+        except Exception as e:
+            # Handle both McpError and other exceptions
+            error_detail = str(e)
+            if hasattr(e, "exceptions") and hasattr(e.exceptions[0], "exceptions"):
+                # Handle ExceptionGroup structure
+                error_detail = str(e.exceptions[0].exceptions[0])
             self.logger.exception("ツール呼び出し失敗: %s", error_detail)
             task.comment(f"ツール呼び出しエラー: {error_detail}")
             output = f"error: {error_detail}"

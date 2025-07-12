@@ -18,14 +18,8 @@ from handlers.task_key import GitLabIssueTaskKey, GitLabMergeRequestTaskKey
 from tests.mocks.mock_mcp_client import MockMCPToolClient
 
 
-class TestTaskGitLabIssue(unittest.TestCase):
-    """Test TaskGitLabIssue functionality with mock data."""
-
-    # Test constants
-    TEST_PROJECT_ID = 123
-    TEST_ISSUE_IID = 1
-    TEST_TASK_KEY_ISSUE_IID = 123
-    TEST_TASK_KEY_MR_IID = 456
+class BaseTestCase(unittest.TestCase):
+    """Base test case with common helper methods."""
 
     def _verify_equal(self, actual: object, expected: object, msg: str = "") -> None:
         """Verify that actual equals expected."""
@@ -51,6 +45,16 @@ class TestTaskGitLabIssue(unittest.TestCase):
         """Verify that obj is instance of cls."""
         if not isinstance(obj, cls):
             pytest.fail(f"Expected {obj} to be instance of {cls}. {msg}")
+
+
+class TestTaskGitLabIssue(BaseTestCase):
+    """Test TaskGitLabIssue functionality with mock data."""
+
+    # Test constants
+    TEST_PROJECT_ID = 123
+    TEST_ISSUE_IID = 1
+    TEST_TASK_KEY_ISSUE_IID = 123
+    TEST_TASK_KEY_MR_IID = 456
 
     def setUp(self) -> None:
         """Set up test environment."""
@@ -215,7 +219,7 @@ class TestTaskGitLabIssue(unittest.TestCase):
             task.comment("This is a test comment")
 
 
-class TestTaskGetterFromGitLab(unittest.TestCase):
+class TestTaskGetterFromGitLab(BaseTestCase):
     """Test TaskGetterFromGitLab functionality."""
 
     def setUp(self) -> None:
@@ -316,8 +320,12 @@ class TestTaskGetterFromGitLab(unittest.TestCase):
                 self._verify_in("coding agent", labels)
 
 
-class TestGitLabTaskKey(unittest.TestCase):
+class TestGitLabTaskKey(BaseTestCase):
     """Test GitLab task key functionality."""
+
+    # Test constants
+    TEST_TASK_KEY_ISSUE_IID = 123
+    TEST_TASK_KEY_MR_IID = 456
 
     def test_gitlab_issue_task_key_creation(self) -> None:
         """Test GitLab issue task key creation."""
@@ -367,7 +375,7 @@ class TestGitLabTaskKey(unittest.TestCase):
         self._verify_equal(recreated.issue_iid, key1.issue_iid)
 
 
-class TestGitLabTaskFactory(unittest.TestCase):
+class TestGitLabTaskFactory(BaseTestCase):
     """Test GitLab task factory functionality."""
 
     def setUp(self) -> None:
@@ -388,7 +396,7 @@ class TestGitLabTaskFactory(unittest.TestCase):
         )
 
         # Similar to GitHub factory, there might be parameter issues
-        with patch("handlers.task_getter_gitlab.TaskGitLabIssue") as mock_task_class:
+        with patch("handlers.task_factory.TaskGitLabIssue") as mock_task_class:
             task_key = GitLabIssueTaskKey(123, 1)
             factory.create_task(task_key)
 
@@ -406,7 +414,7 @@ class TestGitLabTaskFactory(unittest.TestCase):
             factory.create_task("invalid_key")
 
 
-class TestGitLabErrorHandling(unittest.TestCase):
+class TestGitLabErrorHandling(BaseTestCase):
     """Test error handling in GitLab components."""
 
     # Test constants
@@ -526,7 +534,7 @@ class TestGitLabErrorHandling(unittest.TestCase):
         self._verify_isinstance(prompt, str)
 
 
-class TestGitLabLabelManipulation(unittest.TestCase):
+class TestGitLabLabelManipulation(BaseTestCase):
     """Test label manipulation functionality."""
 
     def test_label_manipulation(self) -> None:
