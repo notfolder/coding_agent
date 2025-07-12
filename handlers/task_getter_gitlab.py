@@ -1,13 +1,26 @@
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 from clients.gitlab_client import GitlabClient
 
 from .task import Task
 from .task_getter import TaskGetter
 from .task_key import GitLabIssueTaskKey, GitLabMergeRequestTaskKey
 
+if TYPE_CHECKING:
+    from clients.mcp_tool_client import MCPToolClient
+
 
 class TaskGitLabIssue(Task):
-    def __init__(self, issue, mcp_client, gitlab_client, config) -> None:
+    def __init__(
+        self,
+        issue: dict[str, Any],
+        mcp_client: MCPToolClient,
+        gitlab_client: GitlabClient,
+        config: dict[str, Any],
+    ) -> None:
         self.issue = issue
         self.project_id = issue.get("project_id")
         self.issue_iid = issue.get("iid")
@@ -70,15 +83,21 @@ class TaskGitLabIssue(Task):
         self.issue["labels"] = labels
         self.mcp_client.call_tool("update_issue", args)
 
-    def get_task_key(self):
+    def get_task_key(self) -> GitLabIssueTaskKey:
         return GitLabIssueTaskKey(self.project_id, self.issue_iid)
 
-    def check(self):
+    def check(self) -> bool:
         return self.config["gitlab"]["processing_label"] in self.issue.get("labels", [])
 
 
 class TaskGitLabMergeRequest(Task):
-    def __init__(self, mr, mcp_client, gitlab_client, config) -> None:
+    def __init__(
+        self,
+        mr: dict[str, Any],
+        mcp_client: MCPToolClient,
+        gitlab_client: GitlabClient,
+        config: dict[str, Any],
+    ) -> None:
         self.mr = mr
         self.project_id = mr.get("project_id")
         self.merge_request_iid = mr.get("iid")
@@ -136,20 +155,20 @@ class TaskGitLabMergeRequest(Task):
         )
         self.mr["labels"] = self.labels
 
-    def get_task_key(self):
+    def get_task_key(self) -> GitLabMergeRequestTaskKey:
         return GitLabMergeRequestTaskKey(self.project_id, self.merge_request_iid)
 
-    def check(self):
+    def check(self) -> bool:
         return self.config["gitlab"]["processing_label"] in self.labels
 
 
 class TaskGetterFromGitLab(TaskGetter):
-    def __init__(self, config, mcp_clients) -> None:
+    def __init__(self, config: dict[str, Any], mcp_clients: dict[str, MCPToolClient]) -> None:
         self.config = config
         self.mcp_client = mcp_clients["gitlab"]
         self.gitlab_client = GitlabClient()
 
-    def get_task_list(self):
+    def get_task_list(self) -> list[Task]:
         tasks = []
 
         query = self.config["gitlab"].get("query", "")
@@ -180,7 +199,7 @@ class TaskGetterFromGitLab(TaskGetter):
 
         return tasks
 
-    def from_task_key(self, task_key_dict):
+    def from_task_key(self, task_key_dict: dict[str, Any]) -> Task | None:
         ttype = task_key_dict.get("type")
         if ttype == "gitlab_issue":
             from .task_key import GitLabIssueTaskKey

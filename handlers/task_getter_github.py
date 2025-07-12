@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import json
+from typing import TYPE_CHECKING, Any
 
 from clients.github_client import GithubClient
 
@@ -6,9 +9,18 @@ from .task import Task
 from .task_getter import TaskGetter
 from .task_key import GitHubIssueTaskKey, GitHubPullRequestTaskKey
 
+if TYPE_CHECKING:
+    from clients.mcp_tool_client import MCPToolClient
+
 
 class TaskGitHubIssue(Task):
-    def __init__(self, issue, mcp_client, github_client, config) -> None:
+    def __init__(
+        self,
+        issue: dict[str, Any],
+        mcp_client: MCPToolClient,
+        github_client: GithubClient,
+        config: dict[str, Any],
+    ) -> None:
         self.issue = issue
         self.issue["repo"] = issue["repository_url"].split("/")[-1]
         self.issue["owner"] = issue["repository_url"].split("/")[-2]
@@ -55,7 +67,7 @@ class TaskGitHubIssue(Task):
             f"COMMENTS: {comments}"
         )
 
-    def comment(self, text, mention=False) -> None:
+    def comment(self, text: str, mention: bool = False) -> None:
         if mention:
             owner = self.issue.get("owner")
             if owner:
@@ -82,15 +94,21 @@ class TaskGitHubIssue(Task):
         }
         self.mcp_client.call_tool("update_issue", args)
 
-    def get_task_key(self):
+    def get_task_key(self) -> GitHubIssueTaskKey:
         return GitHubIssueTaskKey(self.issue["owner"], self.issue["repo"], self.issue["number"])
 
-    def check(self):
+    def check(self) -> bool:
         return self.config["github"]["processing_label"] in self.labels
 
 
 class TaskGitHubPullRequest(Task):
-    def __init__(self, pr, mcp_client, github_client, config) -> None:
+    def __init__(
+        self,
+        pr: dict[str, Any],
+        mcp_client: MCPToolClient,
+        github_client: GithubClient,
+        config: dict[str, Any],
+    ) -> None:
         self.pr = pr
         repository_url = pr.get("repository_url", None)
         if repository_url is None:
@@ -135,7 +153,7 @@ class TaskGitHubPullRequest(Task):
         }
         return f"PULL_REQUEST: {json.dumps(pr_info, ensure_ascii=False)}\n"
 
-    def comment(self, text, mention=False) -> None:
+    def comment(self, text: str, mention: bool = False) -> None:
         if mention:
             owner = self.pr.get("owner")
             if owner:
@@ -154,20 +172,20 @@ class TaskGitHubPullRequest(Task):
             self.pr["owner"], self.pr["repo"], self.pr["number"], self.labels,
         )
 
-    def get_task_key(self):
+    def get_task_key(self) -> GitHubPullRequestTaskKey:
         return GitHubPullRequestTaskKey(self.pr["owner"], self.pr["repo"], self.pr["number"])
 
-    def check(self):
+    def check(self) -> bool:
         return self.config["github"]["processing_label"] in self.labels
 
 
 class TaskGetterFromGitHub(TaskGetter):
-    def __init__(self, config, mcp_clients) -> None:
+    def __init__(self, config: dict[str, Any], mcp_clients: dict[str, MCPToolClient]) -> None:
         self.config = config
         self.mcp_client = mcp_clients["github"]
         self.github_client = GithubClient()
 
-    def get_task_list(self):
+    def get_task_list(self) -> list[Task]:
         # MCPサーバーでissue検索
         query = (
             f'label:"{self.config["github"]["bot_label"]}" {self.config["github"].get("query", "")}'
@@ -199,7 +217,7 @@ class TaskGetterFromGitHub(TaskGetter):
 
         return tasks
 
-    def from_task_key(self, task_key_dict):
+    def from_task_key(self, task_key_dict: dict[str, Any]) -> Task | None:
         ttype = task_key_dict.get("type")
         if ttype == "github_issue":
             from .task_key import GitHubIssueTaskKey

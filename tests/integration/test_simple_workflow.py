@@ -13,7 +13,6 @@ sys.modules["mcp"] = MagicMock()
 sys.modules["mcp"].McpError = Exception
 
 from handlers.task_getter_github import TaskGitHubIssue
-
 from handlers.task_handler import TaskHandler
 from tests.mocks.mock_llm_client import MockLLMClient
 from tests.mocks.mock_mcp_client import MockMCPToolClient

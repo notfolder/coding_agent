@@ -17,10 +17,8 @@ import yaml
 from clients.lm_client import get_llm_client
 from clients.mcp_tool_client import MCPToolClient
 from filelock_util import FileLock
-
 from handlers.task_getter import TaskGetter
 from handlers.task_handler import TaskHandler
-
 from queueing import InMemoryTaskQueue
 
 
@@ -31,8 +29,6 @@ def setup_logger() -> None:
     ログ設定を行います。DEBUG環境変数がtrueの場合はDEBUGレベル、
     そうでなければINFOレベルでログを出力します。
     """
-    import os
-
     # 環境変数からログファイルのパスを取得(デフォルト: logs/agent.log)
     log_path = os.environ.get("LOGS", "logs/agent.log")
 

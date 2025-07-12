@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from typing import Any
 
 from .llm_base import LLMClient
 from .lmstudio_client import LMStudioClient
@@ -16,7 +19,7 @@ class LLMClient(ABC):
         pass
 
     @abstractmethod
-    def send_function_result(self, name: str, result) -> None:
+    def send_function_result(self, name: str, result: Any) -> None:
         pass
 
     @abstractmethod
@@ -24,7 +27,11 @@ class LLMClient(ABC):
         pass
 
 
-def get_llm_client(config, functions=None, tools=None) -> LLMClient:
+def get_llm_client(
+    config: dict[str, Any],
+    functions: list[dict[str, Any]] | None = None,
+    tools: list[dict[str, Any]] | None = None,
+) -> LLMClient:
     prov = config["llm"]["provider"]
     if prov == "lmstudio":
         if functions is not None:

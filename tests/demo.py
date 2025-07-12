@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """Interactive demo for real GitHub and GitLab integration testing."""
 
+from __future__ import annotations
+
 import logging
 import os
 import sys
+from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 
 import yaml
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from unittest.mock import patch
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from clients.mcp_tool_client import MCPToolClient
 from handlers.task_getter_github import TaskGetterFromGitHub
@@ -50,11 +53,11 @@ class RealIntegrationDemo:
 
         return True
 
-    def load_config(self, service):
+    def load_config(self, service: str) -> dict[str, Any]:
         """Load configuration for a service."""
-        config_path = os.path.join(os.path.dirname(__file__), f"real_test_config_{service}.yaml")
+        config_path = Path(__file__).parent / f"real_test_config_{service}.yaml"
 
-        with open(config_path) as f:
+        with config_path.open() as f:
             return yaml.safe_load(f)
 
     def demo_github_mcp_connection(self) -> None:

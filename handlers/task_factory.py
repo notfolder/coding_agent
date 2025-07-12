@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any
 
 from .task_key import (
     GitHubIssueTaskKey,
@@ -8,20 +11,32 @@ from .task_key import (
     TaskKey,
 )
 
+if TYPE_CHECKING:
+    from clients.github_client import GithubClient
+    from clients.gitlab_client import GitlabClient
+    from clients.mcp_tool_client import MCPToolClient
+
+    from .task import Task
+
 
 class TaskFactory(ABC):
     @abstractmethod
-    def create_task(self, task_key: TaskKey):
+    def create_task(self, task_key: TaskKey) -> Task | None:
         pass
 
 
 class GitHubTaskFactory(TaskFactory):
-    def __init__(self, mcp_client, github_client, config) -> None:
+    def __init__(
+        self,
+        mcp_client: MCPToolClient,
+        github_client: GithubClient,
+        config: dict[str, Any],
+    ) -> None:
         self.mcp_client = mcp_client
         self.github_client = github_client
         self.config = config
 
-    def create_task(self, task_key: TaskKey):
+    def create_task(self, task_key: TaskKey) -> Task | None:
         if isinstance(task_key, GitHubIssueTaskKey):
             issue = self.mcp_client.call_tool(
                 "get_issue",
@@ -42,12 +57,17 @@ class GitHubTaskFactory(TaskFactory):
 
 
 class GitLabTaskFactory(TaskFactory):
-    def __init__(self, mcp_client, gitlab_client, config) -> None:
+    def __init__(
+        self,
+        mcp_client: MCPToolClient,
+        gitlab_client: GitlabClient,
+        config: dict[str, Any],
+    ) -> None:
         self.mcp_client = mcp_client
         self.gitlab_client = gitlab_client
         self.config = config
 
-    def create_task(self, task_key: TaskKey):
+    def create_task(self, task_key: TaskKey) -> Task | None:
         if isinstance(task_key, GitLabIssueTaskKey):
             issue = self.mcp_client.call_tool(
                 "get_issue", {"project_id": task_key.project_id, "issue_iid": task_key.issue_iid},

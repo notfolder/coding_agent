@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json
 import os
 import threading
+from typing import Any
 
 from mcp import StdioServerParameters
 from mcp.client.session import ClientSession
@@ -18,13 +21,13 @@ from mcp.types import (
 
 
 class MCPToolClient:
-    def __init__(self, server_config, function_calling=True) -> None:
+    def __init__(self, server_config: dict[str, Any], *, function_calling: bool = True) -> None:
         self.server_config = server_config
         self.lock = threading.Lock()
         self._system_prompt = None
         self.function_calling = function_calling
 
-    def call_tool(self, tool, args):
+    def call_tool(self, tool: str, args: dict[str, Any]) -> Any:
         with self.lock:
             return self._call_tool_sync(tool, args)
 
@@ -32,12 +35,12 @@ class MCPToolClient:
         # MCPのClientSessionは自動でinitializeを呼ぶので何もしない
         return None
 
-    def list_tools(self):
+    def list_tools(self) -> list[Tool]:
         with self.lock:
             return self._list_tools_sync()
 
     @property
-    def system_prompt(self):
+    def system_prompt(self) -> str:
         return self._get_system_prompt_sync()
 
     def close(self) -> None:
@@ -80,7 +83,7 @@ class MCPToolClient:
         full = header + data
         return hashlib.sha1(full).hexdigest()
 
-    def _call_tool_sync(self, tool, args):
+    def _call_tool_sync(self, tool: str, args: dict[str, Any]) -> Any:
         # tool_name = tool.split('_', 1)[1]
         tool_name = tool
 
@@ -121,7 +124,7 @@ class MCPToolClient:
         tools = self.list_tools().tools
         return mcp_name, tools
 
-    def get_function_calling_tools(self):
+    def get_function_calling_tools(self) -> list[dict[str, Any]]:
         mcp_name, tools = self._get_tools_sync()
         return [
             {
@@ -135,7 +138,7 @@ class MCPToolClient:
             for tool in tools
         ]
 
-    def get_function_calling_functions(self):
+    def get_function_calling_functions(self) -> list[dict[str, Any]]:
         mcp_name, tools = self._get_tools_sync()
         return [
             {
