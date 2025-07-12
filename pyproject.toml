@@ -1,8 +1,10 @@
 [tool.ruff]
 line-length = 100
+indent-width = 4
 
 [tool.ruff.format]
 docstring-code-format = true
+indent-style = "space"
 
 [tool.ruff.lint]
 select = ["ALL"]
