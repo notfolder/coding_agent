@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
+import lmstudio as lms
+from ollama import chat
+
 from .llm_base import LLMClient
 
 
 class LMStudioClient(LLMClient):
     def __init__(self, config: dict[str, Any]) -> None:
-        import lmstudio as lms
-
         lms.configure_default_client(config.get("base_url", "localhost:1234"))
         self.model = lms.llm(config.get("model"))
         self.chat = lms.Chat()
@@ -16,12 +17,11 @@ class LMStudioClient(LLMClient):
 
     def send_system_prompt(self, prompt: str) -> None:
         self.chat.add_system_prompt(prompt)
-        # self.chat = self.model.Chat(prompt)
 
     def send_user_message(self, message: str) -> None:
         self.chat.add_user_message(message)
 
-    def send_function_result(self, name: str, result: Any) -> None:
+    def send_function_result(self, name: str, result: object) -> None:
         msg = "LMStudio does not support function calls. Use OpenAI compatible call instead."
         raise NotImplementedError(
             msg,
@@ -30,14 +30,11 @@ class LMStudioClient(LLMClient):
     def get_response(self) -> str:
         result = self.model.respond(self.chat)
         self.chat.add_assistant_response(result)
-        # self.chat.add_assistant_message(result)
         return str(result)
 
 
 class OllamaClient(LLMClient):
     def __init__(self, config: dict[str, Any]) -> None:
-        from ollama import chat
-
         self.chat = chat
         self.model = config["model"]
         self.max_token = config.get("max_token", 32768)

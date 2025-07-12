@@ -3,10 +3,15 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from .llm_base import LLMClient
 from .lmstudio_client import LMStudioClient
 from .ollama_client import OllamaClient
 from .openai_client import OpenAIClient
+
+# Conditional import for mock client to avoid circular imports in testing
+try:
+    from tests.mocks.mock_llm_client import get_mock_llm_client
+except ImportError:
+    get_mock_llm_client = None
 
 
 class LLMClient(ABC):
@@ -19,7 +24,7 @@ class LLMClient(ABC):
         pass
 
     @abstractmethod
-    def send_function_result(self, name: str, result: Any) -> None:
+    def send_function_result(self, name: str, result: object) -> None:
         pass
 
     @abstractmethod
@@ -39,19 +44,13 @@ def get_llm_client(
             raise ValueError(msg)
         return LMStudioClient(config["llm"]["lmstudio"])
     if prov == "ollama":
-        # TODO: functions support
         return OllamaClient(config["llm"]["ollama"])
     if prov == "openai":
         return OpenAIClient(config["llm"]["openai"], functions, tools)
     if prov == "mock":
-        # Import here to avoid circular import during testing
-        try:
-            from tests.mocks.mock_llm_client import get_mock_llm_client
-
-            return get_mock_llm_client(config, functions, tools)
-        except ImportError:
+        if get_mock_llm_client is None:
             msg = "Mock LLM client not available - this should only be used in tests"
             raise ValueError(msg)
-    else:
-        msg = f"Unknown llm.provider: {prov}"
-        raise ValueError(msg)
+        return get_mock_llm_client(config, functions, tools)
+    msg = f"Unknown llm.provider: {prov}"
+    raise ValueError(msg)

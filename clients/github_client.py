@@ -29,7 +29,6 @@ class GithubClient:
             ValueError: トークンが設定されていない場合
 
         """
-        # トークンの設定(引数または環境変数から取得)
         self.token = token or os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
 
         # APIのベースURLの設定(デフォルト: https://api.github.com)
@@ -290,7 +289,10 @@ class GithubClient:
 
         return reviews
 
-    def remove_url_fields(self, obj: Any) -> Any:
+    def remove_url_fields(
+        self,
+        obj: object,
+    ) -> object:
         """辞書またはリストから再帰的にURLのみを含むフィールドを削除する.
 
         APIレスポンスから不要なURLフィールドを削除し、
@@ -304,14 +306,13 @@ class GithubClient:
 
         """
 
-        def is_url(val: Any) -> bool:
+        def is_url(val: object) -> bool:
             """値がURL文字列かどうかを判定する."""
             return isinstance(val, str) and (
                 val.startswith(("http://", "https://"))
             )
 
         if isinstance(obj, dict):
-            # 辞書の場合:URLでない値のみを残して再帰的に処理
             return {
                 k: self.remove_url_fields(v)
                 for k, v in obj.items()
