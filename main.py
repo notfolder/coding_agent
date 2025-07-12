@@ -66,6 +66,17 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
     with Path(config_file).open() as f:
         config = yaml.safe_load(f)
 
+    # 各種設定の上書き処理
+    _override_llm_config(config)
+    _override_mcp_config(config)
+    _override_rabbitmq_config(config)
+    _override_bot_config(config)
+
+    return config
+
+
+def _override_llm_config(config: dict[str, Any]) -> None:
+    """LLM設定を環境変数で上書きする."""
     # function_calling設定の処理
     function_calling = os.environ.get("FUNCTION_CALLING", "true").lower() == "true"
     if "llm" in config:
@@ -77,6 +88,17 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
         config["llm"]["provider"] = llm_provider
 
     # LM Studio設定の上書き処理
+    _override_lmstudio_config(config)
+
+    # Ollama設定の上書き処理
+    _override_ollama_config(config)
+
+    # OpenAI設定の上書き処理
+    _override_openai_config(config)
+
+
+def _override_lmstudio_config(config: dict[str, Any]) -> None:
+    """LM Studio設定を環境変数で上書きする."""
     lmstudio_env_url = os.environ.get("LMSTUDIO_BASE_URL")
     if lmstudio_env_url and "llm" in config and "lmstudio" in config["llm"]:
         config["llm"]["lmstudio"]["base_url"] = lmstudio_env_url
@@ -85,7 +107,9 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
     if lmstudio_env_model and "llm" in config and "lmstudio" in config["llm"]:
         config["llm"]["lmstudio"]["model"] = lmstudio_env_model
 
-    # Ollama設定の上書き処理
+
+def _override_ollama_config(config: dict[str, Any]) -> None:
+    """Ollama設定を環境変数で上書きする."""
     ollama_env_endpoint = os.environ.get("OLLAMA_ENDPOINT")
     if ollama_env_endpoint and "llm" in config and "ollama" in config["llm"]:
         config["llm"]["ollama"]["endpoint"] = ollama_env_endpoint
@@ -94,7 +118,9 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
     if ollama_env_model and "llm" in config and "ollama" in config["llm"]:
         config["llm"]["ollama"]["model"] = ollama_env_model
 
-    # OpenAI設定の上書き処理
+
+def _override_openai_config(config: dict[str, Any]) -> None:
+    """OpenAI設定を環境変数で上書きする."""
     openai_env_base_url = os.environ.get("OPENAI_BASE_URL")
     if openai_env_base_url and "llm" in config and "openai" in config["llm"]:
         config["llm"]["openai"]["base_url"] = openai_env_base_url
@@ -107,6 +133,9 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
     if openai_env_key and "llm" in config and "openai" in config["llm"]:
         config["llm"]["openai"]["api_key"] = openai_env_key
 
+
+def _override_mcp_config(config: dict[str, Any]) -> None:
+    """MCP設定を環境変数で上書きする."""
     # GitHub MCPコマンド設定の処理
     github_cmd_env = os.environ.get("GITHUB_MCP_COMMAND")
     if github_cmd_env:
@@ -115,7 +144,9 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
                 # スペース区切りで分割してコマンドリストを作成
                 server["command"] = github_cmd_env.split()
 
-    # RabbitMQ設定の環境変数上書き処理
+
+def _override_rabbitmq_config(config: dict[str, Any]) -> None:
+    """RabbitMQ設定を環境変数で上書きする."""
     rabbitmq_env = {
         "host": os.environ.get("RABBITMQ_HOST"),
         "port": os.environ.get("RABBITMQ_PORT"),
@@ -143,7 +174,9 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
     if "queue" in config["rabbitmq"] and not config["rabbitmq"]["queue"]:
         config["rabbitmq"]["queue"] = "mcp_tasks"
 
-    # ボット名設定の処理
+
+def _override_bot_config(config: dict[str, Any]) -> None:
+    """ボット名設定を環境変数で上書きする."""
     github_bot_name = os.environ.get("GITHUB_BOT_NAME")
     if github_bot_name and "github" in config and isinstance(config["github"], dict):
         config["github"]["assignee"] = github_bot_name
@@ -151,8 +184,6 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
     gitlab_bot_name = os.environ.get("GITLAB_BOT_NAME")
     if gitlab_bot_name and "gitlab" in config and isinstance(config["gitlab"], dict):
         config["gitlab"]["assignee"] = gitlab_bot_name
-
-    return config
 
 
 def produce_tasks(
@@ -193,9 +224,7 @@ def consume_tasks(
     task_queue: RabbitMQTaskQueue | InMemoryTaskQueue,
     handler: TaskHandler,
     logger: logging.Logger,
-    mcp_clients: dict[str, MCPToolClient],
-    config: dict[str, Any],
-    task_source: str,
+    task_config: dict[str, Any],
 ) -> None:
     """キューからタスクを取得して処理する.
 
@@ -206,11 +235,14 @@ def consume_tasks(
         task_queue: タスクキューオブジェクト
         handler: タスク処理ハンドラー
         logger: ログ出力用のロガー
-        mcp_clients: MCPクライアントの辞書
-        config: アプリケーション設定辞書
-        task_source: タスクソース("github" または "gitlab")
+        task_config: タスク設定情報(mcp_clients, config, task_sourceを含む)
 
     """
+    # 設定から必要な情報を取得
+    mcp_clients = task_config["mcp_clients"]
+    config = task_config["config"]
+    task_source = task_config["task_source"]
+
     # タスクゲッターのファクトリーメソッドでインスタンス生成
     task_getter = TaskGetter.factory(config, mcp_clients, task_source)
 
@@ -329,12 +361,22 @@ def main() -> None:
         return
     if args.mode == "consumer":
         # コンシューマーモード
-        consume_tasks(task_queue, handler, logger, mcp_clients, config, task_source)
+        task_config = {
+            "mcp_clients": mcp_clients,
+            "config": config,
+            "task_source": task_source,
+        }
+        consume_tasks(task_queue, handler, logger, task_config)
     else:
         # デフォルトモード
         with FileLock(str(lock_path)):
             produce_tasks(config, mcp_clients, task_source, task_queue, logger)
-        consume_tasks(task_queue, handler, logger, mcp_clients, config, task_source)
+        task_config = {
+            "mcp_clients": mcp_clients,
+            "config": config,
+            "task_source": task_source,
+        }
+        consume_tasks(task_queue, handler, logger, task_config)
 
 
 if __name__ == "__main__":
