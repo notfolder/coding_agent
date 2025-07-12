@@ -10,6 +10,8 @@ import logging
 import logging.config
 import os
 import sys
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -19,7 +21,7 @@ from clients.mcp_tool_client import MCPToolClient
 from filelock_util import FileLock
 from handlers.task_getter import TaskGetter
 from handlers.task_handler import TaskHandler
-from queueing import InMemoryTaskQueue
+from queueing import InMemoryTaskQueue, RabbitMQTaskQueue
 
 
 def setup_logger() -> None:
@@ -61,7 +63,7 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
 
     """
     # 設定ファイルを読み込み
-    with open(config_file) as f:
+    with Path(config_file).open() as f:
         config = yaml.safe_load(f)
 
     # function_calling設定の処理
@@ -133,7 +135,7 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
     if "port" in config["rabbitmq"] and config["rabbitmq"]["port"] is not None:
         try:
             config["rabbitmq"]["port"] = int(config["rabbitmq"]["port"])
-        except Exception:
+        except (ValueError, TypeError, KeyError):
             # 変換に失敗した場合はデフォルトポート番号を使用
             config["rabbitmq"]["port"] = 5672
 
@@ -141,7 +143,7 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
     if "queue" in config["rabbitmq"] and not config["rabbitmq"]["queue"]:
         config["rabbitmq"]["queue"] = "mcp_tasks"
 
-    # ボット名設定の処理(GitHub/GitLab)
+    # ボット名設定の処理
     github_bot_name = os.environ.get("GITHUB_BOT_NAME")
     if github_bot_name and "github" in config and isinstance(config["github"], dict):
         config["github"]["assignee"] = github_bot_name
@@ -157,7 +159,7 @@ def produce_tasks(
     config: dict[str, Any],
     mcp_clients: dict[str, MCPToolClient],
     task_source: str,
-    task_queue: Any,  # InMemoryTaskQueue or RabbitMQTaskQueue
+    task_queue: RabbitMQTaskQueue | InMemoryTaskQueue,
     logger: logging.Logger,
 ) -> None:
     """タスクを取得してキューに追加する.
@@ -184,11 +186,11 @@ def produce_tasks(
         task.prepare()  # ラベル付与などの準備処理
         task_queue.put(task.get_task_key().to_dict())
 
-    logger.info(f"{len(tasks)}件のタスクをキューに追加しました")
+    logger.info("%d件のタスクをキューに追加しました", len(tasks))
 
 
 def consume_tasks(
-    task_queue: Any,  # InMemoryTaskQueue or RabbitMQTaskQueue
+    task_queue: RabbitMQTaskQueue | InMemoryTaskQueue,
     handler: TaskHandler,
     logger: logging.Logger,
     mcp_clients: dict[str, MCPToolClient],
@@ -222,19 +224,19 @@ def consume_tasks(
         # TaskGetterのfrom_task_keyメソッドでTaskインスタンスを生成
         task = task_getter.from_task_key(task_key_dict)
         if task is None:
-            logger.error(f"Unknown or invalid task key: {task_key_dict}")
+            logger.error("Unknown or invalid task key: %s", task_key_dict)
             continue
 
-        # タスクの状態確認(processing_labelが付与されているかチェック)
+        # タスクの状態確認
         if not hasattr(task, "check") or not task.check():
-            logger.info(f"スキップ: processing_labelが付与されていないタスク {task_key_dict}")
+            logger.info("スキップ: processing_labelが付与されていないタスク %s", task_key_dict)
             continue
 
         # タスクの処理実行
         try:
             handler.handle(task)
         except Exception as e:
-            logger.exception(f"Task処理中にエラー: {e}")
+            logger.exception("Task処理中にエラー")
             # エラーが発生した場合はタスクにコメントを追加
             task.comment(f"処理中にエラーが発生しました: {e}")
 
@@ -267,7 +269,7 @@ def main() -> None:
 
     # タスクソースの設定取得(デフォルト: "github")
     task_source = os.environ.get("TASK_SOURCE", "github")
-    logger.info(f"TASK_SOURCE: {task_source}")
+    logger.info("TASK_SOURCE: %s", task_source)
 
     # 設定ファイルの読み込み
     config_file = "config.yaml"
@@ -280,7 +282,7 @@ def main() -> None:
 
     # ファンクションコーリング設定の確認
     function_calling = config.get("llm", {}).get("function_calling", True)
-    logger.info(f"function_calling: {function_calling}")
+    logger.info("function_calling: %s", function_calling)
 
     # ファンクションコーリングが有効な場合はリストを初期化
     if function_calling:
@@ -309,31 +311,28 @@ def main() -> None:
     # LLMクライアントの初期化
     llm_client = get_llm_client(config, functions, tools)
 
-    # タスクキューの初期化(RabbitMQまたはインメモリー)
-    from queueing import RabbitMQTaskQueue
-
+    # タスクキューの初期化
     if config.get("use_rabbitmq", False):
-        # RabbitMQを使用する場合
         task_queue = RabbitMQTaskQueue(config)
     else:
-        # インメモリーキューを使用する場合(デフォルト)
         task_queue = InMemoryTaskQueue()
 
     # タスクハンドラーの初期化
     handler = TaskHandler(llm_client, mcp_clients, config)
 
     # 実行モードに応じた処理の分岐
+    lock_path = Path(tempfile.gettempdir()) / "produce_tasks.lock"
     if args.mode == "producer":
-        # プロデューサーモード:タスクの取得とキューへの追加のみ
-        with FileLock("/tmp/produce_tasks.lock"):
+        # プロデューサーモード
+        with FileLock(str(lock_path)):
             produce_tasks(config, mcp_clients, task_source, task_queue, logger)
         return
     if args.mode == "consumer":
-        # コンシューマーモード:キューからのタスク処理のみ
+        # コンシューマーモード
         consume_tasks(task_queue, handler, logger, mcp_clients, config, task_source)
     else:
-        # デフォルトモード:タスク取得→キュー→即時処理の統合実行
-        with FileLock("/tmp/produce_tasks.lock"):
+        # デフォルトモード
+        with FileLock(str(lock_path)):
             produce_tasks(config, mcp_clients, task_source, task_queue, logger)
         consume_tasks(task_queue, handler, logger, mcp_clients, config, task_source)
 
