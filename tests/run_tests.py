@@ -5,19 +5,20 @@ import logging
 import os
 import sys
 import unittest
+from pathlib import Path
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-def run_tests():
+def run_tests() -> bool:
     """Run all tests and return results."""
     # Setup logging to suppress noise during tests
     logging.basicConfig(level=logging.CRITICAL)
 
     # Discover and run tests
     loader = unittest.TestLoader()
-    start_dir = os.path.dirname(__file__)
+    start_dir = str(Path(__file__).parent)
     suite = loader.discover(start_dir, pattern="test_*.py")
 
     # Run tests
@@ -28,12 +29,12 @@ def run_tests():
     return result.wasSuccessful()
 
 
-def run_unit_tests():
+def run_unit_tests() -> bool:
     """Run only unit tests."""
     logging.basicConfig(level=logging.CRITICAL)
 
     loader = unittest.TestLoader()
-    unit_dir = os.path.join(os.path.dirname(__file__), "unit")
+    unit_dir = str(Path(__file__).parent / "unit")
     suite = loader.discover(unit_dir, pattern="test_*.py")
 
     runner = unittest.TextTestRunner(verbosity=2)
@@ -42,12 +43,12 @@ def run_unit_tests():
     return result.wasSuccessful()
 
 
-def run_integration_tests():
+def run_integration_tests() -> bool:
     """Run only integration tests."""
     logging.basicConfig(level=logging.CRITICAL)
 
     loader = unittest.TestLoader()
-    integration_dir = os.path.join(os.path.dirname(__file__), "integration")
+    integration_dir = str(Path(__file__).parent / "integration")
     suite = loader.discover(integration_dir, pattern="test_*.py")
 
     runner = unittest.TextTestRunner(verbosity=2)
@@ -56,7 +57,7 @@ def run_integration_tests():
     return result.wasSuccessful()
 
 
-def run_real_tests():
+def run_real_tests() -> bool:
     """Run real integration tests (requires API tokens)."""
     # Check for API tokens
     github_token = os.environ.get("GITHUB_TOKEN")
@@ -83,7 +84,7 @@ def run_real_tests():
     return run_mock_tests()
 
 
-def run_mock_tests():
+def run_mock_tests() -> bool:
     """Run comprehensive tests with mock services."""
     logging.basicConfig(level=logging.CRITICAL)
 
@@ -92,7 +93,7 @@ def run_mock_tests():
 
         # Run comprehensive test suite
         loader = unittest.TestLoader()
-        start_dir = os.path.dirname(__file__)
+        start_dir = str(Path(__file__).parent)
         suite = loader.discover(start_dir, pattern="test_*.py")
 
         # Create a detailed test runner
@@ -109,42 +110,35 @@ def run_mock_tests():
             for _test, _traceback in result.errors:
                 pass
 
-        success_rate = (
-            ((result.testsRun - len(result.failures) - len(result.errors)) / result.testsRun * 100)
-            if result.testsRun > 0
-            else 0
-        )
-
         return result.wasSuccessful()
 
-    except ImportError as e:
+    except ImportError:
         return False
-    except Exception as e:
+    except (OSError, RuntimeError):
         return False
 
 
-def run_coverage_tests():
+def run_coverage_tests() -> bool:
     """Run tests with coverage analysis (if coverage is available)."""
     try:
-        import coverage
-
-        # Create coverage instance
-        cov = coverage.Coverage()
-        cov.start()
-
-        # Run tests
-        success = run_mock_tests()
-
-        # Stop coverage and generate report
-        cov.stop()
-        cov.save()
-
-        cov.report()
-
-        return success
-
+        import coverage  # noqa: PLC0415
     except ImportError:
         return run_mock_tests()
+
+    # Create coverage instance
+    cov = coverage.Coverage()
+    cov.start()
+
+    # Run tests
+    success = run_mock_tests()
+
+    # Stop coverage and generate report
+    cov.stop()
+    cov.save()
+
+    cov.report()
+
+    return success
 
 
 if __name__ == "__main__":
