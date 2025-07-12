@@ -2,19 +2,24 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
+from pathlib import Path
 from typing import Any
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from clients.llm_base import LLMClient
 
 
 class MockLLMClient(LLMClient):
     """Mock implementation of LLM client for testing."""
 
-    def __init__(self, config: dict[str, Any], functions: list | None = None, tools: list | None = None) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        functions: list | None = None,
+        tools: list | None = None,
+    ) -> None:
         self.config = config
         self.functions = functions or []
         self.tools = tools or []
@@ -27,7 +32,7 @@ class MockLLMClient(LLMClient):
         self._setup_default_responses()
 
     def _setup_default_responses(self) -> None:
-        """Setup default responses for testing scenarios."""
+        """Set up default responses for testing scenarios."""
         self.response_queue = [
             # Initial response with a simple tool call
             (
@@ -56,7 +61,10 @@ class MockLLMClient(LLMClient):
                 "<think>Let me analyze this issue carefully and provide a solution</think>\n"
                 + json.dumps(
                     {
-                        "comment": "I understand the issue. The problem is related to the configuration. I'll implement a fix.",
+                        "comment": (
+                            "I understand the issue. The problem is related to the "
+                            "configuration. I'll implement a fix."
+                        ),
                         "done": False,
                     },
                 ),
@@ -66,7 +74,10 @@ class MockLLMClient(LLMClient):
             (
                 json.dumps(
                     {
-                        "comment": "Task completed successfully. The issue has been resolved by updating the configuration.",
+                        "comment": (
+                            "Task completed successfully. The issue has been resolved "
+                            "by updating the configuration."
+                        ),
                         "done": True,
                     },
                 ),
@@ -82,7 +93,7 @@ class MockLLMClient(LLMClient):
         """Store user message."""
         self.user_messages.append(message)
 
-    def send_function_result(self, name: str, result) -> None:
+    def send_function_result(self, name: str, result: str | dict | list) -> None:
         """Store function result."""
         # Not needed for current tests
 
@@ -122,7 +133,12 @@ class MockLLMClient(LLMClient):
 class MockLLMClientWithErrors(MockLLMClient):
     """Mock LLM client that simulates errors for testing error handling."""
 
-    def __init__(self, config: dict[str, Any], functions: list | None = None, tools: list | None = None) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        functions: list | None = None,
+        tools: list | None = None,
+    ) -> None:
         super().__init__(config, functions, tools)
         self.error_count = 0
         self.max_errors = 3
@@ -161,12 +177,17 @@ class MockLLMClientWithErrors(MockLLMClient):
 class MockLLMClientWithToolCalls(MockLLMClient):
     """Mock LLM client that simulates tool calling scenarios."""
 
-    def __init__(self, config: dict[str, Any], functions: list | None = None, tools: list | None = None) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        functions: list | None = None,
+        tools: list | None = None,
+    ) -> None:
         super().__init__(config, functions, tools)
         self._setup_tool_call_responses()
 
     def _setup_tool_call_responses(self) -> None:
-        """Setup responses that include tool calls."""
+        """Set up responses that include tool calls."""
         # Determine if we're working with GitHub or GitLab based on config
         if "github" in self.config:
             self._setup_github_responses()
@@ -176,7 +197,7 @@ class MockLLMClientWithToolCalls(MockLLMClient):
             self._setup_generic_responses()
 
     def _setup_github_responses(self) -> None:
-        """Setup GitHub-specific tool call responses."""
+        """Set up GitHub-specific tool call responses."""
         self.response_queue = [
             # Initial analysis with tool call
             (
@@ -230,7 +251,7 @@ class MockLLMClientWithToolCalls(MockLLMClient):
         ]
 
     def _setup_gitlab_responses(self) -> None:
-        """Setup GitLab-specific tool call responses."""
+        """Set up GitLab-specific tool call responses."""
         self.response_queue = [
             # Initial analysis with tool call
             (
@@ -283,7 +304,7 @@ class MockLLMClientWithToolCalls(MockLLMClient):
         ]
 
     def _setup_generic_responses(self) -> None:
-        """Setup generic responses without specific tool calls."""
+        """Set up generic responses without specific tool calls."""
         self.response_queue = [
             # Initial analysis with tool call
             (json.dumps({"comment": "Analyzing the task", "done": False}), []),
@@ -292,8 +313,12 @@ class MockLLMClientWithToolCalls(MockLLMClient):
         ]
 
 
-def get_mock_llm_client(config: dict[str, Any], functions: list | None = None, tools: list | None = None):
-    """Factory function to create mock LLM client."""
+def get_mock_llm_client(
+    config: dict[str, Any],
+    functions: list | None = None,
+    tools: list | None = None,
+) -> MockLLMClient:
+    """Create a mock LLM client."""
     provider = config.get("llm", {}).get("provider", "mock")
 
     if provider == "mock":

@@ -1,21 +1,21 @@
 """Simple integration test for GitHub and GitLab workflows."""
 
-import os
 import sys
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Mock the mcp module before importing TaskHandler
 sys.modules["mcp"] = MagicMock()
 sys.modules["mcp"].McpError = Exception
 
-from handlers.task_getter_github import TaskGitHubIssue
-from handlers.task_handler import TaskHandler
-from tests.mocks.mock_llm_client import MockLLMClient
-from tests.mocks.mock_mcp_client import MockMCPToolClient
+from handlers.task_getter_github import TaskGitHubIssue  # noqa: E402
+from handlers.task_handler import TaskHandler  # noqa: E402
+from tests.mocks.mock_llm_client import MockLLMClient  # noqa: E402
+from tests.mocks.mock_mcp_client import MockMCPToolClient  # noqa: E402
 
 
 class TestSimpleWorkflow(unittest.TestCase):
@@ -72,7 +72,7 @@ class TestSimpleWorkflow(unittest.TestCase):
         result = task_handler.handle(github_task)
 
         # Should complete without errors
-        assert result is None
+        assert result is None  # noqa: S101
 
 
 if __name__ == "__main__":

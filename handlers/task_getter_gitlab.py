@@ -113,12 +113,14 @@ class TaskGitLabMergeRequest(Task):
             self.labels.append(self.config["gitlab"]["processing_label"])
         # GitLabのAPIを使ってMRのラベルを更新
         self.gitlab_client.update_merge_request_labels(
-            project_id=self.project_id, merge_request_iid=self.merge_request_iid, labels=self.labels,
+            project_id=self.project_id,
+            merge_request_iid=self.merge_request_iid,
+            labels=self.labels,
         )
         self.mr["labels"] = self.labels
 
     def get_prompt(self) -> str:
-        # コメント取得(GitLabはノートとして管理)
+        """GitLabからコメント情報を取得してプロンプトを生成する."""
         comments = self.gitlab_client.list_merge_request_notes(
             project_id=self.project_id, merge_request_iid=self.merge_request_iid,
         )
@@ -137,7 +139,7 @@ class TaskGitLabMergeRequest(Task):
             owner = self.mr.get("author", {}).get("username")
             if owner:
                 text = f"@{owner} {text}"
-        # GitLabのAPIを使ってMRのノートを追加
+        # GitLabのAPIを使ってMRの記録を追加
         self.gitlab_client.add_merge_request_note(
             project_id=self.project_id, merge_request_iid=self.merge_request_iid, body=text,
         )
@@ -150,7 +152,9 @@ class TaskGitLabMergeRequest(Task):
             self.labels.append(self.config["gitlab"]["done_label"])
         # GitLabのAPIを使ってMRのラベルを更新
         self.gitlab_client.update_merge_request_labels(
-            project_id=self.project_id, merge_request_iid=self.merge_request_iid, labels=self.labels,
+            project_id=self.project_id,
+            merge_request_iid=self.merge_request_iid,
+            labels=self.labels,
         )
         self.mr["labels"] = self.labels
 
@@ -181,8 +185,10 @@ class TaskGetterFromGitLab(TaskGetter):
             if self.config["gitlab"]["bot_label"] in issue.get("labels")
             and issue.get("assignee", {}).get("username", "") == assignee
         ]
-        for issue in issues:
-            tasks.append(TaskGitLabIssue(issue, self.mcp_client, self.gitlab_client, self.config))
+        tasks.extend([
+            TaskGitLabIssue(issue, self.mcp_client, self.gitlab_client, self.config)
+            for issue in issues
+        ])
 
         merge_requests = self.gitlab_client.search_merge_requests(query)
         merge_requests = [
@@ -191,10 +197,10 @@ class TaskGetterFromGitLab(TaskGetter):
             if self.config["gitlab"]["bot_label"] in mr.get("labels")
             and mr.get("assignee", {}).get("username", "") == assignee
         ]
-        for mr in merge_requests:
-            tasks.append(
-                TaskGitLabMergeRequest(mr, self.mcp_client, self.gitlab_client, self.config),
-            )
+        tasks.extend([
+            TaskGitLabMergeRequest(mr, self.mcp_client, self.gitlab_client, self.config)
+            for mr in merge_requests
+        ])
 
         return tasks
 
