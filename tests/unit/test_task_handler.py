@@ -1,31 +1,37 @@
 """Comprehensive unit tests for TaskHandler using mocks."""
 
+from __future__ import annotations
+
 import json
-import os
 import sys
 import unittest
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 from mcp import McpError
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Mock the mcp module before importing TaskHandler
 sys.modules["mcp"] = MagicMock()
 sys.modules["mcp"].McpError = Exception
 
-import pytest
+import pytest  # noqa: E402
 
-from handlers.task_getter_github import TaskGitHubIssue
-from handlers.task_getter_gitlab import TaskGitLabIssue
-from handlers.task_handler import TaskHandler
-from tests.mocks.mock_llm_client import (
+from handlers.task_getter_github import TaskGitHubIssue  # noqa: E402
+from handlers.task_getter_gitlab import TaskGitLabIssue  # noqa: E402
+from handlers.task_handler import TaskHandler  # noqa: E402
+from tests.mocks.mock_llm_client import (  # noqa: E402
     MockLLMClient,
     MockLLMClientWithErrors,
     MockLLMClientWithToolCalls,
 )
-from tests.mocks.mock_mcp_client import MockMCPToolClient
+from tests.mocks.mock_mcp_client import MockMCPToolClient  # noqa: E402
+
+# Constants
+MAX_TOOL_FAILURES = 2
 
 
 class TestTaskHandler(unittest.TestCase):
@@ -75,9 +81,9 @@ class TestTaskHandler(unittest.TestCase):
             config=self.config,
         )
 
-        assert task_handler.llm_client is not None
-        assert task_handler.mcp_clients is not None
-        assert task_handler.config is not None
+        assert task_handler.llm_client is not None  # noqa: S101
+        assert task_handler.mcp_clients is not None  # noqa: S101
+        assert task_handler.config is not None  # noqa: S101
 
     def test_sanitize_arguments_dict(self) -> None:
         """Test argument sanitization with dict input."""
@@ -90,7 +96,7 @@ class TestTaskHandler(unittest.TestCase):
         # Test with valid dict
         args_dict = {"owner": "testorg", "repo": "testrepo", "issue_number": 1}
         sanitized = task_handler.sanitize_arguments(args_dict)
-        assert sanitized == args_dict
+        assert sanitized == args_dict  # noqa: S101
 
     def test_sanitize_arguments_json_string(self) -> None:
         """Test argument sanitization with JSON string input."""
@@ -104,7 +110,7 @@ class TestTaskHandler(unittest.TestCase):
         args_json = '{"owner": "testorg", "repo": "testrepo", "issue_number": 1}'
         sanitized = task_handler.sanitize_arguments(args_json)
         expected = {"owner": "testorg", "repo": "testrepo", "issue_number": 1}
-        assert sanitized == expected
+        assert sanitized == expected  # noqa: S101
 
     def test_sanitize_arguments_invalid_json(self) -> None:
         """Test argument sanitization with invalid JSON."""
@@ -115,7 +121,7 @@ class TestTaskHandler(unittest.TestCase):
         )
 
         # Test with invalid JSON
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="JSON decode error"):
             task_handler.sanitize_arguments('{"invalid": json}')
 
     def test_sanitize_arguments_invalid_type(self) -> None:
@@ -145,7 +151,7 @@ class TestTaskHandler(unittest.TestCase):
         result = task_handler.handle(self.github_task)
 
         # Should complete without errors
-        assert result is None  # handle() method returns None on completion
+        assert result is None  # handle() method returns None on completion  # noqa: S101
 
     def test_handle_task_with_tool_calls(self) -> None:
         """Test task handling with tool calls."""
@@ -162,7 +168,7 @@ class TestTaskHandler(unittest.TestCase):
         result = task_handler.handle(self.github_task)
 
         # Should complete after making tool calls
-        assert result is None
+        assert result is None  # noqa: S101
 
     def test_handle_task_with_think_tags(self) -> None:
         """Test handling of <think> tags in LLM responses."""
@@ -186,7 +192,8 @@ class TestTaskHandler(unittest.TestCase):
         task_handler.handle(self.github_task)
 
         # Verify that think content was posted as comment
-        # Check that comment was called with the think content (may have mention=True due to task logic)
+        # Check that comment was called with the think content
+        # (may have mention=True due to task logic)
         self.github_task.comment.assert_called()
 
     def test_handle_task_with_errors(self) -> None:
@@ -195,14 +202,16 @@ class TestTaskHandler(unittest.TestCase):
         error_llm = MockLLMClientWithErrors(self.config)
 
         task_handler = TaskHandler(
-            llm_client=error_llm, mcp_clients={"github": self.github_mcp_client}, config=self.config,
+            llm_client=error_llm,
+            mcp_clients={"github": self.github_mcp_client},
+            config=self.config,
         )
 
         # Handle the task (should handle errors gracefully)
         try:
             task_handler.handle(self.github_task)
             # If it completes, that's good error handling
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             # Should not raise unhandled exceptions
             self.fail(f"TaskHandler should handle errors gracefully, but got: {e}")
 
@@ -229,7 +238,7 @@ class TestTaskHandler(unittest.TestCase):
         result = task_handler.handle(self.github_task)
 
         # Should stop due to max iterations
-        assert result is None
+        assert result is None  # noqa: S101
 
     def test_handle_task_with_invalid_json_responses(self) -> None:
         """Test handling of invalid JSON responses from LLM."""
@@ -251,7 +260,7 @@ class TestTaskHandler(unittest.TestCase):
         try:
             task_handler.handle(self.github_task)
             # Should eventually complete with valid response
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             # Should not crash on invalid JSON
             self.fail(f"TaskHandler should handle invalid JSON gracefully, but got: {e}")
 
@@ -262,15 +271,13 @@ class TestTaskHandler(unittest.TestCase):
         call_count = 0
         original_call_tool = error_mcp_client.call_tool
 
-        def failing_call_tool(tool, args):
+        def failing_call_tool(tool: str, args: dict[str, Any]) -> dict[str, Any] | None:
             nonlocal call_count
             call_count += 1
-            if call_count <= 2:  # Fail first 2 calls
+            if call_count <= MAX_TOOL_FAILURES:  # Fail first 2 calls
                 msg = "Tool call failed"
-                raise ExceptionGroup(
-                    msg,
-                    [ExceptionGroup("Tool call failed", [McpError("Tool call failed")])],
-                )
+                # Use nested exception structure for compatibility
+                raise RuntimeError(msg) from McpError("Tool call failed")
             return original_call_tool(tool, args)
 
         error_mcp_client.call_tool = failing_call_tool
@@ -312,16 +319,14 @@ class TestTaskHandler(unittest.TestCase):
         self.llm_client.set_custom_responses(tool_responses)
 
         task_handler = TaskHandler(
-            llm_client=self.llm_client, mcp_clients={"github": error_mcp_client}, config=self.config,
+            llm_client=self.llm_client,
+            mcp_clients={"github": error_mcp_client},
+            config=self.config,
         )
 
         # Handle the task
-        try:
+        with pytest.raises((OSError, RuntimeError), match="Tool call failed"):
             task_handler.handle(self.github_task)
-            # Should eventually succeed after retries
-        except Exception as e:
-            # May fail due to tool errors, which is acceptable
-            assert "Tool call failed" in str(e)
 
     def test_make_system_prompt(self) -> None:
         """Test system prompt generation."""
@@ -331,10 +336,10 @@ class TestTaskHandler(unittest.TestCase):
             config=self.config,
         )
 
-        # Test that system prompt is generated
-        system_prompt = task_handler._make_system_prompt()
-        assert isinstance(system_prompt, str)
-        assert len(system_prompt) > 0
+        # Test that system prompt is generated (accessing private method for testing)
+        system_prompt = task_handler._make_system_prompt()  # noqa: SLF001
+        assert isinstance(system_prompt, str)  # noqa: S101
+        assert len(system_prompt) > 0  # noqa: S101
 
 
 class TestTaskHandlerWithDifferentTasks(unittest.TestCase):
@@ -385,7 +390,7 @@ class TestTaskHandlerWithDifferentTasks(unittest.TestCase):
 
         # Handle GitLab task
         result = task_handler.handle(self.gitlab_task)
-        assert result is None  # Should complete successfully
+        assert result is None  # Should complete successfully  # noqa: S101
 
     def test_handle_task_with_multiple_mcp_clients(self) -> None:
         """Test task handling with multiple MCP clients."""
@@ -405,7 +410,7 @@ class TestTaskHandlerWithDifferentTasks(unittest.TestCase):
 
         # Handle task
         result = task_handler.handle(self.gitlab_task)
-        assert result is None
+        assert result is None  # noqa: S101
 
 
 if __name__ == "__main__":
