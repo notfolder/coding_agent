@@ -36,9 +36,23 @@ class MockLLMClient(LLMClient):
                 "done": False
             }), []),
             
+            # Response with tool call and progress update
+            (json.dumps({
+                "command": {"tool": "get_issue_comments", "args": {"issue_number": 1}},
+                "comment": "Analyzing the issue and checking comments",
+                "done": False
+            }), []),
+            
+            # Response with thinking and solution
+            ("<think>Let me analyze this issue carefully and provide a solution</think>\n" + 
+             json.dumps({
+                "comment": "I understand the issue. The problem is related to the configuration. I'll implement a fix.",
+                "done": False
+            }), []),
+            
             # Response with completion
             (json.dumps({
-                "comment": "Task completed successfully",
+                "comment": "Task completed successfully. The issue has been resolved by updating the configuration.",
                 "done": True
             }), [])
         ]
@@ -70,6 +84,17 @@ class MockLLMClient(LLMClient):
         self.response_queue = responses
         self.current_response_index = 0
     
+    def set_mock_response(self, response_data: Dict[str, Any]):
+        """Set a single mock response (convenience method)"""
+        response_json = json.dumps(response_data)
+        self.response_queue = [(response_json, [])]
+        self.current_response_index = 0
+    
+    def add_mock_response(self, response_data: Dict[str, Any]):
+        """Add a mock response to the queue"""
+        response_json = json.dumps(response_data)
+        self.response_queue.append((response_json, []))
+    
     def reset(self):
         """Reset client state"""
         self.system_prompt = ""
@@ -85,16 +110,88 @@ class MockLLMClientWithErrors(MockLLMClient):
         super().__init__(config, functions, tools)
         self.error_count = 0
         self.max_errors = 3
+        self.error_types = ['json_error', 'timeout_error', 'api_error']
+        self.current_error_type = 0
     
     def get_response(self) -> Tuple[str, List]:
         """Get response with simulated errors"""
         if self.error_count < self.max_errors:
             self.error_count += 1
-            # Return invalid JSON to simulate parsing errors
-            return ("Invalid JSON response {", [])
+            error_type = self.error_types[self.current_error_type % len(self.error_types)]
+            self.current_error_type += 1
+            
+            if error_type == 'json_error':
+                # Return invalid JSON to simulate parsing errors
+                return ("Invalid JSON response {", [])
+            elif error_type == 'timeout_error':
+                # Simulate timeout by returning incomplete response
+                return ("Partial response without proper", [])
+            else:  # api_error
+                # Return valid JSON but with error content
+                return (json.dumps({
+                    "error": "API Error occurred",
+                    "comment": "There was an error processing the request",
+                    "done": False
+                }), [])
         else:
             # After max errors, return valid completion
-            return (json.dumps({"comment": "Finally completed after errors", "done": True}), [])
+            return (json.dumps({
+                "comment": "Finally completed after errors",
+                "done": True
+            }), [])
+
+
+class MockLLMClientWithToolCalls(MockLLMClient):
+    """Mock LLM client that simulates tool calling scenarios"""
+    
+    def __init__(self, config: Dict[str, Any], functions: List = None, tools: List = None):
+        super().__init__(config, functions, tools)
+        self._setup_tool_call_responses()
+    
+    def _setup_tool_call_responses(self):
+        """Setup responses that include tool calls"""
+        self.response_queue = [
+            # Initial analysis with tool call
+            (json.dumps({
+                "command": {
+                    "tool": "search_issues",
+                    "args": {"q": "label:\"coding agent\""}
+                },
+                "comment": "Searching for issues to work on",
+                "done": False
+            }), []),
+            
+            # Get specific issue details
+            (json.dumps({
+                "command": {
+                    "tool": "get_issue",
+                    "args": {"owner": "testorg", "repo": "testrepo", "issue_number": 1}
+                },
+                "comment": "Getting issue details",
+                "done": False
+            }), []),
+            
+            # Update issue labels
+            (json.dumps({
+                "command": {
+                    "tool": "update_issue",
+                    "args": {
+                        "owner": "testorg",
+                        "repo": "testrepo", 
+                        "issue_number": 1,
+                        "labels": ["coding agent processing", "bug"]
+                    }
+                },
+                "comment": "Updating issue status",
+                "done": False
+            }), []),
+            
+            # Complete the task
+            (json.dumps({
+                "comment": "Task completed successfully",
+                "done": True
+            }), [])
+        ]
 
 
 def get_mock_llm_client(config: Dict[str, Any], functions: List = None, tools: List = None):
@@ -105,5 +202,7 @@ def get_mock_llm_client(config: Dict[str, Any], functions: List = None, tools: L
         return MockLLMClient(config, functions, tools)
     elif provider == 'mock_with_errors':
         return MockLLMClientWithErrors(config, functions, tools)
+    elif provider == 'mock_with_tool_calls':
+        return MockLLMClientWithToolCalls(config, functions, tools)
     else:
         return MockLLMClient(config, functions, tools)
