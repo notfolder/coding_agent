@@ -1,6 +1,8 @@
 import os
 import sys
+
 import portalocker
+
 
 class FileLock:
     def __init__(self, lockfile):
@@ -8,7 +10,7 @@ class FileLock:
         self.fp = None
 
     def acquire(self):
-        self.fp = open(self.lockfile, 'w')
+        self.fp = open(self.lockfile, "w")
         try:
             portalocker.lock(self.fp, portalocker.LOCK_EX | portalocker.LOCK_NB)
         except portalocker.LockException:

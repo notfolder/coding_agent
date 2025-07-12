@@ -1,204 +1,202 @@
+"""Comprehensive unit tests for TaskHandler using mocks
 """
-Comprehensive unit tests for TaskHandler using mocks
-"""
-import unittest
-import sys
-import os
+
 import json
-from unittest.mock import patch, MagicMock
+import os
+import sys
+import unittest
+from unittest.mock import MagicMock, patch
 
 from mcp import McpError
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 # Mock the mcp module before importing TaskHandler
-sys.modules['mcp'] = MagicMock()
-sys.modules['mcp'].McpError = Exception
+sys.modules["mcp"] = MagicMock()
+sys.modules["mcp"].McpError = Exception
 
-from handlers.task_handler import TaskHandler
 from handlers.task_getter_github import TaskGitHubIssue
 from handlers.task_getter_gitlab import TaskGitLabIssue
+from handlers.task_handler import TaskHandler
+from tests.mocks.mock_llm_client import (
+    MockLLMClient,
+    MockLLMClientWithErrors,
+    MockLLMClientWithToolCalls,
+)
 from tests.mocks.mock_mcp_client import MockMCPToolClient
-from tests.mocks.mock_llm_client import MockLLMClient, MockLLMClientWithErrors, MockLLMClientWithToolCalls
 
 
 class TestTaskHandler(unittest.TestCase):
     """Test TaskHandler functionality with mock components"""
-    
+
     def setUp(self):
         """Set up test environment"""
         self.config = {
-            'github': {
-                'owner': 'testorg',
-                'repo': 'testrepo',
-                'bot_label': 'coding agent',
-                'processing_label': 'coding agent processing',
-                'done_label': 'coding agent done'
+            "github": {
+                "owner": "testorg",
+                "repo": "testrepo",
+                "bot_label": "coding agent",
+                "processing_label": "coding agent processing",
+                "done_label": "coding agent done",
             },
-            'max_llm_process_num': 10
+            "max_llm_process_num": 10,
         }
-        
+
         # Create mock MCP clients
-        github_server_config = {'mcp_server_name': 'github'}
+        github_server_config = {"mcp_server_name": "github"}
         self.github_mcp_client = MockMCPToolClient(github_server_config)
-        
+
         # Create mock LLM client
         self.llm_client = MockLLMClient(self.config)
-        
+
         # Create sample GitHub task
         sample_github_issue = {
-            'number': 1,
-            'title': 'Test Issue',
-            'body': 'Test issue body',
-            'repository_url': 'https://api.github.com/repos/testorg/testrepo',
-            'labels': [{'name': 'coding agent', 'color': 'blue'}]
+            "number": 1,
+            "title": "Test Issue",
+            "body": "Test issue body",
+            "repository_url": "https://api.github.com/repos/testorg/testrepo",
+            "labels": [{"name": "coding agent", "color": "blue"}],
         }
-        
+
         self.github_task = TaskGitHubIssue(
             issue=sample_github_issue,
             mcp_client=self.github_mcp_client,
             github_client=MagicMock(),
-            config=self.config
+            config=self.config,
         )
-    
+
     def test_task_handler_creation(self):
         """Test TaskHandler object creation"""
         task_handler = TaskHandler(
             llm_client=self.llm_client,
-            mcp_clients={'github': self.github_mcp_client},
-            config=self.config
+            mcp_clients={"github": self.github_mcp_client},
+            config=self.config,
         )
-        
+
         self.assertIsNotNone(task_handler.llm_client)
         self.assertIsNotNone(task_handler.mcp_clients)
         self.assertIsNotNone(task_handler.config)
-    
+
     def test_sanitize_arguments_dict(self):
         """Test argument sanitization with dict input"""
         task_handler = TaskHandler(
             llm_client=self.llm_client,
-            mcp_clients={'github': self.github_mcp_client},
-            config=self.config
+            mcp_clients={"github": self.github_mcp_client},
+            config=self.config,
         )
-        
+
         # Test with valid dict
-        args_dict = {'owner': 'testorg', 'repo': 'testrepo', 'issue_number': 1}
+        args_dict = {"owner": "testorg", "repo": "testrepo", "issue_number": 1}
         sanitized = task_handler.sanitize_arguments(args_dict)
         self.assertEqual(sanitized, args_dict)
-    
+
     def test_sanitize_arguments_json_string(self):
         """Test argument sanitization with JSON string input"""
         task_handler = TaskHandler(
             llm_client=self.llm_client,
-            mcp_clients={'github': self.github_mcp_client},
-            config=self.config
+            mcp_clients={"github": self.github_mcp_client},
+            config=self.config,
         )
-        
+
         # Test with valid JSON string
         args_json = '{"owner": "testorg", "repo": "testrepo", "issue_number": 1}'
         sanitized = task_handler.sanitize_arguments(args_json)
-        expected = {'owner': 'testorg', 'repo': 'testrepo', 'issue_number': 1}
+        expected = {"owner": "testorg", "repo": "testrepo", "issue_number": 1}
         self.assertEqual(sanitized, expected)
-    
+
     def test_sanitize_arguments_invalid_json(self):
         """Test argument sanitization with invalid JSON"""
         task_handler = TaskHandler(
             llm_client=self.llm_client,
             mcp_clients={"github": self.github_mcp_client},
-            config=self.config
+            config=self.config,
         )
-        
+
         # Test with invalid JSON
         with self.assertRaises(ValueError):
             task_handler.sanitize_arguments('{"invalid": json}')
-    
+
     def test_sanitize_arguments_invalid_type(self):
         """Test argument sanitization with invalid type"""
         task_handler = TaskHandler(
             llm_client=self.llm_client,
             mcp_clients={"github": self.github_mcp_client},
-            config=self.config
+            config=self.config,
         )
-        
+
         # Test with invalid type
         with self.assertRaises(TypeError):
             task_handler.sanitize_arguments(123)
-    
+
     def test_handle_task_basic_workflow(self):
         """Test basic task handling workflow"""
         # Set up LLM client with completion response
-        self.llm_client.set_mock_response({
-            "comment": "Task completed successfully",
-            "done": True
-        })
-        
+        self.llm_client.set_mock_response({"comment": "Task completed successfully", "done": True})
+
         task_handler = TaskHandler(
             llm_client=self.llm_client,
             mcp_clients={"github": self.github_mcp_client},
-            config=self.config
+            config=self.config,
         )
-        
+
         # Handle the task
         result = task_handler.handle(self.github_task)
-        
+
         # Should complete without errors
         self.assertIsNone(result)  # handle() method returns None on completion
-    
+
     def test_handle_task_with_tool_calls(self):
         """Test task handling with tool calls"""
         # Use LLM client that makes tool calls
         tool_call_llm = MockLLMClientWithToolCalls(self.config)
-        
+
         task_handler = TaskHandler(
             llm_client=tool_call_llm,
             mcp_clients={"github": self.github_mcp_client},
-            config=self.config
+            config=self.config,
         )
-        
+
         # Handle the task
         result = task_handler.handle(self.github_task)
-        
+
         # Should complete after making tool calls
         self.assertIsNone(result)
-    
+
     def test_handle_task_with_think_tags(self):
         """Test handling of <think> tags in LLM responses"""
         # Set up LLM response with think tags
-        think_response = "<think>Let me analyze this issue</think>\n" + json.dumps({
-            "comment": "After thinking, I understand the issue",
-            "done": True
-        })
-        
+        think_response = "<think>Let me analyze this issue</think>\n" + json.dumps(
+            {"comment": "After thinking, I understand the issue", "done": True},
+        )
+
         self.llm_client.set_custom_responses([(think_response, [])])
-        
+
         task_handler = TaskHandler(
             llm_client=self.llm_client,
             mcp_clients={"github": self.github_mcp_client},
-            config=self.config
+            config=self.config,
         )
-        
+
         # Mock the task's comment method to verify think content is posted
         self.github_task.comment = MagicMock()
-        
+
         # Handle the task
         task_handler.handle(self.github_task)
-        
+
         # Verify that think content was posted as comment
         # Check that comment was called with the think content (may have mention=True due to task logic)
         self.github_task.comment.assert_called()
-    
+
     def test_handle_task_with_errors(self):
         """Test task handling with LLM errors"""
         # Use error-prone LLM client
         error_llm = MockLLMClientWithErrors(self.config)
-        
+
         task_handler = TaskHandler(
-            llm_client=error_llm,
-            mcp_clients={"github": self.github_mcp_client},
-            config=self.config
+            llm_client=error_llm, mcp_clients={"github": self.github_mcp_client}, config=self.config,
         )
-        
+
         # Handle the task (should handle errors gracefully)
         try:
             result = task_handler.handle(self.github_task)
@@ -206,7 +204,7 @@ class TestTaskHandler(unittest.TestCase):
         except Exception as e:
             # Should not raise unhandled exceptions
             self.fail(f"TaskHandler should handle errors gracefully, but got: {e}")
-    
+
     def test_handle_task_max_iterations(self):
         """Test task handling with maximum iteration limit"""
         # Set up LLM that never completes (done=False always)
@@ -215,39 +213,39 @@ class TestTaskHandler(unittest.TestCase):
             for i in range(15)  # More than max_llm_process_num
         ]
         self.llm_client.set_custom_responses(never_done_responses)
-        
+
         # Set a low max iteration count for testing
         config_with_low_max = self.config.copy()
-        config_with_low_max['max_llm_process_num'] = 5
-        
+        config_with_low_max["max_llm_process_num"] = 5
+
         task_handler = TaskHandler(
             llm_client=self.llm_client,
             mcp_clients={"github": self.github_mcp_client},
-            config=config_with_low_max
+            config=config_with_low_max,
         )
-        
+
         # Handle the task (should stop after max iterations)
         result = task_handler.handle(self.github_task)
-        
+
         # Should stop due to max iterations
         self.assertIsNone(result)
-    
+
     def test_handle_task_with_invalid_json_responses(self):
         """Test handling of invalid JSON responses from LLM"""
         # Set up invalid JSON responses
         invalid_responses = [
             ("Invalid JSON {", []),
             ("Another invalid response", []),
-            (json.dumps({"comment": "Finally valid", "done": True}), [])
+            (json.dumps({"comment": "Finally valid", "done": True}), []),
         ]
         self.llm_client.set_custom_responses(invalid_responses)
-        
+
         task_handler = TaskHandler(
             llm_client=self.llm_client,
             mcp_clients={"github": self.github_mcp_client},
-            config=self.config
+            config=self.config,
         )
-        
+
         # Handle the task (should handle invalid JSON gracefully)
         try:
             result = task_handler.handle(self.github_task)
@@ -255,50 +253,66 @@ class TestTaskHandler(unittest.TestCase):
         except Exception as e:
             # Should not crash on invalid JSON
             self.fail(f"TaskHandler should handle invalid JSON gracefully, but got: {e}")
-    
+
     def test_handle_task_tool_error_management(self):
         """Test tool error management and retry logic"""
         # Create MCP client that fails on first few calls
-        error_mcp_client = MockMCPToolClient({'mcp_server_name': 'github'})
+        error_mcp_client = MockMCPToolClient({"mcp_server_name": "github"})
         call_count = 0
         original_call_tool = error_mcp_client.call_tool
-        
+
         def failing_call_tool(tool, args):
             nonlocal call_count
             call_count += 1
             if call_count <= 2:  # Fail first 2 calls
-                raise ExceptionGroup("Tool call failed", [ExceptionGroup("Tool call failed",[McpError("Tool call failed")])])
+                raise ExceptionGroup(
+                    "Tool call failed",
+                    [ExceptionGroup("Tool call failed", [McpError("Tool call failed")])],
+                )
             return original_call_tool(tool, args)
-        
+
         error_mcp_client.call_tool = failing_call_tool
-        
+
         # Set up LLM to make tool calls
         tool_responses = [
-            (json.dumps({
-                "command": {"tool": "github_get_issue", "args": {"issue_number": 1}},
-                "comment": "Getting issue details",
-                "done": False
-            }), []),
-            (json.dumps({
-                "command": {"tool": "github_get_issue", "args": {"issue_number": 1}},
-                "comment": "Retrying to get issue details",
-                "done": False
-            }), []),
-            (json.dumps({
-                "command": {"tool": "github_get_issue", "args": {"issue_number": 1}},
-                "comment": "Finally got issue details",
-                "done": False
-            }), []),
-            (json.dumps({"comment": "Task completed", "done": True}), [])
+            (
+                json.dumps(
+                    {
+                        "command": {"tool": "github_get_issue", "args": {"issue_number": 1}},
+                        "comment": "Getting issue details",
+                        "done": False,
+                    },
+                ),
+                [],
+            ),
+            (
+                json.dumps(
+                    {
+                        "command": {"tool": "github_get_issue", "args": {"issue_number": 1}},
+                        "comment": "Retrying to get issue details",
+                        "done": False,
+                    },
+                ),
+                [],
+            ),
+            (
+                json.dumps(
+                    {
+                        "command": {"tool": "github_get_issue", "args": {"issue_number": 1}},
+                        "comment": "Finally got issue details",
+                        "done": False,
+                    },
+                ),
+                [],
+            ),
+            (json.dumps({"comment": "Task completed", "done": True}), []),
         ]
         self.llm_client.set_custom_responses(tool_responses)
-        
+
         task_handler = TaskHandler(
-            llm_client=self.llm_client,
-            mcp_clients={"github": error_mcp_client},
-            config=self.config
+            llm_client=self.llm_client, mcp_clients={"github": error_mcp_client}, config=self.config,
         )
-        
+
         # Handle the task
         try:
             result = task_handler.handle(self.github_task)
@@ -306,15 +320,15 @@ class TestTaskHandler(unittest.TestCase):
         except Exception as e:
             # May fail due to tool errors, which is acceptable
             self.assertIn("Tool call failed", str(e))
-    
+
     def test_make_system_prompt(self):
         """Test system prompt generation"""
         task_handler = TaskHandler(
             llm_client=self.llm_client,
             mcp_clients={"github": self.github_mcp_client},
-            config=self.config
+            config=self.config,
         )
-        
+
         # Test that system prompt is generated
         system_prompt = task_handler._make_system_prompt()
         self.assertIsInstance(system_prompt, str)
@@ -323,78 +337,74 @@ class TestTaskHandler(unittest.TestCase):
 
 class TestTaskHandlerWithDifferentTasks(unittest.TestCase):
     """Test TaskHandler with different types of tasks"""
-    
+
     def setUp(self):
         """Set up test environment"""
         self.config = {
-            'gitlab': {
-                'project_id': 123,
-                'bot_label': 'coding agent',
-                'processing_label': 'coding agent processing',
-                'done_label': 'coding agent done'
+            "gitlab": {
+                "project_id": 123,
+                "bot_label": "coding agent",
+                "processing_label": "coding agent processing",
+                "done_label": "coding agent done",
             },
-            'max_llm_process_num': 10
+            "max_llm_process_num": 10,
         }
-        
+
         # Create mock GitLab components
-        gitlab_server_config = {'mcp_server_name': 'gitlab'}
+        gitlab_server_config = {"mcp_server_name": "gitlab"}
         self.gitlab_mcp_client = MockMCPToolClient(gitlab_server_config)
         self.llm_client = MockLLMClient(self.config)
-        
+
         # Create sample GitLab task
         sample_gitlab_issue = {
-            'iid': 1,
-            'title': 'Test GitLab Issue',
-            'description': 'Test GitLab issue description',
-            'project_id': 123,
-            'labels': ['coding agent']
+            "iid": 1,
+            "title": "Test GitLab Issue",
+            "description": "Test GitLab issue description",
+            "project_id": 123,
+            "labels": ["coding agent"],
         }
-        
+
         self.gitlab_task = TaskGitLabIssue(
             issue=sample_gitlab_issue,
             mcp_client=self.gitlab_mcp_client,
             gitlab_client=MagicMock(),
-            config=self.config
+            config=self.config,
         )
-    
+
     def test_handle_gitlab_task(self):
         """Test handling GitLab tasks"""
-        self.llm_client.set_mock_response({
-            "comment": "GitLab task completed",
-            "done": True
-        })
-        
+        self.llm_client.set_mock_response({"comment": "GitLab task completed", "done": True})
+
         task_handler = TaskHandler(
             llm_client=self.llm_client,
             mcp_clients={"gitlab": self.gitlab_mcp_client},
-            config=self.config
+            config=self.config,
         )
-        
+
         # Handle GitLab task
         result = task_handler.handle(self.gitlab_task)
         self.assertIsNone(result)  # Should complete successfully
-    
+
     def test_handle_task_with_multiple_mcp_clients(self):
         """Test task handling with multiple MCP clients"""
         # Create both GitHub and GitLab MCP clients
-        github_mcp = MockMCPToolClient({'mcp_server_name': 'github'})
-        gitlab_mcp = MockMCPToolClient({'mcp_server_name': 'gitlab'})
-        
-        self.llm_client.set_mock_response({
-            "comment": "Task completed with multiple MCP clients",
-            "done": True
-        })
-        
+        github_mcp = MockMCPToolClient({"mcp_server_name": "github"})
+        gitlab_mcp = MockMCPToolClient({"mcp_server_name": "gitlab"})
+
+        self.llm_client.set_mock_response(
+            {"comment": "Task completed with multiple MCP clients", "done": True},
+        )
+
         task_handler = TaskHandler(
             llm_client=self.llm_client,
             mcp_clients={"github": github_mcp, "gitlab": gitlab_mcp},
-            config=self.config
+            config=self.config,
         )
-        
+
         # Handle task
         result = task_handler.handle(self.gitlab_task)
         self.assertIsNone(result)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
