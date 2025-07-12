@@ -1,11 +1,10 @@
 import json
-import os
 
 from .llm_base import LLMClient
 
 
 class OpenAIClient(LLMClient):
-    def __init__(self, config, functions=None, tools=None):
+    def __init__(self, config, functions=None, tools=None) -> None:
         import openai
 
         api_key = config.get("api_key", "OPENAI_API_KEY")

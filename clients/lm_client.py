@@ -28,7 +28,8 @@ def get_llm_client(config, functions=None, tools=None) -> LLMClient:
     prov = config["llm"]["provider"]
     if prov == "lmstudio":
         if functions is not None:
-            raise ValueError("LMStudio does not support functions. use openapi compatible call.")
+            msg = "LMStudio does not support functions. use openapi compatible call."
+            raise ValueError(msg)
         return LMStudioClient(config["llm"]["lmstudio"])
     if prov == "ollama":
         # TODO: functions support
@@ -42,6 +43,8 @@ def get_llm_client(config, functions=None, tools=None) -> LLMClient:
 
             return get_mock_llm_client(config, functions, tools)
         except ImportError:
-            raise ValueError("Mock LLM client not available - this should only be used in tests")
+            msg = "Mock LLM client not available - this should only be used in tests"
+            raise ValueError(msg)
     else:
-        raise ValueError(f"Unknown llm.provider: {prov}")
+        msg = f"Unknown llm.provider: {prov}"
+        raise ValueError(msg)

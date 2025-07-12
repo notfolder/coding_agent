@@ -1,22 +1,21 @@
-"""Comprehensive mock MCP client for testing GitHub and GitLab functionality
-"""
+"""Comprehensive mock MCP client for testing GitHub and GitLab functionality."""
 
 import json
 from typing import Any, Dict, List, Optional
 
 
 class MockTool:
-    """Mock tool representation"""
+    """Mock tool representation."""
 
-    def __init__(self, name: str, description: str = ""):
+    def __init__(self, name: str, description: str = "") -> None:
         self.name = name
         self.description = description
 
 
 class MockMCPToolClient:
-    """Comprehensive mock implementation of MCPToolClient with GitHub and GitLab support"""
+    """Comprehensive mock implementation of MCPToolClient with GitHub and GitLab support."""
 
-    def __init__(self, server_config, function_calling=True):
+    def __init__(self, server_config, function_calling=True) -> None:
         self.server_config = server_config
         self.function_calling = function_calling
         self.server_name = server_config.get("mcp_server_name", "unknown")
@@ -25,8 +24,8 @@ class MockMCPToolClient:
         # Initialize mock data based on server type
         self._setup_mock_data()
 
-    def _setup_mock_data(self):
-        """Setup mock data structures for different server types"""
+    def _setup_mock_data(self) -> None:
+        """Setup mock data structures for different server types."""
         if "github" in self.server_name.lower():
             self._setup_github_mock_data()
         elif "gitlab" in self.server_name.lower():
@@ -34,8 +33,8 @@ class MockMCPToolClient:
         else:
             self.mock_data = {}
 
-    def _setup_github_mock_data(self):
-        """Setup comprehensive GitHub mock data"""
+    def _setup_github_mock_data(self) -> None:
+        """Setup comprehensive GitHub mock data."""
         self.mock_data = {
             "issues": [
                 {
@@ -86,8 +85,8 @@ class MockMCPToolClient:
             "updated_issues": {},  # Track issues that have been updated
         }
 
-    def _setup_gitlab_mock_data(self):
-        """Setup comprehensive GitLab mock data"""
+    def _setup_gitlab_mock_data(self) -> None:
+        """Setup comprehensive GitLab mock data."""
         self.mock_data = {
             "issues": [
                 {
@@ -137,16 +136,16 @@ class MockMCPToolClient:
             "updated_issues": {},  # Track issues that have been updated
         }
 
-    def call_tool(self, tool: str, args: Dict[str, Any]) -> Any:
-        """Mock tool call implementation with comprehensive GitHub/GitLab support"""
+    def call_tool(self, tool: str, args: dict[str, Any]) -> Any:
+        """Mock tool call implementation with comprehensive GitHub/GitLab support."""
         if "github" in self.server_name.lower():
             return self._handle_github_tool(tool, args)
         if "gitlab" in self.server_name.lower():
             return self._handle_gitlab_tool(tool, args)
         return {}
 
-    def _handle_github_tool(self, tool: str, args: Dict[str, Any]) -> Any:
-        """Handle GitHub-specific tool calls"""
+    def _handle_github_tool(self, tool: str, args: dict[str, Any]) -> Any:
+        """Handle GitHub-specific tool calls."""
         if tool == "search_issues":
             # Return issues matching query (simple label-based filtering)
             query = args.get("q", "")
@@ -206,8 +205,8 @@ class MockMCPToolClient:
 
         return {}
 
-    def _handle_gitlab_tool(self, tool: str, args: Dict[str, Any]) -> Any:
-        """Handle GitLab-specific tool calls"""
+    def _handle_gitlab_tool(self, tool: str, args: dict[str, Any]) -> Any:
+        """Handle GitLab-specific tool calls."""
         if tool == "list_issues":
             # Return issues matching criteria
             project_id = args.get("project_id")
@@ -272,12 +271,12 @@ class MockMCPToolClient:
 
         return {}
 
-    def call_initialize(self):
-        """Mock initialize call"""
+    def call_initialize(self) -> None:
+        """Mock initialize call."""
         return
 
     def list_tools(self):
-        """Mock list tools based on server type"""
+        """Mock list tools based on server type."""
         if "github" in self.server_name.lower():
             return [
                 MockTool("search_issues", "Search for issues"),
@@ -297,25 +296,25 @@ class MockMCPToolClient:
         return []
 
     @property
-    def system_prompt(self):
-        """Mock system prompt"""
+    def system_prompt(self) -> str:
+        """Mock system prompt."""
         return f"Mock {self.server_name} MCP server for testing"
 
-    def close(self):
-        """Mock close"""
+    def close(self) -> None:
+        """Mock close."""
 
     def get_function_calling_functions(self):
-        """Mock function calling functions"""
+        """Mock function calling functions."""
         return []
 
     def get_function_calling_tools(self):
-        """Mock function calling tools"""
+        """Mock function calling tools."""
         return []
 
     def get_mock_data(self):
-        """Get mock data for inspection in tests"""
+        """Get mock data for inspection in tests."""
         return self.mock_data
 
-    def reset_mock_data(self):
-        """Reset mock data to initial state"""
+    def reset_mock_data(self) -> None:
+        """Reset mock data to initial state."""
         self._setup_mock_data()

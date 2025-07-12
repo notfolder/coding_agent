@@ -8,7 +8,7 @@ from .task_key import GitHubIssueTaskKey, GitHubPullRequestTaskKey
 
 
 class TaskGitHubIssue(Task):
-    def __init__(self, issue, mcp_client, github_client, config):
+    def __init__(self, issue, mcp_client, github_client, config) -> None:
         self.issue = issue
         self.issue["repo"] = issue["repository_url"].split("/")[-1]
         self.issue["owner"] = issue["repository_url"].split("/")[-2]
@@ -17,7 +17,7 @@ class TaskGitHubIssue(Task):
         self.config = config
         self.labels = [label.get("name", "") for label in issue.get("labels", [])]
 
-    def prepare(self):
+    def prepare(self) -> None:
         # ラベル付け変更
         self.labels.remove(self.config["github"]["bot_label"]) if self.config["github"][
             "bot_label"
@@ -34,7 +34,7 @@ class TaskGitHubIssue(Task):
         }
         self.mcp_client.call_tool("update_issue", args)
 
-    def get_prompt(self):
+    def get_prompt(self) -> str:
         # issue内容・コメント取得
         args = {
             "owner": self.config["github"]["owner"],
@@ -55,7 +55,7 @@ class TaskGitHubIssue(Task):
             f"COMMENTS: {comments}"
         )
 
-    def comment(self, text, mention=False):
+    def comment(self, text, mention=False) -> None:
         if mention:
             owner = self.issue.get("owner")
             if owner:
@@ -68,7 +68,7 @@ class TaskGitHubIssue(Task):
         }
         self.mcp_client.call_tool("add_issue_comment", args)
 
-    def finish(self):
+    def finish(self) -> None:
         # ラベル付け変更
         label = self.config["github"]["processing_label"]
         self.labels.remove(label) if label in self.labels else None
@@ -90,7 +90,7 @@ class TaskGitHubIssue(Task):
 
 
 class TaskGitHubPullRequest(Task):
-    def __init__(self, pr, mcp_client, github_client, config):
+    def __init__(self, pr, mcp_client, github_client, config) -> None:
         self.pr = pr
         repository_url = pr.get("repository_url", None)
         if repository_url is None:
@@ -105,7 +105,7 @@ class TaskGitHubPullRequest(Task):
             for label in pr.get("labels", [])
         ]  # ラベルが辞書型であることを確認
 
-    def prepare(self):
+    def prepare(self) -> None:
         # ラベル付け変更
         self.labels = list(set(self.labels))
         self.labels.append(self.config["github"]["processing_label"]) if self.config["github"][
@@ -118,7 +118,7 @@ class TaskGitHubPullRequest(Task):
             self.pr["owner"], self.pr["repo"], self.pr["number"], self.labels,
         )
 
-    def get_prompt(self):
+    def get_prompt(self) -> str:
         comments = self.github_client.get_pull_request_comments(
             owner=self.pr["owner"], repo=self.pr["repo"], pull_number=self.pr["number"],
         )
@@ -135,7 +135,7 @@ class TaskGitHubPullRequest(Task):
         }
         return f"PULL_REQUEST: {json.dumps(pr_info, ensure_ascii=False)}\n"
 
-    def comment(self, text, mention=False):
+    def comment(self, text, mention=False) -> None:
         if mention:
             owner = self.pr.get("owner")
             if owner:
@@ -144,7 +144,7 @@ class TaskGitHubPullRequest(Task):
             owner=self.pr["owner"], repo=self.pr["repo"], pull_number=self.pr["number"], body=text,
         )
 
-    def finish(self):
+    def finish(self) -> None:
         label = self.config["github"]["processing_label"]
         if label in self.labels:
             self.labels.remove(label)
@@ -168,7 +168,7 @@ class TaskGitHubPullRequest(Task):
 
 
 class TaskGetterFromGitHub(TaskGetter):
-    def __init__(self, config, mcp_clients):
+    def __init__(self, config, mcp_clients) -> None:
         self.config = config
         self.mcp_client = mcp_clients["github"]
         self.github_client = GithubClient()

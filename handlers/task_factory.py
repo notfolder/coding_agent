@@ -16,7 +16,7 @@ class TaskFactory(ABC):
 
 
 class GitHubTaskFactory(TaskFactory):
-    def __init__(self, mcp_client, github_client, config):
+    def __init__(self, mcp_client, github_client, config) -> None:
         self.mcp_client = mcp_client
         self.github_client = github_client
         self.config = config
@@ -37,11 +37,12 @@ class GitHubTaskFactory(TaskFactory):
             from .task_getter_github import TaskGitHubPullRequest
 
             return TaskGitHubPullRequest(pr, self.mcp_client, self.github_client, self.config)
-        raise ValueError("Unknown task key type for GitHub")
+        msg = "Unknown task key type for GitHub"
+        raise ValueError(msg)
 
 
 class GitLabTaskFactory(TaskFactory):
-    def __init__(self, mcp_client, gitlab_client, config):
+    def __init__(self, mcp_client, gitlab_client, config) -> None:
         self.mcp_client = mcp_client
         self.gitlab_client = gitlab_client
         self.config = config
@@ -61,4 +62,5 @@ class GitLabTaskFactory(TaskFactory):
             from .task_getter_gitlab import TaskGitLabMergeRequest
 
             return TaskGitLabMergeRequest(mr, self.mcp_client, self.gitlab_client, self.config)
-        raise ValueError("Unknown task key type for GitLab")
+        msg = "Unknown task key type for GitLab"
+        raise ValueError(msg)

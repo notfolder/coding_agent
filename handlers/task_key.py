@@ -13,7 +13,7 @@ class TaskKey(ABC):
 
 
 class GitHubIssueTaskKey(TaskKey):
-    def __init__(self, owner, repo, number):
+    def __init__(self, owner, repo, number) -> None:
         self.owner = owner
         self.repo = repo
         self.number = number
@@ -32,7 +32,7 @@ class GitHubIssueTaskKey(TaskKey):
 
 
 class GitHubPullRequestTaskKey(TaskKey):
-    def __init__(self, owner, repo, number):
+    def __init__(self, owner, repo, number) -> None:
         self.owner = owner
         self.repo = repo
         self.number = number
@@ -51,7 +51,7 @@ class GitHubPullRequestTaskKey(TaskKey):
 
 
 class GitLabIssueTaskKey(TaskKey):
-    def __init__(self, project_id, issue_iid):
+    def __init__(self, project_id, issue_iid) -> None:
         self.project_id = project_id
         self.issue_iid = issue_iid
 
@@ -64,7 +64,7 @@ class GitLabIssueTaskKey(TaskKey):
 
 
 class GitLabMergeRequestTaskKey(TaskKey):
-    def __init__(self, project_id, mr_iid):
+    def __init__(self, project_id, mr_iid) -> None:
         self.project_id = project_id
         self.mr_iid = mr_iid
 

@@ -2,7 +2,7 @@ from .llm_base import LLMClient
 
 
 class LMStudioClient(LLMClient):
-    def __init__(self, config):
+    def __init__(self, config) -> None:
         import lmstudio as lms
 
         lms.configure_default_client(config.get("base_url", "localhost:1234"))
@@ -18,8 +18,9 @@ class LMStudioClient(LLMClient):
         self.chat.add_user_message(message)
 
     def send_function_result(self, name: str, result) -> None:
+        msg = "LMStudio does not support function calls. Use OpenAI compatible call instead."
         raise NotImplementedError(
-            "LMStudio does not support function calls. Use OpenAI compatible call instead.",
+            msg,
         )
 
     def get_response(self) -> str:
@@ -30,7 +31,7 @@ class LMStudioClient(LLMClient):
 
 
 class OllamaClient(LLMClient):
-    def __init__(self, config):
+    def __init__(self, config) -> None:
         from ollama import chat
 
         self.chat = chat

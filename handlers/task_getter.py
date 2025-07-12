@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import NoReturn
 
 
 class TaskGetter(ABC):
@@ -17,9 +18,11 @@ class TaskGetter(ABC):
             from .task_getter_gitlab import TaskGetterFromGitLab
 
             return TaskGetterFromGitLab(config, mcp_clients)
-        raise ValueError(f"Unknown task_source: {task_source}")
+        msg = f"Unknown task_source: {task_source}"
+        raise ValueError(msg)
 
     @abstractmethod
-    def from_task_key(self, task_key_dict):
-        """タスクキーからタスクを生成"""
-        raise NotImplementedError("from_task_keyはサブクラスで実装してください")
+    def from_task_key(self, task_key_dict) -> NoReturn:
+        """タスクキーからタスクを生成."""
+        msg = "from_task_keyはサブクラスで実装してください"
+        raise NotImplementedError(msg)

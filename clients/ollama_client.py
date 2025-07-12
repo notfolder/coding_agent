@@ -2,7 +2,7 @@ from .llm_base import LLMClient
 
 
 class OllamaClient(LLMClient):
-    def __init__(self, config):
+    def __init__(self, config) -> None:
         from ollama import chat
 
         self.chat = chat
@@ -22,8 +22,9 @@ class OllamaClient(LLMClient):
             total_chars = sum(len(m["content"]) for m in self.messages)
 
     def send_function_result(self, name: str, result) -> None:
+        msg = "Ollama does not support function calls. Use OpenAI compatible call instead."
         raise NotImplementedError(
-            "Ollama does not support function calls. Use OpenAI compatible call instead.",
+            msg,
         )
 
     def get_response(self) -> str:

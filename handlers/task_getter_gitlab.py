@@ -1,4 +1,3 @@
-import json
 
 from clients.gitlab_client import GitlabClient
 
@@ -8,7 +7,7 @@ from .task_key import GitLabIssueTaskKey, GitLabMergeRequestTaskKey
 
 
 class TaskGitLabIssue(Task):
-    def __init__(self, issue, mcp_client, gitlab_client, config):
+    def __init__(self, issue, mcp_client, gitlab_client, config) -> None:
         self.issue = issue
         self.project_id = issue.get("project_id")
         self.issue_iid = issue.get("iid")
@@ -16,7 +15,7 @@ class TaskGitLabIssue(Task):
         self.gitlab_client = gitlab_client
         self.config = config
 
-    def prepare(self):
+    def prepare(self) -> None:
         # ラベル付け変更: bot_label → processing_label
         labels = self.issue.get("labels", [])
         if self.config["gitlab"]["bot_label"] in labels:
@@ -27,11 +26,11 @@ class TaskGitLabIssue(Task):
         self.issue["labels"] = labels
         self.mcp_client.call_tool("update_issue", args)
 
-    def get_prompt(self):
+    def get_prompt(self) -> str:
         # issue本体取得
         args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid}
         issue_detail = self.mcp_client.call_tool("get_issue", args)
-        # コメント取得（GitLabはノートとして管理）
+        # コメント取得(GitLabはノートとして管理)
         comments = []
         note_args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid}
         comments = self.mcp_client.call_tool("list_issue_discussions", note_args)
@@ -47,7 +46,7 @@ class TaskGitLabIssue(Task):
             f"COMMENTS: {comments}"
         )
 
-    def comment(self, text, mention=False):
+    def comment(self, text, mention=False) -> None:
         if mention:
             owner = self.issue.get("author", {}).get("username")
             if owner:
@@ -60,7 +59,7 @@ class TaskGitLabIssue(Task):
         }
         self.mcp_client.call_tool("create_note", args)
 
-    def finish(self):
+    def finish(self) -> None:
         # ラベル付け変更: processing_label → done_label
         labels = self.issue.get("labels", [])
         if self.config["gitlab"]["processing_label"] in labels:
@@ -79,16 +78,16 @@ class TaskGitLabIssue(Task):
 
 
 class TaskGitLabMergeRequest(Task):
-    def __init__(self, mr, mcp_client, gitlab_client, config):
+    def __init__(self, mr, mcp_client, gitlab_client, config) -> None:
         self.mr = mr
         self.project_id = mr.get("project_id")
         self.merge_request_iid = mr.get("iid")
         self.mcp_client = mcp_client
         self.gitlab_client = gitlab_client
         self.config = config
-        self.labels = [label for label in mr.get("labels", [])]
+        self.labels = list(mr.get("labels", []))
 
-    def prepare(self):
+    def prepare(self) -> None:
         # ラベル付け変更: bot_label → processing_label
         if self.config["gitlab"]["bot_label"] in self.labels:
             self.labels.remove(self.config["gitlab"]["bot_label"])
@@ -100,8 +99,8 @@ class TaskGitLabMergeRequest(Task):
         )
         self.mr["labels"] = self.labels
 
-    def get_prompt(self):
-        # コメント取得（GitLabはノートとして管理）
+    def get_prompt(self) -> str:
+        # コメント取得(GitLabはノートとして管理)
         comments = self.gitlab_client.list_merge_request_notes(
             project_id=self.project_id, merge_request_iid=self.merge_request_iid,
         )
@@ -115,7 +114,7 @@ class TaskGitLabMergeRequest(Task):
             f"COMMENTS: {comments}"
         )
 
-    def comment(self, text, mention=False):
+    def comment(self, text, mention=False) -> None:
         if mention:
             owner = self.mr.get("author", {}).get("username")
             if owner:
@@ -125,7 +124,7 @@ class TaskGitLabMergeRequest(Task):
             project_id=self.project_id, merge_request_iid=self.merge_request_iid, body=text,
         )
 
-    def finish(self):
+    def finish(self) -> None:
         # ラベル付け変更: processing_label → done_label
         if self.config["gitlab"]["processing_label"] in self.labels:
             self.labels.remove(self.config["gitlab"]["processing_label"])
@@ -145,7 +144,7 @@ class TaskGitLabMergeRequest(Task):
 
 
 class TaskGetterFromGitLab(TaskGetter):
-    def __init__(self, config, mcp_clients):
+    def __init__(self, config, mcp_clients) -> None:
         self.config = config
         self.mcp_client = mcp_clients["gitlab"]
         self.gitlab_client = GitlabClient()

@@ -1,5 +1,4 @@
-"""Simple integration test for GitHub and GitLab workflows
-"""
+"""Simple integration test for GitHub and GitLab workflows."""
 
 import os
 import sys
@@ -21,10 +20,10 @@ from tests.mocks.mock_mcp_client import MockMCPToolClient
 
 
 class TestSimpleWorkflow(unittest.TestCase):
-    """Simple workflow integration test"""
+    """Simple workflow integration test."""
 
-    def setUp(self):
-        """Set up test environment"""
+    def setUp(self) -> None:
+        """Set up test environment."""
         self.config = {
             "github": {
                 "owner": "testorg",
@@ -49,8 +48,8 @@ class TestSimpleWorkflow(unittest.TestCase):
         self.gitlab_mcp_client = MockMCPToolClient({"mcp_server_name": "gitlab"})
         self.llm_client = MockLLMClient(self.config)
 
-    def test_basic_integration_workflow(self):
-        """Test basic integration workflow"""
+    def test_basic_integration_workflow(self) -> None:
+        """Test basic integration workflow."""
         # Set up simple LLM response
         self.llm_client.set_mock_response({"comment": "Integration test completed", "done": True})
 
@@ -74,7 +73,7 @@ class TestSimpleWorkflow(unittest.TestCase):
         result = task_handler.handle(github_task)
 
         # Should complete without errors
-        self.assertIsNone(result)
+        assert result is None
 
 
 if __name__ == "__main__":

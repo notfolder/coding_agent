@@ -1,5 +1,5 @@
-"""Mock LLM client for testing
-"""
+"""Mock LLM client for testing."""
+from __future__ import annotations
 
 import json
 import os
@@ -12,9 +12,9 @@ from clients.llm_base import LLMClient
 
 
 class MockLLMClient(LLMClient):
-    """Mock implementation of LLM client for testing"""
+    """Mock implementation of LLM client for testing."""
 
-    def __init__(self, config: Dict[str, Any], functions: List = None, tools: List = None):
+    def __init__(self, config: dict[str, Any], functions: list | None = None, tools: list | None = None) -> None:
         self.config = config
         self.functions = functions or []
         self.tools = tools or []
@@ -26,8 +26,8 @@ class MockLLMClient(LLMClient):
         # Default responses for testing
         self._setup_default_responses()
 
-    def _setup_default_responses(self):
-        """Setup default responses for testing scenarios"""
+    def _setup_default_responses(self) -> None:
+        """Setup default responses for testing scenarios."""
         self.response_queue = [
             # Initial response with a simple tool call
             (
@@ -74,20 +74,20 @@ class MockLLMClient(LLMClient):
             ),
         ]
 
-    def send_system_prompt(self, prompt: str):
-        """Store system prompt"""
+    def send_system_prompt(self, prompt: str) -> None:
+        """Store system prompt."""
         self.system_prompt = prompt
 
-    def send_user_message(self, message: str):
-        """Store user message"""
+    def send_user_message(self, message: str) -> None:
+        """Store user message."""
         self.user_messages.append(message)
 
     def send_function_result(self, name: str, result) -> None:
-        """Store function result"""
+        """Store function result."""
         # Not needed for current tests
 
-    def get_response(self) -> Tuple[str, List]:
-        """Get mock response"""
+    def get_response(self) -> tuple[str, list]:
+        """Get mock response."""
         if self.current_response_index < len(self.response_queue):
             response = self.response_queue[self.current_response_index]
             self.current_response_index += 1
@@ -95,24 +95,24 @@ class MockLLMClient(LLMClient):
         # Default completion response
         return (json.dumps({"comment": "No more responses", "done": True}), [])
 
-    def set_custom_responses(self, responses: List[Tuple[str, List]]):
-        """Set custom response queue for specific tests"""
+    def set_custom_responses(self, responses: list[tuple[str, list]]) -> None:
+        """Set custom response queue for specific tests."""
         self.response_queue = responses
         self.current_response_index = 0
 
-    def set_mock_response(self, response_data: Dict[str, Any]):
-        """Set a single mock response (convenience method)"""
+    def set_mock_response(self, response_data: dict[str, Any]) -> None:
+        """Set a single mock response (convenience method)."""
         response_json = json.dumps(response_data)
         self.response_queue = [(response_json, [])]
         self.current_response_index = 0
 
-    def add_mock_response(self, response_data: Dict[str, Any]):
-        """Add a mock response to the queue"""
+    def add_mock_response(self, response_data: dict[str, Any]) -> None:
+        """Add a mock response to the queue."""
         response_json = json.dumps(response_data)
         self.response_queue.append((response_json, []))
 
-    def reset(self):
-        """Reset client state"""
+    def reset(self) -> None:
+        """Reset client state."""
         self.system_prompt = ""
         self.user_messages = []
         self.current_response_index = 0
@@ -120,17 +120,17 @@ class MockLLMClient(LLMClient):
 
 
 class MockLLMClientWithErrors(MockLLMClient):
-    """Mock LLM client that simulates errors for testing error handling"""
+    """Mock LLM client that simulates errors for testing error handling."""
 
-    def __init__(self, config: Dict[str, Any], functions: List = None, tools: List = None):
+    def __init__(self, config: dict[str, Any], functions: list | None = None, tools: list | None = None) -> None:
         super().__init__(config, functions, tools)
         self.error_count = 0
         self.max_errors = 3
         self.error_types = ["json_error", "timeout_error", "api_error"]
         self.current_error_type = 0
 
-    def get_response(self) -> Tuple[str, List]:
-        """Get response with simulated errors"""
+    def get_response(self) -> tuple[str, list]:
+        """Get response with simulated errors."""
         if self.error_count < self.max_errors:
             self.error_count += 1
             error_type = self.error_types[self.current_error_type % len(self.error_types)]
@@ -159,14 +159,14 @@ class MockLLMClientWithErrors(MockLLMClient):
 
 
 class MockLLMClientWithToolCalls(MockLLMClient):
-    """Mock LLM client that simulates tool calling scenarios"""
+    """Mock LLM client that simulates tool calling scenarios."""
 
-    def __init__(self, config: Dict[str, Any], functions: List = None, tools: List = None):
+    def __init__(self, config: dict[str, Any], functions: list | None = None, tools: list | None = None) -> None:
         super().__init__(config, functions, tools)
         self._setup_tool_call_responses()
 
-    def _setup_tool_call_responses(self):
-        """Setup responses that include tool calls"""
+    def _setup_tool_call_responses(self) -> None:
+        """Setup responses that include tool calls."""
         # Determine if we're working with GitHub or GitLab based on config
         if "github" in self.config:
             self._setup_github_responses()
@@ -175,8 +175,8 @@ class MockLLMClientWithToolCalls(MockLLMClient):
         else:
             self._setup_generic_responses()
 
-    def _setup_github_responses(self):
-        """Setup GitHub-specific tool call responses"""
+    def _setup_github_responses(self) -> None:
+        """Setup GitHub-specific tool call responses."""
         self.response_queue = [
             # Initial analysis with tool call
             (
@@ -229,8 +229,8 @@ class MockLLMClientWithToolCalls(MockLLMClient):
             (json.dumps({"comment": "GitHub task completed successfully", "done": True}), []),
         ]
 
-    def _setup_gitlab_responses(self):
-        """Setup GitLab-specific tool call responses"""
+    def _setup_gitlab_responses(self) -> None:
+        """Setup GitLab-specific tool call responses."""
         self.response_queue = [
             # Initial analysis with tool call
             (
@@ -282,8 +282,8 @@ class MockLLMClientWithToolCalls(MockLLMClient):
             (json.dumps({"comment": "GitLab task completed successfully", "done": True}), []),
         ]
 
-    def _setup_generic_responses(self):
-        """Setup generic responses without specific tool calls"""
+    def _setup_generic_responses(self) -> None:
+        """Setup generic responses without specific tool calls."""
         self.response_queue = [
             # Initial analysis with tool call
             (json.dumps({"comment": "Analyzing the task", "done": False}), []),
@@ -292,8 +292,8 @@ class MockLLMClientWithToolCalls(MockLLMClient):
         ]
 
 
-def get_mock_llm_client(config: Dict[str, Any], functions: List = None, tools: List = None):
-    """Factory function to create mock LLM client"""
+def get_mock_llm_client(config: dict[str, Any], functions: list | None = None, tools: list | None = None):
+    """Factory function to create mock LLM client."""
     provider = config.get("llm", {}).get("provider", "mock")
 
     if provider == "mock":

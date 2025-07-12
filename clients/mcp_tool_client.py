@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import json
-import logging
 import os
 import threading
 
@@ -19,7 +18,7 @@ from mcp.types import (
 
 
 class MCPToolClient:
-    def __init__(self, server_config, function_calling=True):
+    def __init__(self, server_config, function_calling=True) -> None:
         self.server_config = server_config
         self.lock = threading.Lock()
         self._system_prompt = None
@@ -29,7 +28,7 @@ class MCPToolClient:
         with self.lock:
             return self._call_tool_sync(tool, args)
 
-    def call_initialize(self):
+    def call_initialize(self) -> None:
         # MCPのClientSessionは自動でinitializeを呼ぶので何もしない
         return None
 
@@ -41,7 +40,7 @@ class MCPToolClient:
     def system_prompt(self):
         return self._get_system_prompt_sync()
 
-    def close(self):
+    def close(self) -> None:
         pass  # クライアントの状態管理が不要になったため何もしない
 
     def _run_async(self, coro):
@@ -72,9 +71,9 @@ class MCPToolClient:
         return self._run_async(wrapper())
 
     def _git_blob_sha1_from_str(self, s: str, encoding: str = "utf-8") -> str:
-        """Git blob SHA‑1 を文字列から計算する。
-        - s: テキスト文字列（例："Hello\n"）
-        - encoding: バイト化に使用するエンコーディング
+        r"""Git blob SHA-1 を文字列から計算する。
+        - s: テキスト文字列(例:"Hello\n")
+        - encoding: バイト化に使用するエンコーディング.
         """
         data = s.encode(encoding)
         header = f"blob {len(data)}\0".encode()

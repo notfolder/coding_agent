@@ -1,5 +1,4 @@
-"""Comprehensive unit tests for GitHub task components using mocks
-"""
+"""Comprehensive unit tests for GitHub task components using mocks."""
 
 import os
 import sys
@@ -9,6 +8,8 @@ from unittest.mock import MagicMock, patch
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
+import pytest
+
 from handlers.task_factory import GitHubTaskFactory
 from handlers.task_getter_github import TaskGetterFromGitHub, TaskGitHubIssue
 from handlers.task_key import GitHubIssueTaskKey, GitHubPullRequestTaskKey
@@ -17,10 +18,10 @@ from tests.mocks.mock_mcp_client import MockMCPToolClient
 
 
 class TestTaskGitHubIssue(unittest.TestCase):
-    """Test TaskGitHubIssue functionality with mock data"""
+    """Test TaskGitHubIssue functionality with mock data."""
 
-    def setUp(self):
-        """Set up test environment"""
+    def setUp(self) -> None:
+        """Set up test environment."""
         self.config = {
             "github": {
                 "owner": "testorg",
@@ -49,8 +50,8 @@ class TestTaskGitHubIssue(unittest.TestCase):
             "user": {"login": "testuser"},
         }
 
-    def test_task_github_issue_creation(self):
-        """Test TaskGitHubIssue object creation"""
+    def test_task_github_issue_creation(self) -> None:
+        """Test TaskGitHubIssue object creation."""
         task = TaskGitHubIssue(
             issue=self.sample_issue,
             mcp_client=self.mcp_client,
@@ -59,18 +60,18 @@ class TestTaskGitHubIssue(unittest.TestCase):
         )
 
         # Test basic properties
-        self.assertEqual(task.issue["number"], 1)
-        self.assertEqual(task.issue["title"], "Test GitHub Issue")
-        self.assertEqual(task.issue["repo"], "testrepo")
-        self.assertEqual(task.issue["owner"], "testorg")
+        assert task.issue["number"] == 1
+        assert task.issue["title"] == "Test GitHub Issue"
+        assert task.issue["repo"] == "testrepo"
+        assert task.issue["owner"] == "testorg"
 
         # Test labels extraction
-        self.assertIn("coding agent", task.labels)
-        self.assertIn("bug", task.labels)
-        self.assertEqual(len(task.labels), 2)
+        assert "coding agent" in task.labels
+        assert "bug" in task.labels
+        assert len(task.labels) == 2
 
-    def test_task_prepare_label_update(self):
-        """Test task preparation and label updates"""
+    def test_task_prepare_label_update(self) -> None:
+        """Test task preparation and label updates."""
         task = TaskGitHubIssue(
             issue=self.sample_issue,
             mcp_client=self.mcp_client,
@@ -82,19 +83,19 @@ class TestTaskGitHubIssue(unittest.TestCase):
         task.prepare()
 
         # Check that labels were updated
-        self.assertNotIn("coding agent", task.labels)
-        self.assertIn("coding agent processing", task.labels)
-        self.assertIn("bug", task.labels)  # Other labels should remain
+        assert "coding agent" not in task.labels
+        assert "coding agent processing" in task.labels
+        assert "bug" in task.labels  # Other labels should remain
 
         # Check that MCP client received update call
         mock_data = self.mcp_client.get_mock_data()
-        self.assertIn(1, mock_data["updated_issues"])
+        assert 1 in mock_data["updated_issues"]
         updated_labels = mock_data["updated_issues"][1]["labels"]
-        self.assertIn("coding agent processing", updated_labels)
-        self.assertNotIn("coding agent", updated_labels)
+        assert "coding agent processing" in updated_labels
+        assert "coding agent" not in updated_labels
 
-    def test_get_prompt_generation(self):
-        """Test prompt generation with issue and comments"""
+    def test_get_prompt_generation(self) -> None:
+        """Test prompt generation with issue and comments."""
         task = TaskGitHubIssue(
             issue=self.sample_issue,
             mcp_client=self.mcp_client,
@@ -106,17 +107,17 @@ class TestTaskGitHubIssue(unittest.TestCase):
         prompt = task.get_prompt()
 
         # Verify prompt contains expected information
-        self.assertIsInstance(prompt, str)
-        self.assertIn("ISSUE:", prompt)
-        self.assertIn("COMMENTS:", prompt)
-        self.assertIn("Test GitHub Issue", prompt)
-        self.assertIn("This is a test issue", prompt)
-        self.assertIn("testorg", prompt)
-        self.assertIn("testrepo", prompt)
-        self.assertIn("1", prompt)  # Issue number
+        assert isinstance(prompt, str)
+        assert "ISSUE:" in prompt
+        assert "COMMENTS:" in prompt
+        assert "Test GitHub Issue" in prompt
+        assert "This is a test issue" in prompt
+        assert "testorg" in prompt
+        assert "testrepo" in prompt
+        assert "1" in prompt  # Issue number
 
-    def test_comment_creation(self):
-        """Test comment creation functionality"""
+    def test_comment_creation(self) -> None:
+        """Test comment creation functionality."""
         task = TaskGitHubIssue(
             issue=self.sample_issue,
             mcp_client=self.mcp_client,
@@ -131,8 +132,8 @@ class TestTaskGitHubIssue(unittest.TestCase):
         # For now, test that method doesn't crash
         task.comment("This is a mentioned comment", mention=True)
 
-    def test_issue_with_missing_labels(self):
-        """Test handling of issue with missing or empty labels"""
+    def test_issue_with_missing_labels(self) -> None:
+        """Test handling of issue with missing or empty labels."""
         issue_no_labels = self.sample_issue.copy()
         issue_no_labels["labels"] = []
 
@@ -143,14 +144,14 @@ class TestTaskGitHubIssue(unittest.TestCase):
             config=self.config,
         )
 
-        self.assertEqual(len(task.labels), 0)
+        assert len(task.labels) == 0
 
         # Test prepare doesn't crash with no labels
         task.prepare()
-        self.assertIn("coding agent processing", task.labels)
+        assert "coding agent processing" in task.labels
 
-    def test_issue_with_malformed_repository_url(self):
-        """Test handling of malformed repository URL"""
+    def test_issue_with_malformed_repository_url(self) -> None:
+        """Test handling of malformed repository URL."""
         issue_bad_url = self.sample_issue.copy()
         issue_bad_url["repository_url"] = "invalid-url"
 
@@ -163,18 +164,18 @@ class TestTaskGitHubIssue(unittest.TestCase):
                 config=self.config,
             )
             # If it doesn't crash, check that it handles the error gracefully
-            self.assertIsNotNone(task.issue["owner"])
-            self.assertIsNotNone(task.issue["repo"])
+            assert task.issue["owner"] is not None
+            assert task.issue["repo"] is not None
         except (IndexError, AttributeError):
             # Expected behavior for malformed URL
             pass
 
 
 class TestTaskGetterFromGitHub(unittest.TestCase):
-    """Test TaskGetterFromGitHub functionality"""
+    """Test TaskGetterFromGitHub functionality."""
 
-    def setUp(self):
-        """Set up test environment"""
+    def setUp(self) -> None:
+        """Set up test environment."""
         self.config = {
             "github": {
                 "owner": "testorg",
@@ -192,8 +193,8 @@ class TestTaskGetterFromGitHub(unittest.TestCase):
         # Mock GitHub client
         self.github_client = MagicMock()
 
-    def test_get_tasks_basic(self):
-        """Test basic task retrieval"""
+    def test_get_tasks_basic(self) -> None:
+        """Test basic task retrieval."""
         # Create mcp_clients dict as expected by TaskGetter
         mcp_clients = {"github": self.mcp_client}
 
@@ -213,14 +214,14 @@ class TestTaskGetterFromGitHub(unittest.TestCase):
             tasks = task_getter.get_task_list()
 
             # Should return list of TaskGitHubIssue objects
-            self.assertIsInstance(tasks, list)
+            assert isinstance(tasks, list)
             if tasks:  # If issues are found
-                self.assertIsInstance(tasks[0], TaskGitHubIssue)
-                self.assertEqual(tasks[0].issue["owner"], "testorg")
-                self.assertEqual(tasks[0].issue["repo"], "testrepo")
+                assert isinstance(tasks[0], TaskGitHubIssue)
+                assert tasks[0].issue["owner"] == "testorg"
+                assert tasks[0].issue["repo"] == "testrepo"
 
-    def test_get_tasks_with_empty_results(self):
-        """Test task retrieval when no issues match criteria"""
+    def test_get_tasks_with_empty_results(self) -> None:
+        """Test task retrieval when no issues match criteria."""
         # Create MCP client with no matching data
         server_config = {"mcp_server_name": "github"}
         empty_mcp_client = MockMCPToolClient(server_config)
@@ -238,11 +239,11 @@ class TestTaskGetterFromGitHub(unittest.TestCase):
             task_getter = TaskGetterFromGitHub(config=self.config, mcp_clients=mcp_clients)
 
             tasks = task_getter.get_task_list()
-            self.assertIsInstance(tasks, list)
-            self.assertEqual(len(tasks), 0)
+            assert isinstance(tasks, list)
+            assert len(tasks) == 0
 
-    def test_get_tasks_filters_by_label(self):
-        """Test that task getter properly filters by label"""
+    def test_get_tasks_filters_by_label(self) -> None:
+        """Test that task getter properly filters by label."""
         mcp_clients = {"github": self.mcp_client}
 
         with patch("handlers.task_getter_github.GithubClient") as mock_github_client_class:
@@ -264,70 +265,70 @@ class TestTaskGetterFromGitHub(unittest.TestCase):
 
             # All returned tasks should have the 'coding agent' label
             for task in tasks:
-                self.assertIn("coding agent", task.labels)
+                assert "coding agent" in task.labels
 
 
 class TestGitHubTaskKey(unittest.TestCase):
-    """Test GitHub task key functionality"""
+    """Test GitHub task key functionality."""
 
-    def test_github_issue_task_key_creation(self):
-        """Test GitHub issue task key creation"""
+    def test_github_issue_task_key_creation(self) -> None:
+        """Test GitHub issue task key creation."""
         task_key = GitHubIssueTaskKey("testorg", "testrepo", 123)
 
-        self.assertEqual(task_key.owner, "testorg")
-        self.assertEqual(task_key.repo, "testrepo")
-        self.assertEqual(task_key.number, 123)
+        assert task_key.owner == "testorg"
+        assert task_key.repo == "testrepo"
+        assert task_key.number == 123
 
         # Test to_dict method
         key_dict = task_key.to_dict()
-        self.assertEqual(key_dict["type"], "github_issue")
-        self.assertEqual(key_dict["owner"], "testorg")
-        self.assertEqual(key_dict["repo"], "testrepo")
-        self.assertEqual(key_dict["number"], 123)
+        assert key_dict["type"] == "github_issue"
+        assert key_dict["owner"] == "testorg"
+        assert key_dict["repo"] == "testrepo"
+        assert key_dict["number"] == 123
 
         # Test from_dict method
         recreated_key = GitHubIssueTaskKey.from_dict(key_dict)
-        self.assertEqual(recreated_key.owner, "testorg")
-        self.assertEqual(recreated_key.repo, "testrepo")
-        self.assertEqual(recreated_key.number, 123)
+        assert recreated_key.owner == "testorg"
+        assert recreated_key.repo == "testrepo"
+        assert recreated_key.number == 123
 
-    def test_github_pr_task_key_creation(self):
-        """Test GitHub PR task key creation"""
+    def test_github_pr_task_key_creation(self) -> None:
+        """Test GitHub PR task key creation."""
         task_key = GitHubPullRequestTaskKey("testorg", "testrepo", 456)
 
-        self.assertEqual(task_key.owner, "testorg")
-        self.assertEqual(task_key.repo, "testrepo")
-        self.assertEqual(task_key.number, 456)
+        assert task_key.owner == "testorg"
+        assert task_key.repo == "testrepo"
+        assert task_key.number == 456
 
         # Test to_dict method
         key_dict = task_key.to_dict()
-        self.assertEqual(key_dict["type"], "github_pull_request")
-        self.assertEqual(key_dict["owner"], "testorg")
-        self.assertEqual(key_dict["repo"], "testrepo")
-        self.assertEqual(key_dict["number"], 456)
+        assert key_dict["type"] == "github_pull_request"
+        assert key_dict["owner"] == "testorg"
+        assert key_dict["repo"] == "testrepo"
+        assert key_dict["number"] == 456
 
-    def test_task_key_equality(self):
-        """Test task key equality comparison"""
+    def test_task_key_equality(self) -> None:
+        """Test task key equality comparison."""
         key1 = GitHubIssueTaskKey("testorg", "testrepo", 123)
         key2 = GitHubIssueTaskKey("testorg", "testrepo", 123)
         key3 = GitHubIssueTaskKey("testorg", "testrepo", 124)
 
         # Test dict representation equality
-        self.assertEqual(key1.to_dict(), key2.to_dict())
-        self.assertNotEqual(key1.to_dict(), key3.to_dict())
+        assert key1.to_dict() == key2.to_dict()
+        assert key1.to_dict() != key3.to_dict()
 
         # Test recreation from dict
         recreated = GitHubIssueTaskKey.from_dict(key1.to_dict())
-        self.assertEqual(recreated.owner, key1.owner)
-        self.assertEqual(recreated.repo, key1.repo)
-        self.assertEqual(recreated.number, key1.number)
+        assert recreated.owner == key1.owner
+        assert recreated.repo == key1.repo
+        assert recreated.number == key1.number
 
 
 class TestGitHubTaskFactory(unittest.TestCase):
-    """Test GitHub task factory functionality"""
+    """Test GitHub task factory functionality."""
 
-    def setUp(self):
-        """Set up test environment"""
+    def setUp(self) -> None:
+        """Set up test environment."""
         self.config = {
             "github": {"owner": "testorg", "repo": "testrepo", "bot_label": "coding agent"},
         }
@@ -339,8 +340,8 @@ class TestGitHubTaskFactory(unittest.TestCase):
         # Mock GitHub client
         self.github_client = MagicMock()
 
-    def test_create_github_issue_task(self):
-        """Test creating GitHub issue task from factory"""
+    def test_create_github_issue_task(self) -> None:
+        """Test creating GitHub issue task from factory."""
         factory = GitHubTaskFactory(
             mcp_client=self.mcp_client, github_client=self.github_client, config=self.config,
         )
@@ -355,22 +356,22 @@ class TestGitHubTaskFactory(unittest.TestCase):
             # (even though the real implementation has a bug)
             mock_task_class.assert_called_once()
 
-    def test_create_task_with_invalid_key_type(self):
-        """Test factory with invalid key type"""
+    def test_create_task_with_invalid_key_type(self) -> None:
+        """Test factory with invalid key type."""
         factory = GitHubTaskFactory(
             mcp_client=self.mcp_client, github_client=self.github_client, config=self.config,
         )
 
         # Test with invalid key type
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             factory.create_task("invalid_key")
 
 
 class TestGitHubErrorHandling(unittest.TestCase):
-    """Test error handling in GitHub components"""
+    """Test error handling in GitHub components."""
 
-    def setUp(self):
-        """Set up test environment"""
+    def setUp(self) -> None:
+        """Set up test environment."""
         self.config = {
             "github": {
                 "owner": "testorg",
@@ -380,8 +381,8 @@ class TestGitHubErrorHandling(unittest.TestCase):
             },
         }
 
-    def test_task_with_mcp_client_errors(self):
-        """Test task handling when MCP client has errors"""
+    def test_task_with_mcp_client_errors(self) -> None:
+        """Test task handling when MCP client has errors."""
         # Create a mock MCP client that raises exceptions
         server_config = {"mcp_server_name": "github"}
         mcp_client = MockMCPToolClient(server_config)
@@ -391,7 +392,8 @@ class TestGitHubErrorHandling(unittest.TestCase):
 
         def error_call_tool(tool, args):
             if tool == "update_issue":
-                raise Exception("MCP connection error")
+                msg = "MCP connection error"
+                raise Exception(msg)
             return original_call_tool(tool, args)
 
         mcp_client.call_tool = error_call_tool
@@ -418,10 +420,10 @@ class TestGitHubErrorHandling(unittest.TestCase):
             # If it doesn't crash, that's good error handling
         except Exception as e:
             # Check that it's the expected error, not an unhandled one
-            self.assertIn("MCP connection error", str(e))
+            assert "MCP connection error" in str(e)
 
-    def test_task_with_missing_config(self):
-        """Test task creation with missing configuration"""
+    def test_task_with_missing_config(self) -> None:
+        """Test task creation with missing configuration."""
         incomplete_config = {"github": {}}  # Missing required fields
 
         server_config = {"mcp_server_name": "github"}

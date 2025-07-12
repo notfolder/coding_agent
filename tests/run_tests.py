@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Comprehensive test runner for coding agent with mock and real integration tests
-"""
+"""Comprehensive test runner for coding agent with mock and real integration tests."""
 
 import logging
 import os
@@ -12,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 
 def run_tests():
-    """Run all tests and return results"""
+    """Run all tests and return results."""
     # Setup logging to suppress noise during tests
     logging.basicConfig(level=logging.CRITICAL)
 
@@ -30,7 +29,7 @@ def run_tests():
 
 
 def run_unit_tests():
-    """Run only unit tests"""
+    """Run only unit tests."""
     logging.basicConfig(level=logging.CRITICAL)
 
     loader = unittest.TestLoader()
@@ -44,7 +43,7 @@ def run_unit_tests():
 
 
 def run_integration_tests():
-    """Run only integration tests"""
+    """Run only integration tests."""
     logging.basicConfig(level=logging.CRITICAL)
 
     loader = unittest.TestLoader()
@@ -58,33 +57,24 @@ def run_integration_tests():
 
 
 def run_real_tests():
-    """Run real integration tests (requires API tokens)"""
-    print("Running real integration tests...")
-    print("⚠️  These tests require API tokens and will make real API calls")
-    print("   Set GITHUB_TOKEN and/or GITLAB_TOKEN environment variables")
-    print()
-
+    """Run real integration tests (requires API tokens)."""
     # Check for API tokens
     github_token = os.environ.get("GITHUB_TOKEN")
     gitlab_token = os.environ.get("GITLAB_TOKEN")
 
     if not github_token and not gitlab_token:
-        print(
-            "❌ No API tokens found. Please set GITHUB_TOKEN and/or GITLAB_TOKEN environment variables",
-        )
         return False
 
     if github_token:
-        print("✅ GitHub token found - GitHub tests will run")
+        pass
     else:
-        print("⚠️  No GitHub token - GitHub tests will be skipped")
+        pass
 
     if gitlab_token:
-        print("✅ GitLab token found - GitLab tests will run")
+        pass
     else:
-        print("⚠️  No GitLab token - GitLab tests will be skipped")
+        pass
 
-    print()
 
     logging.basicConfig(level=logging.INFO)
 
@@ -94,13 +84,7 @@ def run_real_tests():
 
 
 def run_mock_tests():
-    """Run comprehensive tests with mock services"""
-    print("Running comprehensive mock tests...")
-    print("✅ Testing GitHub and GitLab functionality with mock data")
-    print("✅ Testing error handling and edge cases")
-    print("✅ Testing complete workflows end-to-end")
-    print()
-
+    """Run comprehensive tests with mock services."""
     logging.basicConfig(level=logging.CRITICAL)
 
     # Import test modules to ensure they're available
@@ -118,48 +102,31 @@ def run_mock_tests():
         result = runner.run(suite)
 
         # Print summary
-        print(f"\n{'=' * 60}")
-        print("TEST SUMMARY")
-        print(f"{'=' * 60}")
-        print(f"Tests run: {result.testsRun}")
-        print(f"Failures: {len(result.failures)}")
-        print(f"Errors: {len(result.errors)}")
-        print(f"Skipped: {len(result.skipped) if hasattr(result, 'skipped') else 0}")
 
         if result.failures:
-            print("\nFAILURES:")
-            for test, traceback in result.failures:
-                print(
-                    f"- {test}: {traceback.split(chr(10))[-2] if chr(10) in traceback else traceback}",
-                )
+            for _test, _traceback in result.failures:
+                pass
 
         if result.errors:
-            print("\nERRORS:")
-            for test, traceback in result.errors:
-                print(
-                    f"- {test}: {traceback.split(chr(10))[-2] if chr(10) in traceback else traceback}",
-                )
+            for _test, _traceback in result.errors:
+                pass
 
         success_rate = (
             ((result.testsRun - len(result.failures) - len(result.errors)) / result.testsRun * 100)
             if result.testsRun > 0
             else 0
         )
-        print(f"\nSuccess rate: {success_rate:.1f}%")
-        print(f"{'=' * 60}")
 
         return result.wasSuccessful()
 
     except ImportError as e:
-        print(f"❌ Failed to import test modules: {e}")
         return False
     except Exception as e:
-        print(f"❌ Test execution failed: {e}")
         return False
 
 
 def run_coverage_tests():
-    """Run tests with coverage analysis (if coverage is available)"""
+    """Run tests with coverage analysis (if coverage is available)."""
     try:
         import coverage
 
@@ -174,15 +141,11 @@ def run_coverage_tests():
         cov.stop()
         cov.save()
 
-        print("\n" + "=" * 60)
-        print("COVERAGE REPORT")
-        print("=" * 60)
         cov.report()
 
         return success
 
     except ImportError:
-        print("Coverage module not available. Running tests without coverage analysis.")
         return run_mock_tests()
 
 
@@ -200,10 +163,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.unit:
-        print("Running unit tests...")
         success = run_unit_tests()
     elif args.integration:
-        print("Running integration tests...")
         success = run_integration_tests()
     elif args.real:
         success = run_real_tests()
@@ -213,9 +174,6 @@ if __name__ == "__main__":
         success = run_mock_tests()
     else:
         # Default: run comprehensive mock tests
-        print("No specific test type specified - running comprehensive mock tests")
-        print("Use --help to see available options")
-        print()
         success = run_mock_tests()
 
     sys.exit(0 if success else 1)
