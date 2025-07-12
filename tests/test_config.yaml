@@ -1,0 +1,35 @@
+mcp_servers:
+  - mcp_server_name: "github"
+    command:
+      - "mock_github_server"
+    env:
+      GITHUB_TOOLSETS: "all"
+
+  - mcp_server_name: "gitlab"
+    command:
+      - "mock_gitlab_server"
+
+llm:
+  provider: "mock"
+  function_calling: true
+  mock:
+    model: "test-model"
+    max_token: 1000
+
+github:
+  owner: "test-owner"
+  bot_label: "coding agent"
+  processing_label: "coding agent processing"
+  done_label: "coding agent done"
+  query: 'state:open archived:false'
+
+gitlab:
+  owner: "test-owner"
+  bot_label: "coding agent"
+  processing_label: "coding agent processing"
+  done_label: "coding agent done"
+  project_id: "test-project"
+  query: ''
+
+max_llm_process_num: 10
+use_rabbitmq: false

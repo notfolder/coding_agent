@@ -48,7 +48,7 @@ class TaskGitLabIssue(Task):
             f"ISSUE: {{'title': '{self.issue.get('title', '')}', "
             f"'description': '{self.issue.get('description', '')}', "
             f"'project_id': '{self.issue.get('project_id', '')}'\n"
-            f"'issue_iid': '{self.issue.issue_iid}'}}\n"
+            f"'issue_iid': '{self.issue.get('iid', '')}'}}\n"
             f"COMMENTS: {comments}"
         )
 
@@ -168,7 +168,7 @@ class TaskGetterFromGitLab(TaskGetter):
         tasks = []
 
         query = self.config["gitlab"].get("query", "")
-        assignee = self.config['github'].get('assignee')
+        assignee = self.config['gitlab'].get('assignee')
         if not assignee:
             assignee = self.config['gitlab'].get('owner', '')
         issues = self.gitlab_client.search_issues(query)

@@ -32,5 +32,12 @@ def get_llm_client(config, functions=None, tools=None) -> LLMClient:
         return OllamaClient(config['llm']['ollama'])
     elif prov == 'openai':
         return OpenAIClient(config['llm']['openai'], functions, tools)
+    elif prov == 'mock':
+        # Import here to avoid circular import during testing
+        try:
+            from tests.mocks.mock_llm_client import get_mock_llm_client
+            return get_mock_llm_client(config, functions, tools)
+        except ImportError:
+            raise ValueError("Mock LLM client not available - this should only be used in tests")
     else:
         raise ValueError(f"Unknown llm.provider: {prov}")
