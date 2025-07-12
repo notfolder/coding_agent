@@ -168,7 +168,7 @@ class TaskGetterFromGitLab(TaskGetter):
         tasks = []
 
         query = self.config["gitlab"].get("query", "")
-        assignee = self.config['github'].get('assignee')
+        assignee = self.config['gitlab'].get('assignee')
         if not assignee:
             assignee = self.config['gitlab'].get('owner', '')
         issues = self.gitlab_client.search_issues(query)

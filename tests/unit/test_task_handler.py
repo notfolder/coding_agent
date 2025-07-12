@@ -7,6 +7,8 @@ import os
 import json
 from unittest.mock import patch, MagicMock
 
+from mcp import McpError
+
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
@@ -265,7 +267,7 @@ class TestTaskHandler(unittest.TestCase):
             nonlocal call_count
             call_count += 1
             if call_count <= 2:  # Fail first 2 calls
-                raise Exception("Tool call failed")
+                raise ExceptionGroup("Tool call failed", [ExceptionGroup("Tool call failed",[McpError("Tool call failed")])])
             return original_call_tool(tool, args)
         
         error_mcp_client.call_tool = failing_call_tool
@@ -273,17 +275,17 @@ class TestTaskHandler(unittest.TestCase):
         # Set up LLM to make tool calls
         tool_responses = [
             (json.dumps({
-                "command": {"tool": "get_issue", "args": {"issue_number": 1}},
+                "command": {"tool": "github_get_issue", "args": {"issue_number": 1}},
                 "comment": "Getting issue details",
                 "done": False
             }), []),
             (json.dumps({
-                "command": {"tool": "get_issue", "args": {"issue_number": 1}},
+                "command": {"tool": "github_get_issue", "args": {"issue_number": 1}},
                 "comment": "Retrying to get issue details",
                 "done": False
             }), []),
             (json.dumps({
-                "command": {"tool": "get_issue", "args": {"issue_number": 1}},
+                "command": {"tool": "github_get_issue", "args": {"issue_number": 1}},
                 "comment": "Finally got issue details",
                 "done": False
             }), []),

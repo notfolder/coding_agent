@@ -41,9 +41,6 @@ class TestSimpleWorkflow(unittest.TestCase):
                 'done_label': 'coding agent done',
                 'owner': 'testuser'
             },
-            'github': {  # GitLab TaskGetter bug workaround
-                'assignee': None
-            },
             'max_llm_process_num': 20
         }
         

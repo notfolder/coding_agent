@@ -154,7 +154,7 @@ class MockLLMClientWithToolCalls(MockLLMClient):
             # Initial analysis with tool call
             (json.dumps({
                 "command": {
-                    "tool": "search_issues",
+                    "tool": "github_search_issues",
                     "args": {"q": "label:\"coding agent\""}
                 },
                 "comment": "Searching for issues to work on",
@@ -164,7 +164,7 @@ class MockLLMClientWithToolCalls(MockLLMClient):
             # Get specific issue details
             (json.dumps({
                 "command": {
-                    "tool": "get_issue",
+                    "tool": "github_get_issue",
                     "args": {"owner": "testorg", "repo": "testrepo", "issue_number": 1}
                 },
                 "comment": "Getting issue details",
@@ -174,7 +174,7 @@ class MockLLMClientWithToolCalls(MockLLMClient):
             # Update issue labels
             (json.dumps({
                 "command": {
-                    "tool": "update_issue",
+                    "tool": "github_update_issue",
                     "args": {
                         "owner": "testorg",
                         "repo": "testrepo", 
