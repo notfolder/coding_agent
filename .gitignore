@@ -12,3 +12,5 @@ __pycache__/
 build/
 dist/
 .coverage
+github-mcp-server
+github-mcp-server-exe
