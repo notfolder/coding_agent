@@ -1,0 +1,21 @@
+[tool.ruff]
+line-length = 100
+indent-width = 4
+
+[tool.ruff.format]
+docstring-code-format = true
+indent-style = "space"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "D1",    # undocumented
+    "TD001", # invalid todo tag
+    "TD002", # missing todo author
+    "TD003", # missing todo link
+    "PD011", # pandas use of dot values
+]
+unfixable = [
+    "F401", # unused import
+    "F841", # unused variable
+]
