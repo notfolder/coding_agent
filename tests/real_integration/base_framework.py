@@ -15,9 +15,6 @@ from typing import Any
 
 import yaml
 
-# クライアントモジュールをインポート
-from clients.lm_client import get_llm_client
-
 
 class RealIntegrationTestFramework:
     """リアル統合テストを実行するためのフレームワーク."""
@@ -322,6 +319,9 @@ class RealIntegrationTestFramework:
             LLMが出力が基準を満たすと判断した場合はTrue
 
         """
+        # LLMクライアントをインポート（遅延インポートで依存関係の問題を回避）
+        from clients.lm_client import get_llm_client
+
         llm_client = get_llm_client(self.config, None, None)
 
         prompt = f"""
