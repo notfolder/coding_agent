@@ -239,21 +239,21 @@ class TaskHandler:
         error_state: dict,
     ) -> str:
         """MCPツールを呼び出し、エラーハンドリングを行う."""
+        result = ""
         try:
             args = error_state.get("current_args", {})
-            output = self.mcp_clients[mcp_server].call_tool(tool_name, args)
+            result = self.mcp_clients[mcp_server].call_tool(tool_name, args)
             # ツール呼び出し成功時はエラーカウントリセット
             if error_state["last_tool"] == tool_name:
                 error_state["tool_error_count"] = 0
-        except (McpError, ValueError, TypeError, RuntimeError) as e:
+        except *(McpError, BaseException) as e:
             # 例外の種類に応じて処理を分岐
             if hasattr(e, "exceptions") and e.exceptions:
                 # McpErrorの場合
-                return self._handle_mcp_error(task, e, full_name, error_state)
+                result = self._handle_mcp_error(task, e, full_name, error_state)
             # その他の例外の場合
-            return self._handle_general_error(task, e, full_name, error_state)
-        else:
-            return output
+            result = self._handle_general_error(task, e, full_name, error_state)
+        return result
 
     def _handle_mcp_error(self, task: Task, e: Exception, name: str, error_state: dict) -> str:
         """MCPエラーを処理する."""

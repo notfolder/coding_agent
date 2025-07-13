@@ -247,8 +247,8 @@ def consume_tasks(
     task_getter = TaskGetter.factory(config, mcp_clients, task_source)
 
     while True:
-        # キューからタスクキーを取得(5秒でタイムアウト)
-        task_key_dict = task_queue.get(timeout=5)
+        # キューからタスクキーを取得
+        task_key_dict = task_queue.get()
         if task_key_dict is None:
             # タイムアウトした場合はループを終了
             break
@@ -332,7 +332,7 @@ def main() -> None:
 
         # MCPツールクライアントを初期化
         mcp_clients[name] = MCPToolClient(
-            server, config.get("llm", {}).get("function_calling", True),
+            server, function_calling=config.get("llm", {}).get("function_calling", True),
         )
 
         # ファンクションコーリングが有効な場合は関数とツールを取得

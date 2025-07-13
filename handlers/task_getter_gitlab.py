@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -183,7 +182,7 @@ class TaskGetterFromGitLab(TaskGetter):
             issue
             for issue in issues
             if self.config["gitlab"]["bot_label"] in issue.get("labels")
-            and issue.get("assignee", {}).get("username", "") == assignee
+            and (issue.get("assignee") or {}).get("username", "") == assignee
         ]
         tasks.extend([
             TaskGitLabIssue(issue, self.mcp_client, self.gitlab_client, self.config)

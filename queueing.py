@@ -12,6 +12,7 @@ from queue import Empty, Queue
 from typing import Any
 
 import pika
+import pika.exceptions
 
 
 class TaskQueue(ABC):
@@ -142,15 +143,28 @@ class RabbitMQTaskQueue(TaskQueue):
             task: キューに追加するタスクの辞書
 
         """
-        # タスクをJSONにシリアライズ
         body = json.dumps(task)
+        try:
+            self.channel.basic_publish(
+                exchange="",
+                routing_key=self.queue_name,
+                body=body,
+                properties=pika.BasicProperties(delivery_mode=2),
+            )
+        except pika.exceptions.StreamLostError:
+            self._reconnect()
+            self.put(task)
 
-        self.channel.basic_publish(
-            exchange="",
-            routing_key=self.queue_name,
-            body=body,
-            properties=pika.BasicProperties(delivery_mode=2),  # メッセージを永続化
+    def _reconnect(self) -> None:
+        """RabbitMQサーバーへ再接続する."""
+        credentials = pika.PlainCredentials(self.user, self.password)
+        self.connection = pika.BlockingConnection(
+            pika.ConnectionParameters(
+                host=self.host, port=self.port, credentials=credentials,
+            ),
         )
+        self.channel = self.connection.channel()
+        self.channel.queue_declare(queue=self.queue_name, durable=True)
 
     def get(self, _timeout: float | None = None) -> dict[str, Any] | None:
         """RabbitMQキューからタスクを取得する.
@@ -166,16 +180,17 @@ class RabbitMQTaskQueue(TaskQueue):
             必要に応じて将来のバージョンで実装予定です。
 
         """
-        method_frame, header_frame, body = self.channel.basic_get(
-            queue=self.queue_name, auto_ack=True,
-        )
-
-        if method_frame:
-            # メッセージが存在する場合はJSONをデシリアライズして返す
-            return json.loads(body)
-
-        # メッセージがない場合はNoneを返す
-        return None
+        try:
+            method_frame, header_frame, body = self.channel.basic_get(
+                queue=self.queue_name, auto_ack=True,
+            )
+        except pika.exceptions.StreamLostError:
+            self._reconnect()
+            return self.get(_timeout)
+        else:
+            if method_frame:
+                return json.loads(body)
+            return None
 
     def empty(self) -> bool:
         """RabbitMQキューが空かどうかを確認する.
@@ -184,7 +199,11 @@ class RabbitMQTaskQueue(TaskQueue):
             キューが空の場合True、そうでなければFalse
 
         """
-        queue_info = self.channel.queue_declare(queue=self.queue_name, passive=True)
-
-        # メッセージ数が0かどうかを返す
-        return queue_info.method.message_count == 0
+        try:
+            queue_info = self.channel.queue_declare(queue=self.queue_name, passive=True)
+            queue_info = self.channel.queue_declare(queue=self.queue_name, passive=True)
+        except pika.exceptions.StreamLostError:
+            self._reconnect()
+            return self.empty()
+        else:
+            return queue_info.method.message_count == 0
