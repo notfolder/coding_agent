@@ -1,9 +1,9 @@
-"""Test scenarios for real integration testing.
+"""リアル統合テスト用のテストシナリオ.
 
-This module implements the three test scenarios described in the issue:
-1. Issue-based operation with hello_world.py creation
-2. Issue-based pull request creation
-3. Pull request comment-based operation
+このモジュールは、イシューで説明された3つのテストシナリオを実装します:
+1. hello_world.py作成によるイシューベースの操作
+2. イシューベースのプルリクエスト作成
+3. プルリクエストコメントベースの操作
 """
 from __future__ import annotations
 
@@ -11,18 +11,17 @@ import logging
 import subprocess
 import time
 import unittest
-from typing import Optional
 
 from .github_framework import GitHubRealIntegrationFramework
 from .gitlab_framework import GitLabRealIntegrationFramework
 
 
 class RealIntegrationTestScenarios(unittest.TestCase):
-    """Real integration test scenarios using actual APIs."""
+    """実際のAPIを使用するリアル統合テストシナリオ."""
 
     def setUp(self) -> None:
-        """Set up test environment."""
-        # Determine which platform to test
+        """テスト環境をセットアップする."""
+        # テストするプラットフォームを決定
         self.platform = self._get_test_platform()
 
         if self.platform == "github":
