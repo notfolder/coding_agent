@@ -1,0 +1,1 @@
+"""Real integration tests using actual GitHub/GitLab and LLM APIs."""

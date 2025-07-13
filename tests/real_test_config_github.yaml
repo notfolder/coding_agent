@@ -1,39 +1,30 @@
 # Configuration for real GitHub integration tests
-# Requires environment variables: GITHUB_TOKEN
+# Requires environment variables: GITHUB_TOKEN, GITHUB_TEST_REPO
 mcp_servers:
   - mcp_server_name: "github"
     command:
-      - "npx"
-      - "@notfolder/github-mcp-server"
+      - "./github-mcp-server"
       - "stdio"
     env:
       GITHUB_TOOLSETS: "all"
-    system_prompt: |
-      ### github mcp tools
-      * `github/get_issue`           → `{ "owner": string, "repo": string, "issue_number": int }`
-      * `github/get_file_contents`   → `{ "owner": string, "repo": string, "path": string, "ref": string }`
-      * `github/create_or_update_file` → `{ "owner": string, "repo": string, "path": string, "content": string, "branch": string, "message": string }`
-      * `github/create_pull_request` → `{ "owner": string, "repo": string, "title": string, "body": string, "head": string, "base": string }`
-      * `github/update_issue`        → `{ "owner": string, "repo": string, "issue_number": int, "remove_labels"?: [string], "add_labels"?: [string] }`
-      * `github/list_issues`         → `{ "owner": string, "repo": string, "state"?: string, "labels"?: string }`
-      * `github/get_issue_comments`  → `{ "owner": string, "repo": string, "issue_number": int }`
-      * `github/create_issue_comment` → `{ "owner": string, "repo": string, "issue_number": int, "body": string }`
-      * `github/search_issues`       → `{ "q": string }`
 
 llm:
-  provider: "mock"
+  provider: "openai"
   function_calling: true
-  mock:
-    model: "test-model"
-    max_token: 1000
+  openai:
+    base_url: "https://api.openai.com/v1"
+    api_key: "OPENAI_API_KEY"
+    model: "gpt-4o"
+    max_token: 40960
 
 github:
-  owner: "notfolder"  # Test repository owner
-  repo: "coding-agent-test"  # Test repository name
+  owner: "test-owner"  # Will be overridden by GITHUB_TEST_REPO env var
+  repo: "test-repo"    # Will be overridden by GITHUB_TEST_REPO env var
   bot_label: "coding agent"
   processing_label: "coding agent processing"
   done_label: "coding agent done"
-  query: 'repo:notfolder/coding-agent-test state:open label:"coding agent"'
+  query: 'state:open label:"coding agent"'
+  assignee: "coding-agent-bot"
 
 max_llm_process_num: 10
 use_rabbitmq: false
