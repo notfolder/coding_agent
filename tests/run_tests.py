@@ -72,7 +72,7 @@ def run_real_tests() -> bool:
     if github_token and not github_repo:
         print("❌ GITHUB_TOKEN is set but GITHUB_TEST_REPO is missing. Please set GITHUB_TEST_REPO (format: owner/repo).")
         return False
-        
+
     if gitlab_token and not gitlab_project:
         print("❌ GITLAB_TOKEN is set but GITLAB_TEST_PROJECT is missing. Please set GITLAB_TEST_PROJECT.")
         return False
@@ -92,7 +92,7 @@ def run_real_tests() -> bool:
     if llm_provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
         print("❌ LLM_PROVIDER is 'openai' but OPENAI_API_KEY is not set.")
         return False
-    elif llm_provider == "openai":
+    if llm_provider == "openai":
         print("✅ OpenAI LLM configured")
 
     print("\n🚀 Running real integration tests...")
@@ -109,7 +109,7 @@ def run_real_tests() -> bool:
         result = runner.run(suite)
 
         # Print summary
-        print(f"\n📊 Test Results:")
+        print("\n📊 Test Results:")
         print(f"Tests run: {result.testsRun}")
         print(f"Failures: {len(result.failures)}")
         print(f"Errors: {len(result.errors)}")

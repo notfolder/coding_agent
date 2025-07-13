@@ -1,1 +1,1 @@
-"""Real integration tests using actual GitHub/GitLab and LLM APIs."""
+"""実際のGitHub/GitLabとLLM APIを使用するリアル統合テスト."""

@@ -1,75 +1,84 @@
-"""Base framework for real integration tests.
+"""リアル統合テスト用のベースフレームワーク.
 
-This module provides the base infrastructure for running integration tests
-that use actual GitHub/GitLab and LLM APIs rather than mocks.
+このモジュールは、モックではなく実際のGitHub/GitLabとLLM APIを使用して
+統合テストを実行するためのベースインフラを提供します。
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
+# クライアントモジュールをインポート
+from clients.lm_client import get_llm_client
+
 
 class RealIntegrationTestFramework:
-    """Framework for running real integration tests."""
+    """リアル統合テストを実行するためのフレームワーク."""
 
     def __init__(self, platform: str = "github") -> None:
-        """Initialize the test framework.
-        
+        """テストフレームワークを初期化する.
+
         Args:
-            platform: Either "github" or "gitlab"
+            platform: "github" または "gitlab" のいずれか
+
         """
         self.platform = platform
         self.logger = logging.getLogger(__name__)
         self.test_repo = None
         self.test_project_id = None
         self.cleanup_tasks = []
-        
+
         # Check for required environment variables
         self._check_prerequisites()
-        
+
         # Load configuration
         self.config = self._load_config()
-        
+
     def _check_prerequisites(self) -> None:
-        """Check that required environment variables are set."""
+        """必要な環境変数が設定されているかをチェックする."""
         if self.platform == "github":
             if not os.environ.get("GITHUB_TOKEN"):
-                raise ValueError("GITHUB_TOKEN environment variable is required for GitHub tests")
+                msg = "GitHubテスト用にGITHUB_TOKEN環境変数が必要です"
+                raise ValueError(msg)
             if not os.environ.get("GITHUB_TEST_REPO"):
-                raise ValueError("GITHUB_TEST_REPO environment variable is required (format: owner/repo)")
+                msg = "GITHUB_TEST_REPO環境変数が必要です (形式: owner/repo)"
+                raise ValueError(msg)
         elif self.platform == "gitlab":
             if not os.environ.get("GITLAB_TOKEN"):
-                raise ValueError("GITLAB_TOKEN environment variable is required for GitLab tests")
+                msg = "GitLabテスト用にGITLAB_TOKEN環境変数が必要です"
+                raise ValueError(msg)
             if not os.environ.get("GITLAB_TEST_PROJECT"):
-                raise ValueError("GITLAB_TEST_PROJECT environment variable is required")
-                
-        # Check for LLM configuration
+                msg = "GITLAB_TEST_PROJECT環境変数が必要です"
+                raise ValueError(msg)
+
+        # LLM設定をチェック
         llm_provider = os.environ.get("LLM_PROVIDER", "openai")
         if llm_provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
-            raise ValueError("OPENAI_API_KEY environment variable is required when using OpenAI")
-            
+            msg = "OpenAI使用時にはOPENAI_API_KEY環境変数が必要です"
+            raise ValueError(msg)
+
     def _load_config(self) -> dict[str, Any]:
-        """Load test configuration."""
+        """テスト設定を読み込む."""
         config_path = Path(__file__).parent.parent / f"real_test_config_{self.platform}.yaml"
-        
+
         if not config_path.exists():
-            raise FileNotFoundError(f"Configuration file not found: {config_path}")
-            
+            msg = f"設定ファイルが見つかりません: {config_path}"
+            raise FileNotFoundError(msg)
+
         with config_path.open() as f:
             config = yaml.safe_load(f)
-            
-        # Override with environment variables
+
+        # 環境変数で設定を上書き
         if self.platform == "github":
             repo_parts = os.environ.get("GITHUB_TEST_REPO", "").split("/")
-            if len(repo_parts) == 2:
+            if len(repo_parts) == 2:  # noqa: PLR2004
                 config["github"]["owner"] = repo_parts[0]
                 config["github"]["repo"] = repo_parts[1]
                 self.test_repo = f"{repo_parts[0]}/{repo_parts[1]}"
@@ -78,290 +87,316 @@ class RealIntegrationTestFramework:
             if project:
                 config["gitlab"]["project_id"] = project
                 self.test_project_id = project
-                
+
         return config
-        
+
     def setup_test_environment(self) -> None:
-        """Set up the test environment."""
+        """テスト環境をセットアップする."""
         self.logger.info("Setting up test environment for %s", self.platform)
-        
-        # Ensure test labels exist
+
+        # テストラベルが存在することを確認
         self._ensure_labels_exist()
-        
+
     def teardown_test_environment(self) -> None:
-        """Clean up test environment."""
+        """テスト環境をクリーンアップする."""
         self.logger.info("Cleaning up test environment")
-        
-        # Execute cleanup tasks in reverse order
+
+        # クリーンアップタスクを逆順で実行
         for cleanup_task in reversed(self.cleanup_tasks):
             try:
                 cleanup_task()
-            except Exception as e:
+            except (ValueError, TypeError, OSError) as e:
                 self.logger.warning("Cleanup task failed: %s", e)
-                
+
     def _ensure_labels_exist(self) -> None:
-        """Ensure required labels exist in the repository/project."""
+        """必要なラベルがリポジトリ/プロジェクトに存在することを確認する."""
         required_labels = [
             self.config[self.platform]["bot_label"],
             self.config[self.platform]["processing_label"],
             self.config[self.platform]["done_label"],
         ]
-        
+
         for label in required_labels:
             self._create_label_if_not_exists(label)
-            
+
     def _create_label_if_not_exists(self, label: str) -> None:
-        """Create a label if it doesn't exist."""
-        # This would need to be implemented for each platform
-        # For now, we'll assume labels exist
-        pass
-        
-    def create_issue(self, title: str, body: str, labels: Optional[list[str]] = None) -> dict[str, Any]:
-        """Create an issue/merge request.
-        
+        """ラベルが存在しない場合は作成する."""
+        # これは各プラットフォームで実装される必要があります
+        # 今のところ、ラベルが存在すると仮定します
+
+    def create_issue(
+        self,
+        title: str,
+        body: str,
+        labels: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """イシュー/マージリクエストを作成する.
+
         Args:
-            title: Issue title
-            body: Issue body
-            labels: List of labels to add
-            
+            title: イシューのタイトル
+            body: イシューの本文
+            labels: 追加するラベルのリスト
+
         Returns:
-            Dictionary containing issue details
+            イシューの詳細を含む辞書
+
         """
         if labels is None:
             labels = [self.config[self.platform]["bot_label"]]
-            
-        # This will be implemented per platform
+
+        # これは各プラットフォームで実装されます
         issue_data = self._create_issue_impl(title, body, labels)
-        
-        # Add cleanup task
-        def cleanup():
-            self._close_issue(issue_data["number"] if self.platform == "github" else issue_data["iid"])
-            
+
+        # クリーンアップタスクを追加
+        def cleanup() -> None:
+            issue_num = (
+                issue_data["number"] if self.platform == "github" else issue_data["iid"]
+            )
+            self._close_issue(issue_num)
+
         self.cleanup_tasks.append(cleanup)
-        
+
         return issue_data
-        
+
     def _create_issue_impl(self, title: str, body: str, labels: list[str]) -> dict[str, Any]:
-        """Platform-specific issue creation implementation."""
-        raise NotImplementedError("Subclasses must implement _create_issue_impl")
-        
+        """プラットフォーム固有のイシュー作成実装."""
+        msg = "サブクラスは_create_issue_implを実装する必要があります"
+        raise NotImplementedError(msg)
+
     def _close_issue(self, issue_id: int) -> None:
-        """Close an issue."""
-        # Platform-specific implementation
-        pass
-        
+        """イシューを閉じる."""
+        # プラットフォーム固有の実装
+
     def run_coding_agent(self, timeout: int = 300) -> subprocess.CompletedProcess:
-        """Run the coding agent main function.
-        
+        """コーディングエージェントのメイン関数を実行する.
+
         Args:
-            timeout: Maximum time to wait for completion
-            
+            timeout: 完了まで待機する最大時間
+
         Returns:
-            Completed process result
+            完了したプロセスの結果
+
         """
-        # Set up environment for the coding agent
+        # コーディングエージェント用の環境をセットアップ
         env = os.environ.copy()
         env["TASK_SOURCE"] = self.platform
-        
+
         if self.platform == "github":
             env["GITHUB_PERSONAL_ACCESS_TOKEN"] = env["GITHUB_TOKEN"]
         else:
             env["GITLAB_PERSONAL_ACCESS_TOKEN"] = env["GITLAB_TOKEN"]
-            
-        # Use the test configuration
-        config_file = f"real_test_config_{self.platform}.yaml"
-        
-        # Run the coding agent
+
+        # コーディングエージェントを実行
         agent_path = Path(__file__).parent.parent.parent / "main.py"
-        
-        result = subprocess.run(
-            ["python", str(agent_path)],
+
+        result = subprocess.run(  # noqa: S603
+            ["python", str(agent_path)],  # noqa: S607
+            check=False,
             env=env,
             cwd=agent_path.parent,
             capture_output=True,
             text=True,
             timeout=timeout,
         )
-        
+
         self.logger.info("Coding agent stdout: %s", result.stdout)
         if result.stderr:
             self.logger.warning("Coding agent stderr: %s", result.stderr)
-            
+
         return result
-        
-    def verify_file_creation(self, file_path: str, expected_content: Optional[str] = None) -> bool:
-        """Verify that a file was created in the repository.
-        
+
+    def verify_file_creation(
+        self,
+        file_path: str,
+        expected_content: str | None = None,
+    ) -> bool:
+        """リポジトリ内でファイルが作成されたことを確認する.
+
         Args:
-            file_path: Path to the file in the repository
-            expected_content: Optional content to check for
-            
+            file_path: リポジトリ内のファイルパス
+            expected_content: チェック対象のオプション内容
+
         Returns:
-            True if file exists and contains expected content
+            ファイルが存在し、期待される内容を含む場合はTrue
+
         """
-        # This would need platform-specific implementation
+        # これはプラットフォーム固有の実装が必要です
         return self._verify_file_creation_impl(file_path, expected_content)
-        
-    def _verify_file_creation_impl(self, file_path: str, expected_content: Optional[str]) -> bool:
-        """Platform-specific file verification."""
-        raise NotImplementedError("Subclasses must implement _verify_file_creation_impl")
-        
+
+    def _verify_file_creation_impl(
+        self,
+        file_path: str,
+        expected_content: str | None,
+    ) -> bool:
+        """プラットフォーム固有のファイル検証."""
+        msg = "サブクラスは_verify_file_creation_implを実装する必要があります"
+        raise NotImplementedError(msg)
+
     def verify_python_execution(self, file_path: str, expected_output: str) -> bool:
-        """Verify that a Python file executes and produces expected output.
-        
+        """Pythonファイルが実行され、期待される出力を生成することを確認する.
+
         Args:
-            file_path: Path to the Python file in the repository
-            expected_output: Expected output when running the file
-            
+            file_path: リポジトリ内のPythonファイルパス
+            expected_output: ファイル実行時の期待される出力
+
         Returns:
-            True if execution produces expected output
+            実行が期待される出力を生成する場合はTrue
+
         """
-        # Download the file content
+        # ファイル内容をダウンロード
         content = self._get_file_content(file_path)
         if not content:
             return False
-            
-        # Create a temporary file and execute it
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as tmp:
+
+        # 一時ファイルを作成して実行
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
             tmp.write(content)
             tmp_path = tmp.name
-            
+
         try:
-            result = subprocess.run(
-                ["python", tmp_path],
+            result = subprocess.run(  # noqa: S603
+                ["python", tmp_path],  # noqa: S607
+                check=False,
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
-            
+
             output = result.stdout.strip()
             return expected_output.lower() in output.lower()
-            
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as e:
-            self.logger.error("Failed to execute Python file: %s", e)
+
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+            self.logger.exception("Failed to execute Python file")
             return False
         finally:
-            os.unlink(tmp_path)
-            
-    def _get_file_content(self, file_path: str) -> Optional[str]:
-        """Get file content from repository."""
-        raise NotImplementedError("Subclasses must implement _get_file_content")
-        
+            Path(tmp_path).unlink()
+
+    def _get_file_content(self, file_path: str) -> str | None:
+        """リポジトリからファイル内容を取得する."""
+        msg = "サブクラスは_get_file_contentを実装する必要があります"
+        raise NotImplementedError(msg)
+
     def verify_pull_request_creation(self, source_branch: str) -> bool:
-        """Verify that a pull request was created from the specified branch.
-        
+        """指定されたブランチからプルリクエストが作成されたことを確認する.
+
         Args:
-            source_branch: Source branch name
-            
+            source_branch: ソースブランチ名
+
         Returns:
-            True if PR/MR exists
+            PR/MRが存在する場合はTrue
+
         """
         return self._verify_pull_request_creation_impl(source_branch)
-        
+
     def _verify_pull_request_creation_impl(self, source_branch: str) -> bool:
-        """Platform-specific PR verification."""
-        raise NotImplementedError("Subclasses must implement _verify_pull_request_creation_impl")
-        
+        """プラットフォーム固有のPR検証."""
+        msg = "サブクラスは_verify_pull_request_creation_implを実装する必要があります"
+        raise NotImplementedError(msg)
+
     def add_pr_comment(self, pr_number: int, comment: str) -> dict[str, Any]:
-        """Add a comment to a pull request.
-        
+        """プルリクエストにコメントを追加する.
+
         Args:
-            pr_number: PR/MR number
-            comment: Comment text
-            
+            pr_number: PR/MR番号
+            comment: コメントテキスト
+
         Returns:
-            Comment data
+            コメントデータ
+
         """
         return self._add_pr_comment_impl(pr_number, comment)
-        
+
     def _add_pr_comment_impl(self, pr_number: int, comment: str) -> dict[str, Any]:
-        """Platform-specific PR comment implementation."""
-        raise NotImplementedError("Subclasses must implement _add_pr_comment_impl")
-        
+        """プラットフォーム固有のPRコメント実装."""
+        msg = "サブクラスは_add_pr_comment_implを実装する必要があります"
+        raise NotImplementedError(msg)
+
     def llm_verify_output(self, actual_output: str, expected_criteria: str) -> bool:
-        """Use LLM to verify if output meets criteria (for non-deterministic verification).
-        
+        """LLMを使用して出力が基準を満たすかを確認する(非決定的検証用).
+
         Args:
-            actual_output: Actual output to verify
-            expected_criteria: Description of what the output should contain
-            
+            actual_output: 検証する実際の出力
+            expected_criteria: 出力に含まれるべき内容の説明
+
         Returns:
-            True if LLM determines output meets criteria
+            LLMが出力が基準を満たすと判断した場合はTrue
+
         """
-        # Import LLM client
-        from clients.lm_client import get_llm_client
-        
         llm_client = get_llm_client(self.config, None, None)
-        
+
         prompt = f"""
-Please verify if the following output meets the specified criteria.
+以下の出力が指定された基準を満たしているかを確認してください。
 
-Criteria: {expected_criteria}
+基準: {expected_criteria}
 
-Actual Output:
+実際の出力:
 {actual_output}
 
-Respond with only "YES" if the output meets the criteria, or "NO" if it doesn't.
-Include a brief explanation on the next line.
+出力が基準を満たしている場合は"YES"、満たしていない場合は"NO"のみで応答してください。
+次の行に簡単な説明を含めてください。
 """
-        
+
         try:
             response = llm_client.chat(prompt)
-            
-            # Parse response
-            lines = response.strip().split('\n')
+
+            # 応答を解析
+            lines = response.strip().split("\n")
             verdict = lines[0].strip().upper()
-            
+
             self.logger.info("LLM verification verdict: %s", verdict)
             if len(lines) > 1:
                 self.logger.info("LLM verification explanation: %s", lines[1])
-                
-            return verdict == "YES"
-            
-        except Exception as e:
-            self.logger.error("LLM verification failed: %s", e)
+            else:
+                return verdict == "YES"
+
+        except (ValueError, TypeError, OSError):
+            self.logger.exception("LLM verification failed")
             return False
-            
+
+        return verdict == "YES"
+
     def wait_for_processing(self, issue_number: int, max_wait: int = 300) -> bool:
-        """Wait for the coding agent to process an issue.
-        
+        """コーディングエージェントがイシューを処理するまで待機する.
+
         Args:
-            issue_number: Issue number to monitor
-            max_wait: Maximum time to wait in seconds
-            
+            issue_number: 監視するイシュー番号
+            max_wait: 最大待機時間(秒)
+
         Returns:
-            True if processing completed successfully
+            処理が正常に完了した場合はTrue
+
         """
         start_time = time.time()
-        
+
         while time.time() - start_time < max_wait:
             issue_data = self._get_issue(issue_number)
             labels = issue_data.get("labels", [])
-            
-            # Check if processing is complete
+
+            # 処理が完了したかをチェック
             done_label = self.config[self.platform]["done_label"]
             if any(label.get("name") == done_label for label in labels):
                 return True
-                
-            # Check if still processing
+
+            # まだ処理中かをチェック
             processing_label = self.config[self.platform]["processing_label"]
             if any(label.get("name") == processing_label for label in labels):
                 self.logger.info("Issue %s still processing...", issue_number)
                 time.sleep(10)
                 continue
-                
-            # Check if not yet picked up
+
+            # まだピックアップされていないかをチェック
             bot_label = self.config[self.platform]["bot_label"]
             if any(label.get("name") == bot_label for label in labels):
                 self.logger.info("Issue %s waiting to be picked up...", issue_number)
                 time.sleep(5)
                 continue
-                
+
             self.logger.warning("Issue %s has unexpected label state", issue_number)
             time.sleep(5)
-            
+
         return False
-        
+
     def _get_issue(self, issue_number: int) -> dict[str, Any]:
-        """Get issue data."""
-        raise NotImplementedError("Subclasses must implement _get_issue")
+        """イシューデータを取得する."""
+        msg = "サブクラスは_get_issueを実装する必要があります"
+        raise NotImplementedError(msg)
