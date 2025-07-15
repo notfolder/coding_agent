@@ -40,8 +40,10 @@ def run_config_check() -> bool:
     print_step("2", "Running Configuration Checker")
 
     try:
-        result = subprocess.run(  # noqa: S603
-            [sys.executable, "tests/real_integration/check_config.py"],
+        # Safe subprocess call: using sys.executable and hardcoded script path
+        demo_args = [sys.executable, "tests/real_integration/check_config.py"]
+        result = subprocess.run(
+            demo_args,
             check=False,
             capture_output=True,
             text=True,
@@ -63,8 +65,10 @@ def run_mock_tests() -> bool:
     print_substep("Running existing mock tests to ensure functionality...")
 
     try:
-        result = subprocess.run(  # noqa: S603
-            [sys.executable, "tests/run_tests.py", "--mock"],
+        # Safe subprocess call: using sys.executable and hardcoded script path
+        test_args = [sys.executable, "tests/run_tests.py", "--mock"]
+        result = subprocess.run(
+            test_args,
             check=False,
             capture_output=True,
             text=True,
@@ -89,8 +93,10 @@ def run_real_tests() -> bool:
     print_substep("🚀 Starting real integration tests with actual APIs...")
 
     try:
-        result = subprocess.run(  # noqa: S603
-            [sys.executable, "tests/run_tests.py", "--real"],
+        # Safe subprocess call: using sys.executable and hardcoded script path
+        real_test_args = [sys.executable, "tests/run_tests.py", "--real"]
+        result = subprocess.run(
+            real_test_args,
             check=False,
             text=True,
             timeout=1800,  # Add timeout for security (30 minutes)

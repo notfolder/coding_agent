@@ -116,7 +116,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
 
         if not execution_success:
             # Try LLM-based verification for more flexible checking
-            file_content = self.framework._get_file_content("hello_world.py")  # noqa: SLF001
+            file_content = self.framework.get_file_content("hello_world.py")
             if file_content:
                 self.logger.info("File content: %s", file_content)
                 llm_verified = self.framework.llm_verify_output(
@@ -206,7 +206,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
 
         self.logger.info("Test Scenario 2 completed successfully")
 
-    def test_scenario_3_pr_comment_operation(self) -> None:  # noqa: C901
+    def test_scenario_3_pr_comment_operation(self) -> None:
         """Test Scenario 3: Pull request comment-based operation.
 
         Adds comment to existing PR asking to modify file for multiple
@@ -214,6 +214,19 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
         """
         self.logger.info("Starting Test Scenario 3: PR comment operation")
 
+        # Get or create a PR for testing
+        pr_number = self._get_or_create_pr_for_scenario_3()
+
+        # Add comment and run agent
+        self._add_comment_and_run_agent(pr_number)
+
+        # Verify the results
+        self._verify_scenario_3_results()
+
+        self.logger.info("Test Scenario 3 completed successfully")
+
+    def _get_or_create_pr_for_scenario_3(self) -> int:
+        """Get existing PR or create one for scenario 3."""
         # Prerequisite: Ensure there's an open PR (run scenario 2 first if needed)
         latest_pr = None
         if hasattr(self.framework, "get_latest_pull_request"):
@@ -234,8 +247,10 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
         if not latest_pr:
             self.fail("Could not find or create a pull request for testing")
 
-        pr_number = latest_pr["number"] if self.platform == "github" else latest_pr["iid"]
+        return latest_pr["number"] if self.platform == "github" else latest_pr["iid"]
 
+    def _add_comment_and_run_agent(self, pr_number: int) -> None:
+        """Add comment to PR and run the coding agent."""
         # Step 1: Add comment to PR
         comment_text = """1. hello_world.pyファイルを読み込んで現在のコードを理解して
 2. hello_world.pyファイルを変更して、scikit-learnの複数の分類モデルで
@@ -243,7 +258,6 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
 3. レビューや議論は必要ないので、このブランチにコミットして"""
 
         # Add coding agent label to the comment (implementation-specific)
-
         self.framework.add_pr_comment(pr_number, comment_text)
         self.logger.info("Added comment to PR #%s", pr_number)
 
@@ -262,11 +276,13 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
         self.logger.info("Waiting for comment processing...")
         time.sleep(30)  # Give some time for processing
 
+    def _verify_scenario_3_results(self) -> None:
+        """Verify the results of scenario 3."""
         # Step 4: Verify the file was updated with multiple models and evaluation
         self.logger.info("Verifying hello_world.py updates...")
 
         # Get the updated file content
-        file_content = self.framework._get_file_content("hello_world.py")  # noqa: SLF001
+        file_content = self.framework.get_file_content("hello_world.py")
         assert file_content is not None, "Could not retrieve updated hello_world.py content"
 
         # Use LLM to verify the content meets requirements
@@ -278,6 +294,10 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
         assert llm_verified, "LLM verification failed for updated hello_world.py content"
 
         # Step 5: Try to execute the file and verify output contains accuracy and confusion matrix
+        self._verify_execution_or_content(file_content)
+
+    def _verify_execution_or_content(self, file_content: str) -> None:
+        """Verify file execution or analyze content as fallback."""
         try:
             execution_success = self.framework.verify_python_execution(
                 "hello_world.py", "accuracy",
@@ -304,8 +324,6 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
                 "and confusion matrix computation",
             )
             assert content_verified, "File content does not meet requirements based on LLM analysis"
-
-        self.logger.info("Test Scenario 3 completed successfully")
 
 
 if __name__ == "__main__":

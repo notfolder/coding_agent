@@ -7,6 +7,13 @@ import sys
 import unittest
 from pathlib import Path
 
+# Optional import for coverage
+try:
+    import coverage
+    COVERAGE_AVAILABLE = True
+except ImportError:
+    COVERAGE_AVAILABLE = False
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -57,11 +64,26 @@ def run_integration_tests() -> bool:
     return result.wasSuccessful()
 
 
-def run_real_tests() -> bool:  # noqa: C901, PLR0911, PLR0912
+def run_real_tests() -> bool:
     """Run real integration tests (requires API tokens)."""
     # Setup logging
     logger = logging.getLogger(__name__)
 
+    # Check for API tokens and configuration
+    if not _validate_api_tokens(logger):
+        return False
+
+    _log_configuration_status(logger)
+
+    if not _validate_llm_configuration(logger):
+        return False
+
+    # Run the tests
+    return _execute_real_integration_tests(logger)
+
+
+def _validate_api_tokens(logger: logging.Logger) -> bool:
+    """Validate that required API tokens are configured."""
     # Check for API tokens
     github_token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
     gitlab_token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN")
@@ -89,6 +111,16 @@ def run_real_tests() -> bool:  # noqa: C901, PLR0911, PLR0912
         )
         return False
 
+    return True
+
+
+def _log_configuration_status(logger: logging.Logger) -> None:
+    """Log the current configuration status."""
+    github_token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
+    gitlab_token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN")
+    github_repo = os.environ.get("GITHUB_TEST_REPO")
+    gitlab_project = os.environ.get("GITLAB_TEST_PROJECT")
+
     if github_token and github_repo:
         logger.info("GitHub testing enabled for repository: %s", github_repo)
     else:
@@ -99,6 +131,9 @@ def run_real_tests() -> bool:  # noqa: C901, PLR0911, PLR0912
     else:
         logger.warning("GitLab testing disabled (no token or project configured)")
 
+
+def _validate_llm_configuration(logger: logging.Logger) -> bool:
+    """Validate LLM configuration."""
     # Check for LLM configuration
     llm_provider = os.environ.get("LLM_PROVIDER", "openai")
     if llm_provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
@@ -107,6 +142,11 @@ def run_real_tests() -> bool:  # noqa: C901, PLR0911, PLR0912
     if llm_provider == "openai":
         logger.info("OpenAI LLM configured")
 
+    return True
+
+
+def _execute_real_integration_tests(logger: logging.Logger) -> bool:
+    """Execute the real integration tests."""
     logger.info("Running real integration tests...")
     logging.basicConfig(level=logging.INFO)
 
@@ -121,20 +161,7 @@ def run_real_tests() -> bool:  # noqa: C901, PLR0911, PLR0912
         result = runner.run(suite)
 
         # Log summary
-        logger.info("Test Results:")
-        logger.info("Tests run: %d", result.testsRun)
-        logger.info("Failures: %d", len(result.failures))
-        logger.info("Errors: %d", len(result.errors))
-
-        if result.failures:
-            logger.error("FAILURES:")
-            for test, traceback in result.failures:
-                logger.error("- %s: %s", test, traceback)
-
-        if result.errors:
-            logger.error("ERRORS:")
-            for test, traceback in result.errors:
-                logger.error("- %s: %s", test, traceback)
+        _log_test_results(logger, result)
 
         return result.wasSuccessful()
 
@@ -144,6 +171,24 @@ def run_real_tests() -> bool:  # noqa: C901, PLR0911, PLR0912
     except (OSError, RuntimeError):
         logger.exception("Failed to run real integration tests")
         return False
+
+
+def _log_test_results(logger: logging.Logger, result: unittest.TestResult) -> None:
+    """Log the test results summary."""
+    logger.info("Test Results:")
+    logger.info("Tests run: %d", result.testsRun)
+    logger.info("Failures: %d", len(result.failures))
+    logger.info("Errors: %d", len(result.errors))
+
+    if result.failures:
+        logger.error("FAILURES:")
+        for test, traceback in result.failures:
+            logger.error("- %s: %s", test, traceback)
+
+    if result.errors:
+        logger.error("ERRORS:")
+        for test, traceback in result.errors:
+            logger.error("- %s: %s", test, traceback)
 
 
 def run_mock_tests() -> bool:
@@ -182,9 +227,7 @@ def run_mock_tests() -> bool:
 
 def run_coverage_tests() -> bool:
     """Run tests with coverage analysis (if coverage is available)."""
-    try:
-        import coverage  # noqa: PLC0415
-    except ImportError:
+    if not COVERAGE_AVAILABLE:
         return run_mock_tests()
 
     # Create coverage instance

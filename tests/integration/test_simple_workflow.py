@@ -12,10 +12,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.modules["mcp"] = MagicMock()
 sys.modules["mcp"].McpError = Exception
 
-from handlers.task_getter_github import TaskGitHubIssue  # noqa: E402
-from handlers.task_handler import TaskHandler  # noqa: E402
-from tests.mocks.mock_llm_client import MockLLMClient  # noqa: E402
-from tests.mocks.mock_mcp_client import MockMCPToolClient  # noqa: E402
+
+def _import_test_modules() -> tuple[type, type, type, type]:
+    """Import test modules after mocking is set up."""
+    from handlers.task_getter_github import TaskGitHubIssue
+    from handlers.task_handler import TaskHandler
+    from tests.mocks.mock_llm_client import MockLLMClient
+    from tests.mocks.mock_mcp_client import MockMCPToolClient
+    return TaskGitHubIssue, TaskHandler, MockLLMClient, MockMCPToolClient
+
+
+# Import the modules we need
+TaskGitHubIssue, TaskHandler, MockLLMClient, MockMCPToolClient = _import_test_modules()
 
 
 class TestSimpleWorkflow(unittest.TestCase):

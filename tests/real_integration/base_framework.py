@@ -8,12 +8,16 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+# 定数
+EXPECTED_REPO_PARTS_COUNT = 2  # owner/repo形式のパーツ数
 
 # LLMクライアントの遅延インポート用
 try:
@@ -89,7 +93,7 @@ class RealIntegrationTestFramework:
         # 環境変数で設定を上書き
         if self.platform == "github":
             repo_parts = os.environ.get("GITHUB_TEST_REPO", "").split("/")
-            if len(repo_parts) == 2:  # noqa: PLR2004
+            if len(repo_parts) == EXPECTED_REPO_PARTS_COUNT:
                 config["github"]["owner"] = repo_parts[0]
                 config["github"]["repo"] = repo_parts[1]
                 self.test_repo = f"{repo_parts[0]}/{repo_parts[1]}"
@@ -115,20 +119,28 @@ class RealIntegrationTestFramework:
         # クリーンアップタスクを逆順で実行してエラーを蓄積
         cleanup_errors = []
         for cleanup_task in reversed(self.cleanup_tasks):
-            try:
-                cleanup_task()
-            except (ValueError, TypeError, OSError) as e:  # noqa: PERF203
-                task_name = (
-                    cleanup_task.__name__
-                    if hasattr(cleanup_task, "__name__")
-                    else str(cleanup_task)
-                )
-                cleanup_errors.append((task_name, e))
+            self._execute_cleanup_task(cleanup_task, cleanup_errors)
 
         # エラーがあった場合はまとめてログ出力
         if cleanup_errors:
             for task_name, error in cleanup_errors:
                 self.logger.warning("Cleanup task %s failed: %s", task_name, error)
+
+    def _execute_cleanup_task(
+        self,
+        cleanup_task: callable,
+        cleanup_errors: list[tuple[str, Exception]],
+    ) -> None:
+        """個別のクリーンアップタスクを実行し、エラーを記録する."""
+        try:
+            cleanup_task()
+        except (ValueError, TypeError, OSError) as e:
+            task_name = (
+                cleanup_task.__name__
+                if hasattr(cleanup_task, "__name__")
+                else str(cleanup_task)
+            )
+            cleanup_errors.append((task_name, e))
 
     def _ensure_labels_exist(self) -> None:
         """必要なラベルがリポジトリ/プロジェクトに存在することを確認する."""
@@ -214,8 +226,8 @@ class RealIntegrationTestFramework:
         # コーディングエージェントを実行
         agent_path = Path(__file__).parent.parent.parent / "main.py"
 
-        result = subprocess.run(  # noqa: S603
-            ["python", str(agent_path)],  # noqa: S607
+        result = subprocess.run(
+            [sys.executable, str(agent_path)],
             check=False,
             env=env,
             cwd=agent_path.parent,
@@ -279,8 +291,8 @@ class RealIntegrationTestFramework:
             tmp_path = tmp.name
 
         try:
-            result = subprocess.run(  # noqa: S603
-                ["python", tmp_path],  # noqa: S607
+            result = subprocess.run(
+                [sys.executable, tmp_path],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -295,6 +307,10 @@ class RealIntegrationTestFramework:
             return False
         finally:
             Path(tmp_path).unlink()
+
+    def get_file_content(self, file_path: str) -> str | None:
+        """リポジトリからファイル内容を取得する(公開メソッド)."""
+        return self._get_file_content(file_path)
 
     def _get_file_content(self, file_path: str) -> str | None:
         """リポジトリからファイル内容を取得する."""

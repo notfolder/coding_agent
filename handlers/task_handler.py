@@ -337,6 +337,10 @@ class TaskHandler:
         task.comment(comment_text, mention=True)
         task.finish()
 
+    def get_system_prompt(self) -> str:
+        """システムプロンプトを取得する(テスト用の公開メソッド)."""
+        return self._make_system_prompt()
+
     def _make_system_prompt(self) -> str:
         """システムプロンプトを生成する.
 

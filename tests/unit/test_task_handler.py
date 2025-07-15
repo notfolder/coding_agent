@@ -16,18 +16,31 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.modules["mcp"] = MagicMock()
 sys.modules["mcp"].McpError = Exception
 
-import pytest  # noqa: E402
-from mcp import McpError  # noqa: E402
 
-from handlers.task_getter_github import TaskGitHubIssue  # noqa: E402
-from handlers.task_getter_gitlab import TaskGitLabIssue  # noqa: E402
-from handlers.task_handler import TaskHandler  # noqa: E402
-from tests.mocks.mock_llm_client import (  # noqa: E402
-    MockLLMClient,
-    MockLLMClientWithErrors,
-    MockLLMClientWithToolCalls,
-)
-from tests.mocks.mock_mcp_client import MockMCPToolClient  # noqa: E402
+def _import_test_modules() -> tuple[type, ...]:
+    """Import test modules after mocking is set up."""
+    import pytest
+    from mcp import McpError
+
+    from handlers.task_getter_github import TaskGitHubIssue
+    from handlers.task_getter_gitlab import TaskGitLabIssue
+    from handlers.task_handler import TaskHandler
+    from tests.mocks.mock_llm_client import (
+        MockLLMClient,
+        MockLLMClientWithErrors,
+        MockLLMClientWithToolCalls,
+    )
+    from tests.mocks.mock_mcp_client import MockMCPToolClient
+
+    return (pytest, McpError, TaskGitHubIssue, TaskGitLabIssue, TaskHandler,
+            MockLLMClient, MockLLMClientWithErrors, MockLLMClientWithToolCalls,
+            MockMCPToolClient)
+
+
+# Import the modules we need
+(pytest, McpError, TaskGitHubIssue, TaskGitLabIssue, TaskHandler,
+ MockLLMClient, MockLLMClientWithErrors, MockLLMClientWithToolCalls,
+ MockMCPToolClient) = _import_test_modules()
 
 # Constants
 MAX_TOOL_FAILURES = 2
@@ -337,8 +350,8 @@ class TestTaskHandler(unittest.TestCase):
             config=self.config,
         )
 
-        # Test that system prompt is generated (accessing private method for testing)
-        system_prompt = task_handler._make_system_prompt()  # noqa: SLF001
+        # Test that system prompt is generated
+        system_prompt = task_handler.get_system_prompt()
         assert isinstance(system_prompt, str)
         assert len(system_prompt) > 0
 

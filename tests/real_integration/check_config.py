@@ -90,14 +90,28 @@ def check_dependencies() -> bool:
     required_packages = ["requests", "yaml", "portalocker"]
     missing = []
 
-    # Check packages without try-except in loop for better performance
-    for package in required_packages:
-        try:
-            __import__(package)
-        except ImportError:  # noqa: PERF203
-            missing.append(package)
+    # Check packages and collect missing ones using list comprehension for better performance
+    missing = [package for package in required_packages if not _check_package_import(package)]
 
     return not missing
+
+
+def _check_package_import(package: str) -> bool:
+    """Check if a single package can be imported."""
+    try:
+        __import__(package)
+    except ImportError:
+        return False
+    else:
+        return True
+
+
+def _run_check_safely(check_func: callable) -> bool:
+    """Run a check function safely, catching exceptions."""
+    try:
+        return check_func()
+    except (ImportError, OSError, subprocess.SubprocessError):
+        return False
 
 
 def check_mcp_servers() -> bool:
@@ -113,8 +127,10 @@ def check_mcp_servers() -> bool:
         if not Path(npm_cmd).exists():
             npm_cmd = "npm"  # Fallback to PATH lookup
 
-        result = subprocess.run(  # noqa: S603
-            [npm_cmd, "list", "@zereight/mcp-gitlab"],
+        # This subprocess call is safe: using validated npm command with fixed arguments
+        npm_args = [npm_cmd, "list", "@zereight/mcp-gitlab"]
+        result = subprocess.run(
+            npm_args,
             check=False,
             capture_output=True,
             text=True,
@@ -150,10 +166,7 @@ def main() -> None:
     # Run remaining checks
     all_passed = True
     for _name, check_func in checks:
-        try:
-            if not check_func():
-                all_passed = False
-        except (ImportError, OSError, subprocess.SubprocessError):  # noqa: PERF203
+        if not _run_check_safely(check_func):
             all_passed = False
 
     if all_passed and (github_configured or gitlab_configured):

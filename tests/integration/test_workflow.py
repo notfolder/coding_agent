@@ -8,6 +8,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+"""Comprehensive workflow integration tests for GitHub and GitLab task handlers."""
+
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -15,13 +18,29 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.modules["mcp"] = MagicMock()
 sys.modules["mcp"].McpError = Exception
 
-from handlers.task_factory import GitHubTaskFactory, GitLabTaskFactory  # noqa: E402
-from handlers.task_getter_github import TaskGetterFromGitHub, TaskGitHubIssue  # noqa: E402
-from handlers.task_getter_gitlab import TaskGetterFromGitLab, TaskGitLabIssue  # noqa: E402
-from handlers.task_handler import TaskHandler  # noqa: E402
-from handlers.task_key import GitHubIssueTaskKey, GitLabIssueTaskKey  # noqa: E402
-from tests.mocks.mock_llm_client import MockLLMClient, MockLLMClientWithToolCalls  # noqa: E402
-from tests.mocks.mock_mcp_client import MockMCPToolClient  # noqa: E402
+
+def _import_test_modules() -> tuple[type, ...]:
+    """Import test modules after mocking is set up."""
+    from handlers.task_factory import GitHubTaskFactory, GitLabTaskFactory
+    from handlers.task_getter_github import TaskGetterFromGitHub, TaskGitHubIssue
+    from handlers.task_getter_gitlab import TaskGetterFromGitLab, TaskGitLabIssue
+    from handlers.task_handler import TaskHandler
+    from handlers.task_key import GitHubIssueTaskKey, GitLabIssueTaskKey
+    from tests.mocks.mock_llm_client import MockLLMClient, MockLLMClientWithToolCalls
+    from tests.mocks.mock_mcp_client import MockMCPToolClient
+
+    return (
+        GitHubTaskFactory, GitLabTaskFactory, TaskGetterFromGitHub, TaskGitHubIssue,
+        TaskGetterFromGitLab, TaskGitLabIssue, TaskHandler, GitHubIssueTaskKey,
+        GitLabIssueTaskKey, MockLLMClient, MockLLMClientWithToolCalls, MockMCPToolClient,
+    )
+
+
+# Import the modules we need
+(GitHubTaskFactory, GitLabTaskFactory, TaskGetterFromGitHub, TaskGitHubIssue,
+ TaskGetterFromGitLab, TaskGitLabIssue, TaskHandler, GitHubIssueTaskKey,
+ GitLabIssueTaskKey, MockLLMClient, MockLLMClientWithToolCalls,
+ MockMCPToolClient) = _import_test_modules()
 
 
 class TestGitHubWorkflowIntegration(unittest.TestCase):
