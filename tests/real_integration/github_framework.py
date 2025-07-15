@@ -34,8 +34,25 @@ class GitHubRealIntegrationFramework(RealIntegrationTestFramework):
             "Accept": "application/vnd.github.v3+json",
         }
 
-    def _create_issue_impl(self, title: str, body: str, labels: list[str]) -> dict[str, Any]:
-        """GitHubイシューを作成する."""
+    def _create_issue_impl(
+        self,
+        title: str,
+        body: str,
+        labels: list[str],
+        assignee: str | None = None,
+    ) -> dict[str, Any]:
+        """GitHubイシューを作成する.
+
+        Args:
+            title: イシューのタイトル
+            body: イシューの本文
+            labels: ラベルのリスト
+            assignee: アサインするユーザー名(オプション)
+
+        Returns:
+            作成されたイシューの詳細を含む辞書
+
+        """
         owner, repo = self.test_repo.split("/")
 
         url = f"{self.api_base}/repos/{owner}/{repo}/issues"
@@ -45,11 +62,18 @@ class GitHubRealIntegrationFramework(RealIntegrationTestFramework):
             "labels": labels,
         }
 
+        # アサイニーが指定されている場合は追加
+        if assignee:
+            data["assignees"] = [assignee]
+
         response = requests.post(url, json=data, headers=self.headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
         issue_data = response.json()
         self.logger.info("Created GitHub issue #%s: %s", issue_data["number"], title)
+
+        if assignee:
+            self.logger.info("Assigned issue #%s to %s", issue_data["number"], assignee)
 
         return issue_data
 
@@ -152,6 +176,35 @@ class GitHubRealIntegrationFramework(RealIntegrationTestFramework):
 
         pull_requests = response.json()
         return pull_requests[0] if pull_requests else None
+
+    def assign_pull_request(self, pr_number: int, assignee: str) -> bool:
+        """GitHubプルリクエストにユーザーをアサインする.
+
+        Args:
+            pr_number: プルリクエスト番号
+            assignee: アサインするユーザー名
+
+        Returns:
+            成功した場合True、失敗した場合False
+
+        """
+        if not assignee:
+            return False
+
+        owner, repo = self.test_repo.split("/")
+
+        url = f"{self.api_base}/repos/{owner}/{repo}/issues/{pr_number}/assignees"
+        data = {"assignees": [assignee]}
+
+        try:
+            response = requests.post(url, json=data, headers=self.headers, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            self.logger.info("Assigned PR #%s to %s", pr_number, assignee)
+        except requests.RequestException as e:
+            self.logger.warning("Failed to assign PR #%s to %s: %s", pr_number, assignee, e)
+            return False
+
+        return True
 
     def _create_label_if_not_exists(self, label: str) -> None:
         """GitHubリポジトリでラベルが存在しない場合は作成する."""

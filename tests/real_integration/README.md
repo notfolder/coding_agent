@@ -61,11 +61,13 @@ Create a `.env` file or set environment variables:
 # For GitHub testing
 export GITHUB_PERSONAL_ACCESS_TOKEN="ghp_your_token_here"
 export GITHUB_TEST_REPO="yourusername/your-test-repo"
+export GITHUB_BOT_NAME="coding-agent-bot"  # Optional: bot username for assignment
 
 # For GitLab testing
 export GITLAB_PERSONAL_ACCESS_TOKEN="glpat-your_token_here"
 export GITLAB_TEST_PROJECT="123"  # or "yourusername/your-test-project"
 export GITLAB_API_URL="https://gitlab.com/api/v4"
+export GITLAB_BOT_NAME="coding-agent-bot"  # Optional: bot username for assignment
 
 # LLM configuration
 export LLM_PROVIDER="openai"

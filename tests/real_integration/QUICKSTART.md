@@ -14,6 +14,7 @@ This is a quick guide to get the real integration tests running.
    ```bash
    export GITHUB_PERSONAL_ACCESS_TOKEN="ghp_your_token_here"
    export GITHUB_TEST_REPO="myuser/coding-agent-test"
+   export GITHUB_BOT_NAME="coding-agent-bot"  # Optional: bot for assignment
    export OPENAI_API_KEY="sk_your_openai_key_here"
    # Optional: For local LLM via OpenAI-compatible API
    export OPENAI_BASE_URL="http://localhost:1234/v1"
@@ -85,6 +86,7 @@ In your test repository:
 ```bash
 export GITLAB_PERSONAL_ACCESS_TOKEN="glpat_your_token_here"
 export GITLAB_TEST_PROJECT="123"  # or "myuser/project"
+export GITLAB_BOT_NAME="coding-agent-bot"  # Optional: bot for assignment
 export OPENAI_API_KEY="sk_your_openai_key_here"
 ```
 

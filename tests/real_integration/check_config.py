@@ -157,10 +157,24 @@ def main() -> None:
 
     if github_configured:
         checks.append(("GitHub", lambda: True))
+        print("✅ GitHub testing enabled")  # noqa: T201
+        github_bot = os.environ.get("GITHUB_BOT_NAME")
+        if github_bot:
+            print(f"   Bot assignment: {github_bot}")  # noqa: T201
+        else:
+            print("   Bot assignment: Not configured (issues won't be assigned)")  # noqa: T201
+
     if gitlab_configured:
         checks.append(("GitLab", lambda: True))
+        print("✅ GitLab testing enabled")  # noqa: T201
+        gitlab_bot = os.environ.get("GITLAB_BOT_NAME")
+        if gitlab_bot:
+            print(f"   Bot assignment: {gitlab_bot}")  # noqa: T201
+        else:
+            print("   Bot assignment: Not configured (issues won't be assigned)")  # noqa: T201
 
     if not github_configured and not gitlab_configured:
+        print("❌ No platform configured. Please set up GitHub or GitLab credentials.")  # noqa: T201
         sys.exit(1)
 
     # Run remaining checks
@@ -170,8 +184,10 @@ def main() -> None:
             all_passed = False
 
     if all_passed and (github_configured or gitlab_configured):
-        pass
+        print("\n🎉 All configuration checks passed! Ready to run real integration tests.")  # noqa: T201
+        print("Run: python tests/run_tests.py --real")  # noqa: T201
     else:
+        print("\n❌ Some configuration checks failed. Please review your setup.")  # noqa: T201
         sys.exit(1)
 
 

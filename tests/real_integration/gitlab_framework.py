@@ -31,8 +31,25 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
             "Content-Type": "application/json",
         }
 
-    def _create_issue_impl(self, title: str, body: str, labels: list[str]) -> dict[str, Any]:
-        """Create a GitLab issue."""
+    def _create_issue_impl(
+        self,
+        title: str,
+        body: str,
+        labels: list[str],
+        assignee: str | None = None,
+    ) -> dict[str, Any]:
+        """GitLabイシューを作成する.
+
+        Args:
+            title: イシューのタイトル
+            body: イシューの本文
+            labels: ラベルのリスト
+            assignee: アサインするユーザー名(オプション)
+
+        Returns:
+            作成されたイシューの詳細を含む辞書
+
+        """
         url = f"{self.api_base}/projects/{self.test_project_id}/issues"
         data = {
             "title": title,
@@ -40,11 +57,20 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
             "labels": ",".join(labels),
         }
 
+        # アサイニーが指定されている場合はユーザーIDを取得して追加
+        if assignee:
+            assignee_id = self._get_user_id(assignee)
+            if assignee_id:
+                data["assignee_id"] = assignee_id
+
         response = requests.post(url, json=data, headers=self.headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
         issue_data = response.json()
         self.logger.info("Created GitLab issue #%s: %s", issue_data["iid"], title)
+
+        if assignee and assignee_id:
+            self.logger.info("Assigned issue #%s to %s", issue_data["iid"], assignee)
 
         return issue_data
 
@@ -134,6 +160,64 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
 
         merge_requests = response.json()
         return merge_requests[0] if merge_requests else None
+
+    def _get_user_id(self, username: str) -> int | None:
+        """GitLabユーザー名からユーザーIDを取得する.
+
+        Args:
+            username: GitLabユーザー名
+
+        Returns:
+            ユーザーID、または見つからない場合はNone
+
+        """
+        url = f"{self.api_base}/users"
+        params = {"username": username}
+
+        try:
+            response = requests.get(
+                url, params=params, headers=self.headers, timeout=REQUEST_TIMEOUT,
+            )
+            response.raise_for_status()
+            users = response.json()
+
+            if users:
+                return users[0]["id"]
+        except requests.RequestException as e:
+            self.logger.warning("Failed to get user ID for %s: %s", username, e)
+
+        return None
+
+    def assign_merge_request(self, mr_iid: int, assignee: str) -> bool:
+        """GitLabマージリクエストにユーザーをアサインする.
+
+        Args:
+            mr_iid: マージリクエストのIID
+            assignee: アサインするユーザー名
+
+        Returns:
+            成功した場合True、失敗した場合False
+
+        """
+        if not assignee:
+            return False
+
+        assignee_id = self._get_user_id(assignee)
+        if not assignee_id:
+            return False
+
+        url = f"{self.api_base}/projects/{self.test_project_id}/merge_requests/{mr_iid}"
+        data = {"assignee_id": assignee_id}
+
+        try:
+            response = requests.put(url, json=data, headers=self.headers, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            self.logger.info("Assigned MR #%s to %s", mr_iid, assignee)
+        except requests.RequestException as e:
+            self.logger.warning("Failed to assign MR #%s to %s: %s", mr_iid, assignee, e)
+            return False
+
+        return True
 
     def _create_label_if_not_exists(self, label: str) -> None:
         """Create a label if it doesn't exist in GitLab project."""

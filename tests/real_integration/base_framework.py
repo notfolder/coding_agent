@@ -48,6 +48,9 @@ class RealIntegrationTestFramework:
         # Load configuration
         self.config = self._load_config()
 
+        # Get bot name from environment variables (optional)
+        self.bot_name = self._get_bot_name()
+
     def _check_prerequisites(self) -> None:
         """必要な環境変数が設定されているかをチェックする."""
         if self.platform == "github":
@@ -104,6 +107,19 @@ class RealIntegrationTestFramework:
                 self.test_project_id = project
 
         return config
+
+    def _get_bot_name(self) -> str | None:
+        """プラットフォーム固有のボット名を環境変数から取得する.
+
+        Returns:
+            ボット名、または設定されていない場合はNone
+
+        """
+        if self.platform == "github":
+            return os.environ.get("GITHUB_BOT_NAME")
+        if self.platform == "gitlab":
+            return os.environ.get("GITLAB_BOT_NAME")
+        return None
 
     def setup_test_environment(self) -> None:
         """テスト環境をセットアップする."""
@@ -179,7 +195,7 @@ class RealIntegrationTestFramework:
             labels = [self.config[self.platform]["bot_label"]]
 
         # これは各プラットフォームで実装されます
-        issue_data = self._create_issue_impl(title, body, labels)
+        issue_data = self._create_issue_impl(title, body, labels, self.bot_name)
 
         # クリーンアップタスクを追加
         def cleanup() -> None:
@@ -192,8 +208,25 @@ class RealIntegrationTestFramework:
 
         return issue_data
 
-    def _create_issue_impl(self, title: str, body: str, labels: list[str]) -> dict[str, Any]:
-        """プラットフォーム固有のイシュー作成実装."""
+    def _create_issue_impl(
+        self,
+        title: str,
+        body: str,
+        labels: list[str],
+        assignee: str | None = None,
+    ) -> dict[str, Any]:
+        """プラットフォーム固有のイシュー作成実装.
+
+        Args:
+            title: イシューのタイトル
+            body: イシューの本文
+            labels: ラベルのリスト
+            assignee: アサインするユーザー名(オプション)
+
+        Returns:
+            作成されたイシューの詳細を含む辞書
+
+        """
         msg = "サブクラスは_create_issue_implを実装する必要があります"
         raise NotImplementedError(msg)
 

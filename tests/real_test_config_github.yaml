@@ -24,7 +24,7 @@ github:
   processing_label: "coding agent processing"
   done_label: "coding agent done"
   query: 'state:open label:"coding agent"'
-  assignee: "coding-agent-bot"
+  assignee: "${GITHUB_BOT_NAME:-coding-agent-bot}"
 
 max_llm_process_num: 10
 use_rabbitmq: false
