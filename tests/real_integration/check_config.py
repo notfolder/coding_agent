@@ -94,7 +94,7 @@ def check_dependencies() -> bool:
     for package in required_packages:
         try:
             __import__(package)
-        except ImportError:
+        except ImportError:  # noqa: PERF203
             missing.append(package)
 
     return not missing
@@ -113,7 +113,7 @@ def check_mcp_servers() -> bool:
         if not Path(npm_cmd).exists():
             npm_cmd = "npm"  # Fallback to PATH lookup
 
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [npm_cmd, "list", "@zereight/mcp-gitlab"],
             check=False,
             capture_output=True,
@@ -153,7 +153,7 @@ def main() -> None:
         try:
             if not check_func():
                 all_passed = False
-        except (ImportError, OSError, subprocess.SubprocessError):
+        except (ImportError, OSError, subprocess.SubprocessError):  # noqa: PERF203
             all_passed = False
 
     if all_passed and (github_configured or gitlab_configured):

@@ -57,7 +57,7 @@ def run_integration_tests() -> bool:
     return result.wasSuccessful()
 
 
-def run_real_tests() -> bool:
+def run_real_tests() -> bool:  # noqa: C901, PLR0911, PLR0912
     """Run real integration tests (requires API tokens)."""
     # Setup logging
     logger = logging.getLogger(__name__)

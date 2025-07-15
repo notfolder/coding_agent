@@ -116,7 +116,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
 
         if not execution_success:
             # Try LLM-based verification for more flexible checking
-            file_content = self.framework._get_file_content("hello_world.py")
+            file_content = self.framework._get_file_content("hello_world.py")  # noqa: SLF001
             if file_content:
                 self.logger.info("File content: %s", file_content)
                 llm_verified = self.framework.llm_verify_output(
@@ -206,7 +206,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
 
         self.logger.info("Test Scenario 2 completed successfully")
 
-    def test_scenario_3_pr_comment_operation(self) -> None:
+    def test_scenario_3_pr_comment_operation(self) -> None:  # noqa: C901
         """Test Scenario 3: Pull request comment-based operation.
 
         Adds comment to existing PR asking to modify file for multiple
@@ -266,7 +266,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
         self.logger.info("Verifying hello_world.py updates...")
 
         # Get the updated file content
-        file_content = self.framework._get_file_content("hello_world.py")
+        file_content = self.framework._get_file_content("hello_world.py")  # noqa: SLF001
         assert file_content is not None, "Could not retrieve updated hello_world.py content"
 
         # Use LLM to verify the content meets requirements

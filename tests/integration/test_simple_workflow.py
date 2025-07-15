@@ -72,7 +72,7 @@ class TestSimpleWorkflow(unittest.TestCase):
         result = task_handler.handle(github_task)
 
         # Should complete without errors
-        assert result is None  # noqa: S101
+        assert result is None
 
 
 if __name__ == "__main__":

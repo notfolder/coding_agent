@@ -40,7 +40,7 @@ def run_config_check() -> bool:
     print_step("2", "Running Configuration Checker")
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [sys.executable, "tests/real_integration/check_config.py"],
             check=False,
             capture_output=True,
@@ -63,7 +63,7 @@ def run_mock_tests() -> bool:
     print_substep("Running existing mock tests to ensure functionality...")
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [sys.executable, "tests/run_tests.py", "--mock"],
             check=False,
             capture_output=True,
@@ -89,7 +89,7 @@ def run_real_tests() -> bool:
     print_substep("🚀 Starting real integration tests with actual APIs...")
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [sys.executable, "tests/run_tests.py", "--real"],
             check=False,
             text=True,

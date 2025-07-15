@@ -117,7 +117,7 @@ class RealIntegrationTestFramework:
         for cleanup_task in reversed(self.cleanup_tasks):
             try:
                 cleanup_task()
-            except (ValueError, TypeError, OSError) as e:
+            except (ValueError, TypeError, OSError) as e:  # noqa: PERF203
                 task_name = (
                     cleanup_task.__name__
                     if hasattr(cleanup_task, "__name__")
