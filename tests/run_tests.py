@@ -200,7 +200,7 @@ def run_mock_tests() -> bool:
 
         # Run comprehensive test suite
         loader = unittest.TestLoader()
-        start_dir = str(Path(__file__).parent)
+        start_dir = str(Path(__file__).parent / "mocks")
         suite = loader.discover(start_dir, pattern="test_*.py")
 
         # Create a detailed test runner
