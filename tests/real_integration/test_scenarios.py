@@ -13,8 +13,8 @@ import subprocess
 import time
 import unittest
 
-from .github_framework import GitHubRealIntegrationFramework
-from .gitlab_framework import GitLabRealIntegrationFramework
+from tests.real_integration.github_framework import GitHubRealIntegrationFramework
+from tests.real_integration.gitlab_framework import GitLabRealIntegrationFramework
 
 
 class RealIntegrationTestScenarios(unittest.TestCase):
