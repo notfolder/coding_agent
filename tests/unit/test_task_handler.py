@@ -19,18 +19,18 @@ sys.modules["mcp"].McpError = Exception
 
 def _import_test_modules() -> tuple[type, ...]:
     """Import test modules after mocking is set up."""
-    import pytest
-    from mcp import McpError
+    import pytest  # noqa: PLC0415
+    from mcp import McpError  # noqa: PLC0415
 
-    from handlers.task_getter_github import TaskGitHubIssue
-    from handlers.task_getter_gitlab import TaskGitLabIssue
-    from handlers.task_handler import TaskHandler
-    from tests.mocks.mock_llm_client import (
+    from handlers.task_getter_github import TaskGitHubIssue  # noqa: PLC0415
+    from handlers.task_getter_gitlab import TaskGitLabIssue  # noqa: PLC0415
+    from handlers.task_handler import TaskHandler  # noqa: PLC0415
+    from tests.mocks.mock_llm_client import (  # noqa: PLC0415
         MockLLMClient,
         MockLLMClientWithErrors,
         MockLLMClientWithToolCalls,
     )
-    from tests.mocks.mock_mcp_client import MockMCPToolClient
+    from tests.mocks.mock_mcp_client import MockMCPToolClient  # noqa: PLC0415
 
     return (pytest, McpError, TaskGitHubIssue, TaskGitLabIssue, TaskHandler,
             MockLLMClient, MockLLMClientWithErrors, MockLLMClientWithToolCalls,

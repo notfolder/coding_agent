@@ -42,7 +42,7 @@ def run_config_check() -> bool:
     try:
         # Safe subprocess call: using sys.executable and hardcoded script path
         demo_args = [sys.executable, "tests/real_integration/check_config.py"]
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             demo_args,
             check=False,
             capture_output=True,
@@ -67,7 +67,7 @@ def run_mock_tests() -> bool:
     try:
         # Safe subprocess call: using sys.executable and hardcoded script path
         test_args = [sys.executable, "tests/run_tests.py", "--mock"]
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             test_args,
             check=False,
             capture_output=True,
@@ -95,7 +95,7 @@ def run_real_tests() -> bool:
     try:
         # Safe subprocess call: using sys.executable and hardcoded script path
         real_test_args = [sys.executable, "tests/run_tests.py", "--real"]
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             real_test_args,
             check=False,
             text=True,

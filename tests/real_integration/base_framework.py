@@ -226,7 +226,7 @@ class RealIntegrationTestFramework:
         # コーディングエージェントを実行
         agent_path = Path(__file__).parent.parent.parent / "main.py"
 
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [sys.executable, str(agent_path)],
             check=False,
             env=env,
@@ -291,7 +291,7 @@ class RealIntegrationTestFramework:
             tmp_path = tmp.name
 
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: S603
                 [sys.executable, tmp_path],
                 check=False,
                 capture_output=True,

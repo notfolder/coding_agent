@@ -129,7 +129,7 @@ def check_mcp_servers() -> bool:
 
         # This subprocess call is safe: using validated npm command with fixed arguments
         npm_args = [npm_cmd, "list", "@zereight/mcp-gitlab"]
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             npm_args,
             check=False,
             capture_output=True,

@@ -21,13 +21,16 @@ sys.modules["mcp"].McpError = Exception
 
 def _import_test_modules() -> tuple[type, ...]:
     """Import test modules after mocking is set up."""
-    from handlers.task_factory import GitHubTaskFactory, GitLabTaskFactory
-    from handlers.task_getter_github import TaskGetterFromGitHub, TaskGitHubIssue
-    from handlers.task_getter_gitlab import TaskGetterFromGitLab, TaskGitLabIssue
-    from handlers.task_handler import TaskHandler
-    from handlers.task_key import GitHubIssueTaskKey, GitLabIssueTaskKey
-    from tests.mocks.mock_llm_client import MockLLMClient, MockLLMClientWithToolCalls
-    from tests.mocks.mock_mcp_client import MockMCPToolClient
+    from handlers.task_factory import GitHubTaskFactory, GitLabTaskFactory  # noqa: PLC0415
+    from handlers.task_getter_github import TaskGetterFromGitHub, TaskGitHubIssue  # noqa: PLC0415
+    from handlers.task_getter_gitlab import TaskGetterFromGitLab, TaskGitLabIssue  # noqa: PLC0415
+    from handlers.task_handler import TaskHandler  # noqa: PLC0415
+    from handlers.task_key import GitHubIssueTaskKey, GitLabIssueTaskKey  # noqa: PLC0415
+    from tests.mocks.mock_llm_client import (  # noqa: PLC0415
+        MockLLMClient,
+        MockLLMClientWithToolCalls,
+    )
+    from tests.mocks.mock_mcp_client import MockMCPToolClient  # noqa: PLC0415
 
     return (
         GitHubTaskFactory, GitLabTaskFactory, TaskGetterFromGitHub, TaskGitHubIssue,
