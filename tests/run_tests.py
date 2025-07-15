@@ -228,6 +228,15 @@ if __name__ == "__main__":
         success = run_mock_tests()
     else:
         # Default: run comprehensive mock tests
+        success = run_unit_tests()
+        if not success:
+            sys.exit(1)
+        success = run_integration_tests()
+        if not success:
+            sys.exit(1)
         success = run_mock_tests()
+        if not success:
+            sys.exit(1)
+        success = run_coverage_tests()
 
     sys.exit(0 if success else 1)
