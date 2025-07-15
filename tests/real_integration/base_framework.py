@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -385,6 +386,13 @@ class RealIntegrationTestFramework:
         msg = "サブクラスは_add_pr_comment_implを実装する必要があります"
         raise NotImplementedError(msg)
 
+    def _process_think_tags(self, resp: str) -> str:
+        """レスポンス内の<think>タグを処理し、クリーンなレスポンスを返す."""
+        think_matches = re.findall(r"<think>(.*?)</think>", resp, flags=re.DOTALL)
+        for think_content in think_matches:
+            self.logger.info("Processing <think> tag content: %s", think_content.strip())
+        return resp
+
     def llm_verify_output(self, actual_output: str, expected_criteria: str) -> bool:
         """LLMを使用して出力が基準を満たすかを確認する(非決定的検証用).
 
@@ -416,7 +424,9 @@ class RealIntegrationTestFramework:
 """
 
         try:
-            response = llm_client.chat(prompt)
+            llm_client.send_user_message(prompt)
+            response = llm_client.get_response()
+            response = self._process_think_tags(response)
 
             # 応答を解析
             lines = response.strip().split("\n")
