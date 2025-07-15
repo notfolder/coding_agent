@@ -112,12 +112,23 @@ class RealIntegrationTestFramework:
         """テスト環境をクリーンアップする."""
         self.logger.info("Cleaning up test environment")
 
-        # クリーンアップタスクを逆順で実行
+        # クリーンアップタスクを逆順で実行してエラーを蓄積
+        cleanup_errors = []
         for cleanup_task in reversed(self.cleanup_tasks):
             try:
                 cleanup_task()
             except (ValueError, TypeError, OSError) as e:
-                self.logger.warning("Cleanup task failed: %s", e)
+                task_name = (
+                    cleanup_task.__name__
+                    if hasattr(cleanup_task, "__name__")
+                    else str(cleanup_task)
+                )
+                cleanup_errors.append((task_name, e))
+
+        # エラーがあった場合はまとめてログ出力
+        if cleanup_errors:
+            for task_name, error in cleanup_errors:
+                self.logger.warning("Cleanup task %s failed: %s", task_name, error)
 
     def _ensure_labels_exist(self) -> None:
         """必要なラベルがリポジトリ/プロジェクトに存在することを確認する."""

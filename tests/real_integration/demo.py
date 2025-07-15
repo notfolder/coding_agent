@@ -42,17 +42,18 @@ def run_config_check() -> bool:
     try:
         result = subprocess.run(
             [sys.executable, "tests/real_integration/check_config.py"],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             text=True,
+            timeout=60,  # Add timeout for security
         )
 
         if result.stderr:
             pass
-
-        return result.returncode == 0
-
-    except Exception as e:
+    except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
+    else:
+        return result.returncode == 0
 
 
 def run_mock_tests() -> bool:
@@ -64,8 +65,10 @@ def run_mock_tests() -> bool:
     try:
         result = subprocess.run(
             [sys.executable, "tests/run_tests.py", "--mock"],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             text=True,
+            timeout=300,  # Add timeout for security
         )
 
         # Print summary
@@ -73,11 +76,10 @@ def run_mock_tests() -> bool:
         for line in lines:
             if ("Ran" in line and "tests" in line) or "OK" in line or "FAILED" in line:
                 pass
-
-        return result.returncode == 0
-
-    except Exception as e:
+    except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
+    else:
+        return result.returncode == 0
 
 
 def run_real_tests() -> bool:
@@ -89,17 +91,18 @@ def run_real_tests() -> bool:
     try:
         result = subprocess.run(
             [sys.executable, "tests/run_tests.py", "--real"],
-            check=False, text=True,
+            check=False,
+            text=True,
+            timeout=1800,  # Add timeout for security (30 minutes)
         )
-
-        return result.returncode == 0
-
-    except Exception as e:
+    except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
+    else:
+        return result.returncode == 0
 
 
 def main() -> None:
-    """Main demo function."""
+    """Run main demo function."""
     # Step 1: Check environment
     if not check_environment():
         sys.exit(1)

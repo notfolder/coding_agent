@@ -59,6 +59,9 @@ def run_integration_tests() -> bool:
 
 def run_real_tests() -> bool:
     """Run real integration tests (requires API tokens)."""
+    # Setup logging
+    logger = logging.getLogger(__name__)
+
     # Check for API tokens
     github_token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
     gitlab_token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN")
@@ -66,36 +69,45 @@ def run_real_tests() -> bool:
     gitlab_project = os.environ.get("GITLAB_TEST_PROJECT")
 
     if not github_token and not gitlab_token:
-        print("❌ No API tokens found. Please set GITHUB_PERSONAL_ACCESS_TOKEN or GITLAB_PERSONAL_ACCESS_TOKEN environment variables.")
+        logger.error(
+            "No API tokens found. Please set GITHUB_PERSONAL_ACCESS_TOKEN "
+            "or GITLAB_PERSONAL_ACCESS_TOKEN environment variables.",
+        )
         return False
 
     if github_token and not github_repo:
-        print("❌ GITHUB_PERSONAL_ACCESS_TOKEN is set but GITHUB_TEST_REPO is missing. Please set GITHUB_TEST_REPO (format: owner/repo).")
+        logger.error(
+            "GITHUB_PERSONAL_ACCESS_TOKEN is set but GITHUB_TEST_REPO is missing. "
+            "Please set GITHUB_TEST_REPO (format: owner/repo).",
+        )
         return False
 
     if gitlab_token and not gitlab_project:
-        print("❌ GITLAB_PERSONAL_ACCESS_TOKEN is set but GITLAB_TEST_PROJECT is missing. Please set GITLAB_TEST_PROJECT.")
+        logger.error(
+            "GITLAB_PERSONAL_ACCESS_TOKEN is set but GITLAB_TEST_PROJECT is missing. "
+            "Please set GITLAB_TEST_PROJECT.",
+        )
         return False
 
     if github_token and github_repo:
-        print(f"✅ GitHub testing enabled for repository: {github_repo}")
+        logger.info("GitHub testing enabled for repository: %s", github_repo)
     else:
-        print("⚠️  GitHub testing disabled (no token or repo configured)")
+        logger.warning("GitHub testing disabled (no token or repo configured)")
 
     if gitlab_token and gitlab_project:
-        print(f"✅ GitLab testing enabled for project: {gitlab_project}")
+        logger.info("GitLab testing enabled for project: %s", gitlab_project)
     else:
-        print("⚠️  GitLab testing disabled (no token or project configured)")
+        logger.warning("GitLab testing disabled (no token or project configured)")
 
     # Check for LLM configuration
     llm_provider = os.environ.get("LLM_PROVIDER", "openai")
     if llm_provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
-        print("❌ LLM_PROVIDER is 'openai' but OPENAI_API_KEY is not set.")
+        logger.error("LLM_PROVIDER is 'openai' but OPENAI_API_KEY is not set.")
         return False
     if llm_provider == "openai":
-        print("✅ OpenAI LLM configured")
+        logger.info("OpenAI LLM configured")
 
-    print("\n🚀 Running real integration tests...")
+    logger.info("Running real integration tests...")
     logging.basicConfig(level=logging.INFO)
 
     # Import and run real integration tests
@@ -108,29 +120,29 @@ def run_real_tests() -> bool:
         runner = unittest.TextTestRunner(verbosity=2, stream=sys.stdout)
         result = runner.run(suite)
 
-        # Print summary
-        print("\n📊 Test Results:")
-        print(f"Tests run: {result.testsRun}")
-        print(f"Failures: {len(result.failures)}")
-        print(f"Errors: {len(result.errors)}")
+        # Log summary
+        logger.info("Test Results:")
+        logger.info("Tests run: %d", result.testsRun)
+        logger.info("Failures: %d", len(result.failures))
+        logger.info("Errors: %d", len(result.errors))
 
         if result.failures:
-            print("\n❌ FAILURES:")
+            logger.error("FAILURES:")
             for test, traceback in result.failures:
-                print(f"- {test}: {traceback}")
+                logger.error("- %s: %s", test, traceback)
 
         if result.errors:
-            print("\n❌ ERRORS:")
+            logger.error("ERRORS:")
             for test, traceback in result.errors:
-                print(f"- {test}: {traceback}")
+                logger.error("- %s: %s", test, traceback)
 
         return result.wasSuccessful()
 
-    except ImportError as e:
-        print(f"❌ Failed to import real integration tests: {e}")
+    except ImportError:
+        logger.exception("Failed to import real integration tests")
         return False
-    except (OSError, RuntimeError) as e:
-        print(f"❌ Failed to run real integration tests: {e}")
+    except (OSError, RuntimeError):
+        logger.exception("Failed to run real integration tests")
         return False
 
 

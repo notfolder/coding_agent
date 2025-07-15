@@ -1,12 +1,18 @@
 """GitLab-specific implementation of real integration test framework."""
 from __future__ import annotations
 
+import base64
 import os
-from typing import Any, Optional
+from typing import Any
 
 import requests
 
 from .base_framework import RealIntegrationTestFramework
+
+# HTTP timeout constant for security
+REQUEST_TIMEOUT = 30
+# HTTP status constants
+HTTP_NOT_FOUND = 404
 
 
 class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
@@ -16,7 +22,10 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
         """Initialize GitLab test framework."""
         super().__init__("gitlab")
         self.api_base = os.environ.get("GITLAB_API_URL", "https://gitlab.com/api/v4")
-        gitlab_token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN") or os.environ.get("GITLAB_TOKEN")
+        gitlab_token = (
+            os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN")
+            or os.environ.get("GITLAB_TOKEN")
+        )
         self.headers = {
             "Authorization": f"Bearer {gitlab_token}",
             "Content-Type": "application/json",
@@ -31,7 +40,7 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
             "labels": ",".join(labels),
         }
 
-        response = requests.post(url, json=data, headers=self.headers)
+        response = requests.post(url, json=data, headers=self.headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
         issue_data = response.json()
@@ -44,7 +53,7 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
         url = f"{self.api_base}/projects/{self.test_project_id}/issues/{issue_iid}"
         data = {"state_event": "close"}
 
-        response = requests.put(url, json=data, headers=self.headers)
+        response = requests.put(url, json=data, headers=self.headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
         self.logger.info("Closed GitLab issue #%s", issue_iid)
@@ -52,7 +61,7 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
     def _get_issue(self, issue_iid: int) -> dict[str, Any]:
         """Get GitLab issue data."""
         url = f"{self.api_base}/projects/{self.test_project_id}/issues/{issue_iid}"
-        response = requests.get(url, headers=self.headers)
+        response = requests.get(url, headers=self.headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
         return response.json()
@@ -70,19 +79,21 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
 
     def _get_file_content(self, file_path: str) -> str | None:
         """Get file content from GitLab repository."""
-        url = f"{self.api_base}/projects/{self.test_project_id}/repository/files/{file_path.replace('/', '%2F')}"
+        url = (
+            f"{self.api_base}/projects/{self.test_project_id}/repository/files/"
+            f"{file_path.replace('/', '%2F')}"
+        )
         params = {"ref": "main"}
 
-        response = requests.get(url, params=params, headers=self.headers)
+        response = requests.get(url, params=params, headers=self.headers, timeout=REQUEST_TIMEOUT)
 
-        if response.status_code == 404:
+        if response.status_code == HTTP_NOT_FOUND:
             return None
 
         response.raise_for_status()
         file_data = response.json()
 
         # Decode base64 content
-        import base64
         return base64.b64decode(file_data["content"]).decode("utf-8")
 
 
@@ -91,7 +102,7 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
         url = f"{self.api_base}/projects/{self.test_project_id}/merge_requests"
         params = {"source_branch": source_branch, "state": "opened"}
 
-        response = requests.get(url, params=params, headers=self.headers)
+        response = requests.get(url, params=params, headers=self.headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
         merge_requests = response.json()
@@ -102,7 +113,7 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
         url = f"{self.api_base}/projects/{self.test_project_id}/merge_requests/{mr_iid}/notes"
         data = {"body": comment}
 
-        response = requests.post(url, json=data, headers=self.headers)
+        response = requests.post(url, json=data, headers=self.headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
         comment_data = response.json()
@@ -118,7 +129,7 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
         if source_branch:
             params["source_branch"] = source_branch
 
-        response = requests.get(url, params=params, headers=self.headers)
+        response = requests.get(url, params=params, headers=self.headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
         merge_requests = response.json()
@@ -128,11 +139,11 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
         """Create a label if it doesn't exist in GitLab project."""
         # Get existing labels
         url = f"{self.api_base}/projects/{self.test_project_id}/labels"
-        response = requests.get(url, headers=self.headers)
+        response = requests.get(url, headers=self.headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
         existing_labels = response.json()
-        label_names = [l["name"] for l in existing_labels]
+        label_names = [label["name"] for label in existing_labels]
 
         if label in label_names:
             # Label already exists
@@ -145,7 +156,7 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
             "description": f"Label for coding agent: {label}",
         }
 
-        response = requests.post(url, json=data, headers=self.headers)
+        response = requests.post(url, json=data, headers=self.headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
         self.logger.info("Created label: %s", label)

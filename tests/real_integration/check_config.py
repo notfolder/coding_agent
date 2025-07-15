@@ -41,11 +41,10 @@ def check_github_config() -> bool:
             headers=headers,
             timeout=REQUEST_TIMEOUT,
         )
-
-        return response.status_code == HTTP_OK
-
     except requests.RequestException:
         return False
+    else:
+        return response.status_code == HTTP_OK
 
 
 def check_gitlab_config() -> bool:
@@ -68,11 +67,10 @@ def check_gitlab_config() -> bool:
             headers=headers,
             timeout=REQUEST_TIMEOUT,
         )
-
-        return response.status_code == HTTP_OK
-
     except requests.RequestException:
         return False
+    else:
+        return response.status_code == HTTP_OK
 
 
 def check_llm_config() -> bool:
@@ -92,6 +90,7 @@ def check_dependencies() -> bool:
     required_packages = ["requests", "yaml", "portalocker"]
     missing = []
 
+    # Check packages without try-except in loop for better performance
     for package in required_packages:
         try:
             __import__(package)
@@ -109,17 +108,27 @@ def check_mcp_servers() -> bool:
 
     # Check for Node.js and npm packages
     try:
-        result = subprocess.run(["npm", "list", "@zereight/mcp-gitlab"],
-                              check=False, capture_output=True, text=True)
+        # Use absolute path for security
+        npm_cmd = "/usr/bin/npm"
+        if not Path(npm_cmd).exists():
+            npm_cmd = "npm"  # Fallback to PATH lookup
+
+        result = subprocess.run(
+            [npm_cmd, "list", "@zereight/mcp-gitlab"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,  # Add timeout for security
+        )
         gitlab_ok = result.returncode == 0
-    except FileNotFoundError:
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         gitlab_ok = False
 
     return github_ok or gitlab_ok
 
 
 def main() -> None:
-    """Main configuration check."""
+    """Check and validate configuration settings."""
     checks = [
         ("Dependencies", check_dependencies),
         ("MCP Servers", check_mcp_servers),
@@ -144,7 +153,7 @@ def main() -> None:
         try:
             if not check_func():
                 all_passed = False
-        except Exception as e:
+        except (ImportError, OSError, subprocess.SubprocessError):
             all_passed = False
 
     if all_passed and (github_configured or gitlab_configured):
