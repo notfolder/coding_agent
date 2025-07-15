@@ -25,8 +25,8 @@ def check_environment() -> bool:
     print_step("1", "Checking Environment Configuration")
 
     # Check for tokens
-    github_token = os.environ.get("GITHUB_TOKEN")
-    gitlab_token = os.environ.get("GITLAB_TOKEN")
+    github_token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    gitlab_token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN") or os.environ.get("GITLAB_TOKEN")
     openai_key = os.environ.get("OPENAI_API_KEY")
 
     if not github_token and not gitlab_token:

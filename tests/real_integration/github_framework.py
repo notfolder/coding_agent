@@ -25,8 +25,9 @@ class GitHubRealIntegrationFramework(RealIntegrationTestFramework):
         """GitHubテストフレームワークを初期化する."""
         super().__init__("github")
         self.api_base = "https://api.github.com"
+        github_token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN") or os.environ.get("GITHUB_TOKEN")
         self.headers = {
-            "Authorization": f"token {os.environ['GITHUB_TOKEN']}",
+            "Authorization": f"token {github_token}",
             "Accept": "application/vnd.github.v3+json",
         }
 

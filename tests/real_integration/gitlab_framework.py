@@ -16,8 +16,9 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
         """Initialize GitLab test framework."""
         super().__init__("gitlab")
         self.api_base = os.environ.get("GITLAB_API_URL", "https://gitlab.com/api/v4")
+        gitlab_token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN") or os.environ.get("GITLAB_TOKEN")
         self.headers = {
-            "Authorization": f"Bearer {os.environ['GITLAB_TOKEN']}",
+            "Authorization": f"Bearer {gitlab_token}",
             "Content-Type": "application/json",
         }
 

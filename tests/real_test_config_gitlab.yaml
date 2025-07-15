@@ -1,5 +1,5 @@
 # Configuration for real GitLab integration tests  
-# Requires environment variables: GITLAB_TOKEN, GITLAB_TEST_PROJECT, GITLAB_API_URL
+# Requires environment variables: GITLAB_PERSONAL_ACCESS_TOKEN, GITLAB_TEST_PROJECT, GITLAB_API_URL
 mcp_servers:
   - mcp_server_name: "gitlab"
     command:
@@ -13,9 +13,9 @@ llm:
   provider: "openai"
   function_calling: true
   openai:
-    base_url: "https://api.openai.com/v1"
+    base_url: "${OPENAI_BASE_URL:-https://api.openai.com/v1}"
     api_key: "OPENAI_API_KEY"
-    model: "gpt-4o"
+    model: "${OPENAI_MODEL:-gpt-4o}"
     max_token: 40960
 
 gitlab:

@@ -1,5 +1,5 @@
 # Configuration for real GitHub integration tests
-# Requires environment variables: GITHUB_TOKEN, GITHUB_TEST_REPO
+# Requires environment variables: GITHUB_PERSONAL_ACCESS_TOKEN, GITHUB_TEST_REPO
 mcp_servers:
   - mcp_server_name: "github"
     command:
@@ -12,9 +12,9 @@ llm:
   provider: "openai"
   function_calling: true
   openai:
-    base_url: "https://api.openai.com/v1"
+    base_url: "${OPENAI_BASE_URL:-https://api.openai.com/v1}"
     api_key: "OPENAI_API_KEY"
-    model: "gpt-4o"
+    model: "${OPENAI_MODEL:-gpt-4o}"
     max_token: 40960
 
 github:

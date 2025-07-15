@@ -15,17 +15,19 @@ The real integration tests implement the three test scenarios described in issue
 ### Required Environment Variables
 
 #### For GitHub Testing:
-- `GITHUB_TOKEN`: GitHub Personal Access Token with repo permissions
+- `GITHUB_PERSONAL_ACCESS_TOKEN`: GitHub Personal Access Token with repo permissions
 - `GITHUB_TEST_REPO`: Test repository in format `owner/repo` (e.g., `myuser/test-repo`)
 
 #### For GitLab Testing:
-- `GITLAB_TOKEN`: GitLab Personal Access Token with API permissions
+- `GITLAB_PERSONAL_ACCESS_TOKEN`: GitLab Personal Access Token with API permissions
 - `GITLAB_TEST_PROJECT`: Test project ID or path (e.g., `123` or `myuser/test-project`)
 - `GITLAB_API_URL`: GitLab API URL (defaults to `https://gitlab.com/api/v4`)
 
 #### For LLM:
 - `LLM_PROVIDER`: LLM provider to use (default: `openai`)
 - `OPENAI_API_KEY`: OpenAI API key (if using OpenAI)
+- `OPENAI_BASE_URL`: OpenAI-compatible API base URL (for local LLMs, e.g., `http://localhost:1234/v1`)
+- `OPENAI_MODEL`: Model name to use (defaults to `gpt-4o`)
 
 ### Repository/Project Setup
 
@@ -57,11 +59,11 @@ Create a `.env` file or set environment variables:
 
 ```bash
 # For GitHub testing
-export GITHUB_TOKEN="ghp_your_token_here"
+export GITHUB_PERSONAL_ACCESS_TOKEN="ghp_your_token_here"
 export GITHUB_TEST_REPO="yourusername/your-test-repo"
 
 # For GitLab testing
-export GITLAB_TOKEN="glpat-your_token_here"
+export GITLAB_PERSONAL_ACCESS_TOKEN="glpat-your_token_here"
 export GITLAB_TEST_PROJECT="123"  # or "yourusername/your-test-project"
 export GITLAB_API_URL="https://gitlab.com/api/v4"
 

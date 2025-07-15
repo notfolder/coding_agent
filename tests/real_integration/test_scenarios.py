@@ -45,9 +45,9 @@ class RealIntegrationTestScenarios(unittest.TestCase):
         """Determine which platform to test based on environment variables."""
         import os
 
-        if os.environ.get("GITHUB_TOKEN") and os.environ.get("GITHUB_TEST_REPO"):
+        if (os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN") or os.environ.get("GITHUB_TOKEN")) and os.environ.get("GITHUB_TEST_REPO"):
             return "github"
-        if os.environ.get("GITLAB_TOKEN") and os.environ.get("GITLAB_TEST_PROJECT"):
+        if (os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN") or os.environ.get("GITLAB_TOKEN")) and os.environ.get("GITLAB_TEST_PROJECT"):
             return "gitlab"
         return None
 

@@ -12,9 +12,12 @@ This is a quick guide to get the real integration tests running.
 
 2. **Configure environment:**
    ```bash
-   export GITHUB_TOKEN="ghp_your_token_here"
+   export GITHUB_PERSONAL_ACCESS_TOKEN="ghp_your_token_here"
    export GITHUB_TEST_REPO="myuser/coding-agent-test"
    export OPENAI_API_KEY="sk_your_openai_key_here"
+   # Optional: For local LLM via OpenAI-compatible API
+   export OPENAI_BASE_URL="http://localhost:1234/v1"
+   export OPENAI_MODEL="your-model-name"
    ```
 
 3. **Check configuration:**
@@ -55,7 +58,7 @@ The tests will:
 
 | Problem | Solution |
 |---------|----------|
-| `GITHUB_TOKEN not set` | Export your GitHub token |
+| `GITHUB_PERSONAL_ACCESS_TOKEN not set` | Export your GitHub token |
 | `Repository not found` | Check repository exists and token has access |
 | `OpenAI API error` | Verify your OpenAI API key is valid |
 | `Tests timeout` | Increase timeout or check repository activity |
@@ -80,7 +83,7 @@ In your test repository:
 
 ### GitLab Instead of GitHub
 ```bash
-export GITLAB_TOKEN="glpat_your_token_here"
+export GITLAB_PERSONAL_ACCESS_TOKEN="glpat_your_token_here"
 export GITLAB_TEST_PROJECT="123"  # or "myuser/project"
 export OPENAI_API_KEY="sk_your_openai_key_here"
 ```
@@ -103,7 +106,7 @@ export OLLAMA_MODEL="your-model"
 ```yaml
 # GitHub Actions example
 env:
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GITHUB_PERSONAL_ACCESS_TOKEN: ${{ secrets.GITHUB_PERSONAL_ACCESS_TOKEN }}
   GITHUB_TEST_REPO: "myuser/test-repo"
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 

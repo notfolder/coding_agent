@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 def check_github_config() -> bool:
     """Check GitHub configuration."""
-    token = os.environ.get("GITHUB_TOKEN")
+    token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN") or os.environ.get("GITHUB_TOKEN")
     repo = os.environ.get("GITHUB_TEST_REPO")
 
     if not token:
@@ -32,7 +32,7 @@ def check_github_config() -> bool:
     try:
         import requests
         headers = {"Authorization": f"token {token}"}
-        response = requests.get(f"https://api.github.com/repos/{repo}", headers=headers)
+        response = requests.get(f"https://api.github.com/repos/{repo}", headers=headers, timeout=30)
 
         if response.status_code == 200:
             return True
@@ -40,13 +40,13 @@ def check_github_config() -> bool:
             return False
         return False
 
-    except Exception as e:
+    except Exception:
         return False
 
 
 def check_gitlab_config() -> bool:
     """Check GitLab configuration."""
-    token = os.environ.get("GITLAB_TOKEN")
+    token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN")
     project = os.environ.get("GITLAB_TEST_PROJECT")
     api_url = os.environ.get("GITLAB_API_URL", "https://gitlab.com/api/v4")
 
@@ -60,16 +60,15 @@ def check_gitlab_config() -> bool:
     try:
         import requests
         headers = {"Authorization": f"Bearer {token}"}
-        response = requests.get(f"{api_url}/projects/{project}", headers=headers)
+        response = requests.get(f"{api_url}/projects/{project}", headers=headers, timeout=30)
 
         if response.status_code == 200:
-            project_data = response.json()
             return True
         if response.status_code == 404:
             return False
         return False
 
-    except Exception as e:
+    except Exception:
         return False
 
 
