@@ -60,21 +60,21 @@ def run_integration_tests() -> bool:
 def run_real_tests() -> bool:
     """Run real integration tests (requires API tokens)."""
     # Check for API tokens
-    github_token = os.environ.get("GITHUB_TOKEN")
-    gitlab_token = os.environ.get("GITLAB_TOKEN")
+    github_token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
+    gitlab_token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN")
     github_repo = os.environ.get("GITHUB_TEST_REPO")
     gitlab_project = os.environ.get("GITLAB_TEST_PROJECT")
 
     if not github_token and not gitlab_token:
-        print("❌ No API tokens found. Please set GITHUB_TOKEN or GITLAB_TOKEN environment variables.")
+        print("❌ No API tokens found. Please set GITHUB_PERSONAL_ACCESS_TOKEN or GITLAB_PERSONAL_ACCESS_TOKEN environment variables.")
         return False
 
     if github_token and not github_repo:
-        print("❌ GITHUB_TOKEN is set but GITHUB_TEST_REPO is missing. Please set GITHUB_TEST_REPO (format: owner/repo).")
+        print("❌ GITHUB_PERSONAL_ACCESS_TOKEN is set but GITHUB_TEST_REPO is missing. Please set GITHUB_TEST_REPO (format: owner/repo).")
         return False
 
     if gitlab_token and not gitlab_project:
-        print("❌ GITLAB_TOKEN is set but GITLAB_TEST_PROJECT is missing. Please set GITLAB_TEST_PROJECT.")
+        print("❌ GITLAB_PERSONAL_ACCESS_TOKEN is set but GITLAB_TEST_PROJECT is missing. Please set GITLAB_TEST_PROJECT.")
         return False
 
     if github_token and github_repo:
