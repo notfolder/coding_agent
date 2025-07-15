@@ -48,7 +48,7 @@ class RealIntegrationTestFramework:
         """必要な環境変数が設定されているかをチェックする."""
         if self.platform == "github":
             github_token = (
-                os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN") 
+                os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
                 or os.environ.get("GITHUB_TOKEN")
             )
             if not github_token:
@@ -59,7 +59,7 @@ class RealIntegrationTestFramework:
                 raise ValueError(msg)
         elif self.platform == "gitlab":
             gitlab_token = (
-                os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN") 
+                os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN")
                 or os.environ.get("GITLAB_TOKEN")
             )
             if not gitlab_token:

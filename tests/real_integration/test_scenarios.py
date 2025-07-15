@@ -21,6 +21,9 @@ class RealIntegrationTestScenarios(unittest.TestCase):
 
     def setUp(self) -> None:
         """テスト環境をセットアップする."""
+        # ロガーをセットアップ
+        self.logger = logging.getLogger(__name__)
+
         # テストするプラットフォームを決定
         self.platform = self._get_test_platform()
 
@@ -58,7 +61,7 @@ class RealIntegrationTestScenarios(unittest.TestCase):
         that prints "hello world", assigns to coding agent, executes agent,
         and verifies the output.
         """
-        logging.info("Starting Test Scenario 1: hello_world.py creation")
+        self.logger.info("Starting Test Scenario 1: hello_world.py creation")
 
         # Step 1: Create issue
         issue_title = "Create hello_world.py file with main function"
