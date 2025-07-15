@@ -235,3 +235,136 @@ class GitHubRealIntegrationFramework(RealIntegrationTestFramework):
             response.raise_for_status()
 
         self.logger.info("Created label: %s", label)
+
+    def _close_all_pull_requests(self) -> None:
+        """全てのオープンなプルリクエストを閉じる."""
+        owner, repo = self.test_repo.split("/")
+
+        # オープンなプルリクエストを全て取得
+        url = f"{self.api_base}/repos/{owner}/{repo}/pulls"
+        params = {"state": "open", "per_page": 100}
+
+        response = requests.get(url, params=params, headers=self.headers, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+
+        pull_requests = response.json()
+        self.logger.info("Found %d open pull requests to close", len(pull_requests))
+
+        for pr in pull_requests:
+            pr_number = pr["number"]
+            try:
+                # プルリクエストを閉じる
+                close_url = f"{self.api_base}/repos/{owner}/{repo}/pulls/{pr_number}"
+                close_data = {"state": "closed"}
+
+                close_response = requests.patch(
+                    close_url, json=close_data, headers=self.headers, timeout=REQUEST_TIMEOUT,
+                )
+                close_response.raise_for_status()
+                self.logger.info("Closed pull request #%d", pr_number)
+
+            except requests.RequestException as e:
+                self.logger.warning("Failed to close pull request #%d: %s", pr_number, e)
+
+    def _delete_all_branches(self) -> None:
+        """メインブランチ以外の全てのブランチを削除する."""
+        owner, repo = self.test_repo.split("/")
+
+        # 全てのブランチを取得
+        url = f"{self.api_base}/repos/{owner}/{repo}/branches"
+        params = {"per_page": 100}
+
+        response = requests.get(url, params=params, headers=self.headers, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+
+        branches = response.json()
+        main_branches = {"main", "master", "develop"}
+
+        branches_to_delete = [
+            branch["name"] for branch in branches
+            if branch["name"] not in main_branches
+        ]
+
+        self.logger.info(
+            "Found %d branches to delete: %s", len(branches_to_delete), branches_to_delete,
+        )
+
+        for branch_name in branches_to_delete:
+            try:
+                # ブランチを削除
+                delete_url = f"{self.api_base}/repos/{owner}/{repo}/git/refs/heads/{branch_name}"
+
+                delete_response = requests.delete(
+                    delete_url, headers=self.headers, timeout=REQUEST_TIMEOUT,
+                )
+                delete_response.raise_for_status()
+                self.logger.info("Deleted branch: %s", branch_name)
+
+            except requests.RequestException as e:  # noqa: PERF203
+                self.logger.warning("Failed to delete branch %s: %s", branch_name, e)
+
+    def _delete_file(self, file_path: str) -> None:
+        """リポジトリからファイルを削除する."""
+        owner, repo = self.test_repo.split("/")
+
+        try:
+            # まずファイルが存在するかチェック
+            content_url = f"{self.api_base}/repos/{owner}/{repo}/contents/{file_path}"
+            content_response = requests.get(
+                content_url, headers=self.headers, timeout=REQUEST_TIMEOUT,
+            )
+
+            if content_response.status_code == HTTP_NOT_FOUND:
+                self.logger.info("File %s does not exist, skipping deletion", file_path)
+                return
+
+            content_response.raise_for_status()
+            file_data = content_response.json()
+
+            # ファイルを削除
+            delete_data = {
+                "message": f"Delete {file_path} for test cleanup",
+                "sha": file_data["sha"],
+            }
+
+            delete_response = requests.delete(
+                content_url, json=delete_data, headers=self.headers, timeout=REQUEST_TIMEOUT,
+            )
+            delete_response.raise_for_status()
+            self.logger.info("Deleted file: %s", file_path)
+
+        except requests.RequestException as e:
+            self.logger.warning("Failed to delete file %s: %s", file_path, e)
+
+    def add_label_to_pull_request(self, pr_number: int, label: str) -> bool:
+        """GitHubプルリクエストにラベルを追加する.
+
+        Args:
+            pr_number: プルリクエスト番号
+            label: 追加するラベル名
+
+        Returns:
+            成功した場合True、失敗した場合False
+
+        """
+        if not label:
+            return False
+
+        owner, repo = self.test_repo.split("/")
+
+        # まずラベルが存在することを確認
+        self._create_label_if_not_exists(label)
+
+        # プルリクエストにラベルを追加
+        url = f"{self.api_base}/repos/{owner}/{repo}/issues/{pr_number}/labels"
+        data = {"labels": [label]}
+
+        try:
+            response = requests.post(url, json=data, headers=self.headers, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            self.logger.info("Added label '%s' to PR #%s", label, pr_number)
+        except requests.RequestException as e:
+            self.logger.warning("Failed to add label '%s' to PR #%s: %s", label, pr_number, e)
+            return False
+
+        return True

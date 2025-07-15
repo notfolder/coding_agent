@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import requests
 import yaml
 
 # 定数
@@ -109,6 +110,10 @@ class RealIntegrationTestFramework:
 
         return config
 
+    def get_bot_name(self) -> str | None:
+        """ボット名を取得する."""
+        return self._get_bot_name()
+
     def _get_bot_name(self) -> str | None:
         """プラットフォーム固有のボット名を環境変数から取得する.
 
@@ -125,6 +130,10 @@ class RealIntegrationTestFramework:
     def setup_test_environment(self) -> None:
         """テスト環境をセットアップする."""
         self.logger.info("Setting up test environment for %s", self.platform)
+
+        # リアルテストケースを実行する前にクリーンアップを実行
+        self.logger.info("Performing pre-test cleanup...")
+        self._cleanup_before_tests()
 
         # テストラベルが存在することを確認
         self._ensure_labels_exist()
@@ -488,4 +497,40 @@ class RealIntegrationTestFramework:
     def _get_issue(self, issue_number: int) -> dict[str, Any]:
         """イシューデータを取得する."""
         msg = "サブクラスは_get_issueを実装する必要があります"
+        raise NotImplementedError(msg)
+
+    def _cleanup_before_tests(self) -> None:
+        """リアルテストを実行する前にクリーンアップを行う."""
+        self.logger.info("Starting pre-test cleanup...")
+
+        try:
+            # 1. 全てのオープンなプルリクエスト/マージリクエストを閉じる
+            self.logger.info("Closing all open pull/merge requests...")
+            self._close_all_pull_requests()
+
+            # 2. 全てのブランチを削除(main/master以外)
+            self.logger.info("Deleting all branches except main/master...")
+            self._delete_all_branches()
+
+            # 3. hello_world.pyファイルを削除
+            self.logger.info("Deleting hello_world.py file...")
+            self._delete_file("hello_world.py")
+
+        except (OSError, subprocess.SubprocessError, requests.RequestException) as e:
+            self.logger.warning("Pre-test cleanup failed: %s", e)
+            # クリーンアップ失敗はテストを停止させない
+
+    def _close_all_pull_requests(self) -> None:
+        """全てのオープンなプルリクエスト/マージリクエストを閉じる."""
+        msg = "サブクラスは_close_all_pull_requestsを実装する必要があります"
+        raise NotImplementedError(msg)
+
+    def _delete_all_branches(self) -> None:
+        """メインブランチ以外の全てのブランチを削除する."""
+        msg = "サブクラスは_delete_all_branchesを実装する必要があります"
+        raise NotImplementedError(msg)
+
+    def _delete_file(self, file_path: str) -> None:
+        """リポジトリからファイルを削除する."""
+        msg = "サブクラスは_delete_fileを実装する必要があります"
         raise NotImplementedError(msg)

@@ -130,7 +130,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
 
         self.logger.info("Test Scenario 1 completed successfully")
 
-    def test_scenario_2_pull_request_creation(self) -> None:
+    def test_scenario_2_pull_request_creation(self) -> None:  # noqa: C901
         """Test Scenario 2: Issue-based pull request creation.
 
         Creates an issue asking to modify hello_world.py to add scikit-learn
@@ -190,19 +190,34 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
         ]
 
         pr_created = False
+        pr_number = None
         for branch_name in possible_branches:
             if self.framework.verify_pull_request_creation(branch_name):
                 pr_created = True
                 self.logger.info("Found pull request from branch: %s", branch_name)
+                # Get the PR number to add label and assignment
+                if hasattr(self.framework, "get_latest_pull_request"):
+                    latest_pr = self.framework.get_latest_pull_request(branch_name)
+                    if latest_pr:
+                        pr_number = (
+                            latest_pr["number"] if self.platform == "github" else latest_pr["iid"]
+                        )
                 break
 
         if not pr_created and hasattr(self.framework, "get_latest_pull_request"):
             latest_pr = self.framework.get_latest_pull_request()
             if latest_pr:
                 pr_created = True
-                self.logger.info("Found latest pull request: #%s", latest_pr["number"])
+                pr_number = latest_pr["number"] if self.platform == "github" else latest_pr["iid"]
+                self.logger.info("Found latest pull request: #%s", pr_number)
 
         assert pr_created, "Pull request was not created"
+
+        # GitHubプルリクエストの場合、コーディングエージェント用のラベルを追加し、アサインする
+        if pr_number and self.platform == "github":
+            self._enhance_github_pull_request(pr_number)
+        elif pr_number and self.platform == "gitlab":
+            self._enhance_gitlab_merge_request(pr_number)
 
         self.logger.info("Test Scenario 2 completed successfully")
 
@@ -247,7 +262,15 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
         if not latest_pr:
             self.fail("Could not find or create a pull request for testing")
 
-        return latest_pr["number"] if self.platform == "github" else latest_pr["iid"]
+        pr_number = latest_pr["number"] if self.platform == "github" else latest_pr["iid"]
+
+        # PRにコーディングエージェント用のラベルとアサインメントを追加
+        if self.platform == "github":
+            self._enhance_github_pull_request(pr_number)
+        elif self.platform == "gitlab":
+            self._enhance_gitlab_merge_request(pr_number)
+
+        return pr_number
 
     def _add_comment_and_run_agent(self, pr_number: int) -> None:
         """Add comment to PR and run the coding agent."""
@@ -324,6 +347,66 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
                 "and confusion matrix computation",
             )
             assert content_verified, "File content does not meet requirements based on LLM analysis"
+
+    def _enhance_github_pull_request(self, pr_number: int) -> None:
+        """GitHubプルリクエストにコーディングエージェント用のラベルとアサインメントを追加する.
+
+        Args:
+            pr_number: プルリクエスト番号
+
+        """
+        self.logger.info(
+            "Enhancing GitHub pull request #%s with coding agent label and assignment",
+            pr_number,
+        )
+
+        # コーディングエージェント用のラベルを追加
+        bot_label = self.framework.config[self.platform]["bot_label"]
+        if hasattr(self.framework, "add_label_to_pull_request"):
+            success = self.framework.add_label_to_pull_request(pr_number, bot_label)
+            if success:
+                self.logger.info("Added coding agent label to PR #%s", pr_number)
+            else:
+                self.logger.warning("Failed to add coding agent label to PR #%s", pr_number)
+
+        # コーディングエージェントをアサインする
+        bot_name = self.framework.get_bot_name()
+        if bot_name and hasattr(self.framework, "assign_pull_request"):
+            success = self.framework.assign_pull_request(pr_number, bot_name)
+            if success:
+                self.logger.info("Assigned coding agent to PR #%s", pr_number)
+            else:
+                self.logger.warning("Failed to assign coding agent to PR #%s", pr_number)
+
+    def _enhance_gitlab_merge_request(self, mr_iid: int) -> None:
+        """GitLabマージリクエストにコーディングエージェント用のラベルとアサインメントを追加する.
+
+        Args:
+            mr_iid: マージリクエストのIID
+
+        """
+        self.logger.info(
+            "Enhancing GitLab merge request #%s with coding agent label and assignment",
+            mr_iid,
+        )
+
+        # コーディングエージェント用のラベルを追加
+        bot_label = self.framework.config[self.platform]["bot_label"]
+        if hasattr(self.framework, "add_label_to_merge_request"):
+            success = self.framework.add_label_to_merge_request(mr_iid, bot_label)
+            if success:
+                self.logger.info("Added coding agent label to MR #%s", mr_iid)
+            else:
+                self.logger.warning("Failed to add coding agent label to MR #%s", mr_iid)
+
+        # コーディングエージェントをアサインする
+        bot_name = self.framework.get_bot_name()
+        if bot_name and hasattr(self.framework, "assign_merge_request"):
+            success = self.framework.assign_merge_request(mr_iid, bot_name)
+            if success:
+                self.logger.info("Assigned coding agent to MR #%s", mr_iid)
+            else:
+                self.logger.warning("Failed to assign coding agent to MR #%s", mr_iid)
 
 
 if __name__ == "__main__":
