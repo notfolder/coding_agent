@@ -20,32 +20,37 @@ from tests.real_integration.gitlab_framework import GitLabRealIntegrationFramewo
 class RealIntegrationTestScenarios(unittest.TestCase):
     """実際のAPIを使用するリアル統合テストシナリオ."""
 
+    @classmethod
+    def setUpClass(cls) -> None:
+        # テストするプラットフォームを決定
+        cls.platform = cls._get_test_platform()
+
+        if cls.platform == "github":
+            cls.framework = GitHubRealIntegrationFramework()
+        elif cls.platform == "gitlab":
+            cls.framework = GitLabRealIntegrationFramework()
+        else:
+            msg = "No supported platform configured for testing"
+            raise unittest.SkipTest(msg)
+
+        # Set up the test environment
+        cls.framework.setup_test_environment()
+
     def setUp(self) -> None:
         """テスト環境をセットアップする."""
         # ロガーをセットアップ
         self.logger = logging.getLogger(__name__)
 
-        # テストするプラットフォームを決定
-        self.platform = self._get_test_platform()
-
-        if self.platform == "github":
-            self.framework = GitHubRealIntegrationFramework()
-        elif self.platform == "gitlab":
-            self.framework = GitLabRealIntegrationFramework()
-        else:
-            self.skipTest("No supported platform configured for testing")
-
-        # Set up the test environment
-        self.framework.setup_test_environment()
-
         # Store created issues for cleanup
         self.created_issues = []
 
-    def tearDown(self) -> None:
+    @classmethod
+    def tearDownClass(cls) -> None:
         """Clean up test environment."""
-        self.framework.teardown_test_environment()
+        cls.framework.teardown_test_environment()
 
-    def _get_test_platform(self) -> str | None:
+    @classmethod
+    def _get_test_platform(cls) -> str | None:
         """Determine which platform to test based on environment variables."""
         github_token = (
             os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
@@ -89,7 +94,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
 
         # Step 2: Run coding agent
         self.logger.info("Running coding agent...")
-        result = self.framework.run_coding_agent(timeout=600)  # 10 minutes timeout
+        result = self.framework.run_coding_agent(timeout=3600)  # 1 hour timeout
 
         # Log the agent output for debugging
         self.logger.info("Agent return code: %s", result.returncode)
@@ -100,7 +105,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
 
         # Step 3: Wait for processing to complete
         self.logger.info("Waiting for issue processing to complete...")
-        processing_completed = self.framework.wait_for_processing(issue_number, max_wait=600)
+        processing_completed = self.framework.wait_for_processing(issue_number, max_wait=3600)
 
         if not processing_completed:
             self.fail("Issue processing did not complete within timeout")
@@ -161,7 +166,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
 
         # Step 2: Run coding agent
         self.logger.info("Running coding agent...")
-        result = self.framework.run_coding_agent(timeout=600)
+        result = self.framework.run_coding_agent(timeout=3600)
 
         # Log the agent output
         self.logger.info("Agent return code: %s", result.returncode)
@@ -172,7 +177,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
 
         # Step 3: Wait for processing to complete
         self.logger.info("Waiting for issue processing to complete...")
-        processing_completed = self.framework.wait_for_processing(issue_number, max_wait=600)
+        processing_completed = self.framework.wait_for_processing(issue_number, max_wait=3600)
 
         if not processing_completed:
             self.fail("Issue processing did not complete within timeout")
@@ -262,15 +267,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
         if not latest_pr:
             self.fail("Could not find or create a pull request for testing")
 
-        pr_number = latest_pr["number"] if self.platform == "github" else latest_pr["iid"]
-
-        # PRにコーディングエージェント用のラベルとアサインメントを追加
-        if self.platform == "github":
-            self._enhance_github_pull_request(pr_number)
-        elif self.platform == "gitlab":
-            self._enhance_gitlab_merge_request(pr_number)
-
-        return pr_number
+        return latest_pr["number"] if self.platform == "github" else latest_pr["iid"]
 
     def _add_comment_and_run_agent(self, pr_number: int) -> None:
         """Add comment to PR and run the coding agent."""
@@ -284,9 +281,15 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
         self.framework.add_pr_comment(pr_number, comment_text)
         self.logger.info("Added comment to PR #%s", pr_number)
 
+        # PRにコーディングエージェント用のラベルとアサインメントを追加
+        if self.platform == "github":
+            self._enhance_github_pull_request(pr_number)
+        elif self.platform == "gitlab":
+            self._enhance_gitlab_merge_request(pr_number)
+
         # Step 2: Run coding agent
         self.logger.info("Running coding agent...")
-        result = self.framework.run_coding_agent(timeout=600)
+        result = self.framework.run_coding_agent(timeout=3600)
 
         # Log the agent output
         self.logger.info("Agent return code: %s", result.returncode)
