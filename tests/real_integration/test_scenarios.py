@@ -184,13 +184,14 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
 
         # Step 1: Create issue for modification
         issue_title = "Modify hello_world.py to add scikit-learn iris classification"
-        issue_body = """既存のhello_world.pyの内容を変更したいです。下記の手順に従って
+        pr_word = "プルリクエスト" if platform == "github" else "マージリクエスト"
+        issue_body = f"""既存のhello_world.pyの内容を変更したいです。下記の手順に従って
 ソースコードの変更作業を行ってください。
 1. `hello_world.py`ファイルを読み込んで現在のコードを理解して
 2. 下記の変更をするためにブランチを作成して
 3. `hello_world.py`ファイルを変更して、scikit-learnのirisデータセットを分類、評価する
 関数を作ってmain関数から呼び出す様にして
-4. プルリクエストを作成して"""
+4. {pr_word}を作成して"""
 
         issue_data = framework.create_issue(issue_title, issue_body)
         issue_number = issue_data["number"] if platform == "github" else issue_data["iid"]

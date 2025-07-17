@@ -50,7 +50,8 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
             作成されたイシューの詳細を含む辞書
 
         """
-        url = f"{self.api_base}/projects/{self.test_project_id}/issues"
+        project_id_encoded = str(self.test_project_id).replace("/", "%2F")
+        url = f"{self.api_base}/projects/{project_id_encoded}/issues"
         data = {
             "title": title,
             "description": body,
@@ -76,7 +77,8 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
 
     def _close_issue(self, issue_iid: int) -> None:
         """Close a GitLab issue."""
-        url = f"{self.api_base}/projects/{self.test_project_id}/issues/{issue_iid}"
+        project_id_encoded = str(self.test_project_id).replace("/", "%2F")
+        url = f"{self.api_base}/projects/{project_id_encoded}/issues/{issue_iid}"
         data = {"state_event": "close"}
 
         response = requests.put(url, json=data, headers=self.headers, timeout=REQUEST_TIMEOUT)
@@ -86,7 +88,8 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
 
     def _get_issue(self, issue_iid: int) -> dict[str, Any]:
         """Get GitLab issue data."""
-        url = f"{self.api_base}/projects/{self.test_project_id}/issues/{issue_iid}"
+        project_id_encoded = str(self.test_project_id).replace("/", "%2F")
+        url = f"{self.api_base}/projects/{project_id_encoded}/issues/{issue_iid}"
         response = requests.get(url, headers=self.headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
@@ -105,8 +108,9 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
 
     def _get_file_content(self, file_path: str) -> str | None:
         """Get file content from GitLab repository."""
+        project_id_encoded = str(self.test_project_id).replace("/", "%2F")
         url = (
-            f"{self.api_base}/projects/{self.test_project_id}/repository/files/"
+            f"{self.api_base}/projects/{project_id_encoded}/repository/files/"
             f"{file_path.replace('/', '%2F')}"
         )
         params = {"ref": "main"}
@@ -125,7 +129,8 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
 
     def _verify_pull_request_creation_impl(self, source_branch: str) -> bool:
         """Verify merge request creation in GitLab."""
-        url = f"{self.api_base}/projects/{self.test_project_id}/merge_requests"
+        project_id_encoded = str(self.test_project_id).replace("/", "%2F")
+        url = f"{self.api_base}/projects/{project_id_encoded}/merge_requests"
         params = {"source_branch": source_branch, "state": "opened"}
 
         response = requests.get(url, params=params, headers=self.headers, timeout=REQUEST_TIMEOUT)
@@ -136,7 +141,8 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
 
     def _add_pr_comment_impl(self, mr_iid: int, comment: str) -> dict[str, Any]:
         """Add comment to GitLab merge request."""
-        url = f"{self.api_base}/projects/{self.test_project_id}/merge_requests/{mr_iid}/notes"
+        project_id_encoded = str(self.test_project_id).replace("/", "%2F")
+        url = f"{self.api_base}/projects/{project_id_encoded}/merge_requests/{mr_iid}/notes"
         data = {"body": comment}
 
         response = requests.post(url, json=data, headers=self.headers, timeout=REQUEST_TIMEOUT)
@@ -149,7 +155,8 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
 
     def get_latest_merge_request(self, source_branch: str | None = None) -> dict[str, Any] | None:
         """Get the latest merge request, optionally filtered by source branch."""
-        url = f"{self.api_base}/projects/{self.test_project_id}/merge_requests"
+        project_id_encoded = str(self.test_project_id).replace("/", "%2F")
+        url = f"{self.api_base}/projects/{project_id_encoded}/merge_requests"
         params = {"state": "opened", "order_by": "created_at", "sort": "desc"}
 
         if source_branch:
@@ -206,7 +213,8 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
         if not assignee_id:
             return False
 
-        url = f"{self.api_base}/projects/{self.test_project_id}/merge_requests/{mr_iid}"
+        project_id_encoded = str(self.test_project_id).replace("/", "%2F")
+        url = f"{self.api_base}/projects/{project_id_encoded}/merge_requests/{mr_iid}"
         data = {"assignee_id": assignee_id}
 
         try:
@@ -222,7 +230,8 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
     def _create_label_if_not_exists(self, label: str) -> None:
         """Create a label if it doesn't exist in GitLab project."""
         # Get existing labels
-        url = f"{self.api_base}/projects/{self.test_project_id}/labels"
+        project_id_encoded = str(self.test_project_id).replace("/", "%2F")
+        url = f"{self.api_base}/projects/{project_id_encoded}/labels"
         response = requests.get(url, headers=self.headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
@@ -248,7 +257,8 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
     def _close_all_pull_requests(self) -> None:
         """全てのオープンなマージリクエストを閉じる."""
         # オープンなマージリクエストを全て取得
-        url = f"{self.api_base}/projects/{self.test_project_id}/merge_requests"
+        project_id_encoded = str(self.test_project_id).replace("/", "%2F")
+        url = f"{self.api_base}/projects/{project_id_encoded}/merge_requests"
         params = {"state": "opened", "per_page": 100}
 
         response = requests.get(url, params=params, headers=self.headers, timeout=REQUEST_TIMEOUT)
@@ -278,7 +288,8 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
     def _delete_all_branches(self) -> None:
         """メインブランチ以外の全てのブランチを削除する."""
         # 全てのブランチを取得
-        url = f"{self.api_base}/projects/{self.test_project_id}/repository/branches"
+        project_id_encoded = str(self.test_project_id).replace("/", "%2F")
+        url = f"{self.api_base}/projects/{project_id_encoded}/repository/branches"
         params = {"per_page": 100}
 
         response = requests.get(url, params=params, headers=self.headers, timeout=REQUEST_TIMEOUT)
@@ -300,7 +311,7 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
             try:
                 # ブランチを削除
                 delete_url = (
-                    f"{self.api_base}/projects/{self.test_project_id}/repository/branches/"
+                    f"{self.api_base}/projects/{project_id_encoded}/repository/branches/"
                     f"{branch_name.replace('/', '%2F')}"
                 )
 
@@ -318,8 +329,9 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
         try:
             # まずファイルが存在するかチェック
             encoded_file_path = file_path.replace("/", "%2F")
+            project_id_encoded = str(self.test_project_id).replace("/", "%2F")
             content_url = (
-                f"{self.api_base}/projects/{self.test_project_id}/repository/files/"
+                f"{self.api_base}/projects/{project_id_encoded}/repository/files/"
                 f"{encoded_file_path}"
             )
             content_params = {"ref": "main"}
@@ -367,7 +379,8 @@ class GitLabRealIntegrationFramework(RealIntegrationTestFramework):
         self._create_label_if_not_exists(label)
 
         # マージリクエストにラベルを追加
-        url = f"{self.api_base}/projects/{self.test_project_id}/merge_requests/{mr_iid}"
+        project_id_encoded = str(self.test_project_id).replace("/", "%2F")
+        url = f"{self.api_base}/projects/{project_id_encoded}/merge_requests/{mr_iid}"
         data = {"add_labels": label}
 
         try:
