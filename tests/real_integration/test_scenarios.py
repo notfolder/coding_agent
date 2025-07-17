@@ -62,7 +62,8 @@ class RealIntegrationTestScenarios(unittest.TestCase):
     def _get_test_platforms(cls) -> list[str]:
         """Determine which platforms to test based on environment variables."""
         platforms = []
-        
+
+
         github_token = (
             os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
             or os.environ.get("GITHUB_TOKEN")
@@ -79,7 +80,7 @@ class RealIntegrationTestScenarios(unittest.TestCase):
             platforms.append("github")
         if gitlab_token and gitlab_project:
             platforms.append("gitlab")
-            
+
         return platforms
 
     def test_scenario_1_hello_world_creation(self) -> None:
@@ -97,7 +98,7 @@ class RealIntegrationTestScenarios(unittest.TestCase):
         """Test scenario 1 for a specific platform."""
         framework = self.frameworks[platform]
         self.logger.info(
-            "Starting Test Scenario 1: hello_world.py creation for %s", platform
+            "Starting Test Scenario 1: hello_world.py creation for %s", platform,
         )
 
         # Step 1: Create issue
@@ -156,7 +157,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
 
         self.logger.info("Test Scenario 1 completed successfully for %s", platform)
 
-    def test_scenario_2_pull_request_creation(self) -> None:  # noqa: C901
+    def test_scenario_2_pull_request_creation(self) -> None:
         """Test Scenario 2: Issue-based pull request creation.
 
         Creates an issue asking to modify hello_world.py to add scikit-learn
@@ -170,7 +171,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
         """Test scenario 2 for a specific platform."""
         framework = self.frameworks[platform]
         self.logger.info(
-            "Starting Test Scenario 2: Pull request creation for %s", platform
+            "Starting Test Scenario 2: Pull request creation for %s", platform,
         )
 
         # Prerequisite: Ensure hello_world.py exists (run scenario 1 first if needed)
@@ -270,7 +271,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
         """Test scenario 3 for a specific platform."""
         framework = self.frameworks[platform]
         self.logger.info(
-            "Starting Test Scenario 3: PR comment operation for %s", platform
+            "Starting Test Scenario 3: PR comment operation for %s", platform,
         )
 
         # Get or create a PR for testing
@@ -287,7 +288,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
     def _get_or_create_pr_for_scenario_3(self, platform: str) -> int:
         """Get existing PR or create one for scenario 3."""
         framework = self.frameworks[platform]
-        
+
         # Prerequisite: Ensure there's an open PR (run scenario 2 first if needed)
         latest_pr = None
         if hasattr(framework, "get_latest_pull_request"):
@@ -313,7 +314,7 @@ pull requestは作成する必要ないので、mainブランチに直接コミ�
     def _add_comment_and_run_agent(self, platform: str, pr_number: int) -> None:
         """Add comment to PR and run the coding agent."""
         framework = self.frameworks[platform]
-        
+
         # Step 1: Add comment to PR
         comment_text = """1. hello_world.pyファイルを読み込んで現在のコードを理解して
 2. hello_world.pyファイルを変更して、scikit-learnの複数の分類モデルで
