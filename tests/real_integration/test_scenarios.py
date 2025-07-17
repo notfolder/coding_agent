@@ -12,8 +12,11 @@ import os
 import subprocess
 import time
 import unittest
+from typing import TYPE_CHECKING
 
-from tests.real_integration.base_framework import RealIntegrationTestFramework
+if TYPE_CHECKING:
+    from tests.real_integration.base_framework import RealIntegrationTestFramework
+
 from tests.real_integration.github_framework import GitHubRealIntegrationFramework
 from tests.real_integration.gitlab_framework import GitLabRealIntegrationFramework
 
