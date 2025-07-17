@@ -20,7 +20,7 @@ class TaskGetter(ABC):
         mcp_clients: dict[str, Any],
         task_source: str,
     ) -> TaskGetterFromGitHub | TaskGetterFromGitLab:
-        # Import here to avoid circular import issues
+        # Import here to avoid circular import issues - this is a legitimate use case
         if task_source == "github":
             from .task_getter_github import TaskGetterFromGitHub  # noqa: PLC0415
             return TaskGetterFromGitHub(config, mcp_clients)

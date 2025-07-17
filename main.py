@@ -343,11 +343,8 @@ def main() -> None:
     # LLMクライアントの初期化
     llm_client = get_llm_client(config, functions, tools)
 
-    # タスクキューの初期化
-    if config.get("use_rabbitmq", False):
-        task_queue = RabbitMQTaskQueue(config)
-    else:
-        task_queue = InMemoryTaskQueue()
+    # タスクキューの初期化 - RabbitMQまたはインメモリキューを使用
+    task_queue = RabbitMQTaskQueue(config) if config.get("use_rabbitmq", False) else InMemoryTaskQueue()
 
     # タスクハンドラーの初期化
     handler = TaskHandler(llm_client, mcp_clients, config)

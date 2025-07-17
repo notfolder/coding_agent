@@ -199,11 +199,8 @@ class TaskHandler:
         ]
         task.comment(f"関数呼び出し: {', '.join(list(comments))}")
 
-        # 各関数を順次実行
-        for function in functions:
-            if self._execute_single_function(task, function, error_state):
-                return True
-        return False
+        # 各関数を順次実行し、いずれか一つでも成功すればTrueを返す
+        return any(self._execute_single_function(task, function, error_state) for function in functions)
 
     def _execute_single_function(self, task: Task, function: dict, error_state: dict) -> bool:
         """単一の関数を実行する.
@@ -336,6 +333,10 @@ class TaskHandler:
         comment_text = data.get("comment", "") or "処理が完了しました。"
         task.comment(comment_text, mention=True)
         task.finish()
+
+    def get_system_prompt(self) -> str:
+        """システムプロンプトを取得する(テスト用の公開メソッド)."""
+        return self._make_system_prompt()
 
     def _make_system_prompt(self) -> str:
         """システムプロンプトを生成する.

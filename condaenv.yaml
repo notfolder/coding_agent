@@ -10,6 +10,9 @@ dependencies:
   - requests
   - pika
   - mcp-server-fetch
+  - ruff
+  - pytest
+  - coverage
   - pip:
       - fastmcp
       - pydantic==2.10.1

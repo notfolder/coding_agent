@@ -16,18 +16,31 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.modules["mcp"] = MagicMock()
 sys.modules["mcp"].McpError = Exception
 
-import pytest  # noqa: E402
-from mcp import McpError  # noqa: E402
 
-from handlers.task_getter_github import TaskGitHubIssue  # noqa: E402
-from handlers.task_getter_gitlab import TaskGitLabIssue  # noqa: E402
-from handlers.task_handler import TaskHandler  # noqa: E402
-from tests.mocks.mock_llm_client import (  # noqa: E402
-    MockLLMClient,
-    MockLLMClientWithErrors,
-    MockLLMClientWithToolCalls,
-)
-from tests.mocks.mock_mcp_client import MockMCPToolClient  # noqa: E402
+def _import_test_modules() -> tuple[type, ...]:
+    """Import test modules after mocking is set up."""
+    import pytest  # noqa: PLC0415
+    from mcp import McpError  # noqa: PLC0415
+
+    from handlers.task_getter_github import TaskGitHubIssue  # noqa: PLC0415
+    from handlers.task_getter_gitlab import TaskGitLabIssue  # noqa: PLC0415
+    from handlers.task_handler import TaskHandler  # noqa: PLC0415
+    from tests.mocks.mock_llm_client import (  # noqa: PLC0415
+        MockLLMClient,
+        MockLLMClientWithErrors,
+        MockLLMClientWithToolCalls,
+    )
+    from tests.mocks.mock_mcp_client import MockMCPToolClient  # noqa: PLC0415
+
+    return (pytest, McpError, TaskGitHubIssue, TaskGitLabIssue, TaskHandler,
+            MockLLMClient, MockLLMClientWithErrors, MockLLMClientWithToolCalls,
+            MockMCPToolClient)
+
+
+# Import the modules we need
+(pytest, McpError, TaskGitHubIssue, TaskGitLabIssue, TaskHandler,
+ MockLLMClient, MockLLMClientWithErrors, MockLLMClientWithToolCalls,
+ MockMCPToolClient) = _import_test_modules()
 
 # Constants
 MAX_TOOL_FAILURES = 2
@@ -80,9 +93,9 @@ class TestTaskHandler(unittest.TestCase):
             config=self.config,
         )
 
-        assert task_handler.llm_client is not None  # noqa: S101
-        assert task_handler.mcp_clients is not None  # noqa: S101
-        assert task_handler.config is not None  # noqa: S101
+        assert task_handler.llm_client is not None
+        assert task_handler.mcp_clients is not None
+        assert task_handler.config is not None
 
     def test_sanitize_arguments_dict(self) -> None:
         """Test argument sanitization with dict input."""
@@ -95,7 +108,7 @@ class TestTaskHandler(unittest.TestCase):
         # Test with valid dict
         args_dict = {"owner": "testorg", "repo": "testrepo", "issue_number": 1}
         sanitized = task_handler.sanitize_arguments(args_dict)
-        assert sanitized == args_dict  # noqa: S101
+        assert sanitized == args_dict
 
     def test_sanitize_arguments_json_string(self) -> None:
         """Test argument sanitization with JSON string input."""
@@ -109,7 +122,7 @@ class TestTaskHandler(unittest.TestCase):
         args_json = '{"owner": "testorg", "repo": "testrepo", "issue_number": 1}'
         sanitized = task_handler.sanitize_arguments(args_json)
         expected = {"owner": "testorg", "repo": "testrepo", "issue_number": 1}
-        assert sanitized == expected  # noqa: S101
+        assert sanitized == expected
 
     def test_sanitize_arguments_invalid_json(self) -> None:
         """Test argument sanitization with invalid JSON."""
@@ -150,7 +163,7 @@ class TestTaskHandler(unittest.TestCase):
         result = task_handler.handle(self.github_task)
 
         # Should complete without errors
-        assert result is None  # handle() method returns None on completion  # noqa: S101
+        assert result is None  # handle() method returns None on completion
 
     def test_handle_task_with_tool_calls(self) -> None:
         """Test task handling with tool calls."""
@@ -167,7 +180,7 @@ class TestTaskHandler(unittest.TestCase):
         result = task_handler.handle(self.github_task)
 
         # Should complete after making tool calls
-        assert result is None  # noqa: S101
+        assert result is None
 
     def test_handle_task_with_think_tags(self) -> None:
         """Test handling of <think> tags in LLM responses."""
@@ -237,7 +250,7 @@ class TestTaskHandler(unittest.TestCase):
         result = task_handler.handle(self.github_task)
 
         # Should stop due to max iterations
-        assert result is None  # noqa: S101
+        assert result is None
 
     def test_handle_task_with_invalid_json_responses(self) -> None:
         """Test handling of invalid JSON responses from LLM."""
@@ -327,7 +340,7 @@ class TestTaskHandler(unittest.TestCase):
         task_handler.handle(self.github_task)
 
         # Verify that tool was called multiple times due to retries
-        assert call_count >= MAX_TOOL_FAILURES  # noqa: S101
+        assert call_count >= MAX_TOOL_FAILURES
 
     def test_make_system_prompt(self) -> None:
         """Test system prompt generation."""
@@ -337,10 +350,10 @@ class TestTaskHandler(unittest.TestCase):
             config=self.config,
         )
 
-        # Test that system prompt is generated (accessing private method for testing)
-        system_prompt = task_handler._make_system_prompt()  # noqa: SLF001
-        assert isinstance(system_prompt, str)  # noqa: S101
-        assert len(system_prompt) > 0  # noqa: S101
+        # Test that system prompt is generated
+        system_prompt = task_handler.get_system_prompt()
+        assert isinstance(system_prompt, str)
+        assert len(system_prompt) > 0
 
 
 class TestTaskHandlerWithDifferentTasks(unittest.TestCase):
@@ -391,7 +404,7 @@ class TestTaskHandlerWithDifferentTasks(unittest.TestCase):
 
         # Handle GitLab task
         result = task_handler.handle(self.gitlab_task)
-        assert result is None  # Should complete successfully  # noqa: S101
+        assert result is None  # Should complete successfully
 
     def test_handle_task_with_multiple_mcp_clients(self) -> None:
         """Test task handling with multiple MCP clients."""
@@ -411,7 +424,7 @@ class TestTaskHandlerWithDifferentTasks(unittest.TestCase):
 
         # Handle task
         result = task_handler.handle(self.gitlab_task)
-        assert result is None  # noqa: S101
+        assert result is None
 
 
 if __name__ == "__main__":

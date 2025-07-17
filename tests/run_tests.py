@@ -7,6 +7,13 @@ import sys
 import unittest
 from pathlib import Path
 
+# Optional import for coverage
+try:
+    import coverage
+    COVERAGE_AVAILABLE = True
+except ImportError:
+    COVERAGE_AVAILABLE = False
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -59,29 +66,129 @@ def run_integration_tests() -> bool:
 
 def run_real_tests() -> bool:
     """Run real integration tests (requires API tokens)."""
-    # Check for API tokens
-    github_token = os.environ.get("GITHUB_TOKEN")
-    gitlab_token = os.environ.get("GITLAB_TOKEN")
+    # Setup logging
+    logger = logging.getLogger(__name__)
 
-    if not github_token and not gitlab_token:
+    # Check for API tokens and configuration
+    if not _validate_api_tokens(logger):
         return False
 
-    if github_token:
-        pass
+    _log_configuration_status(logger)
+
+    if not _validate_llm_configuration(logger):
+        return False
+
+    # Run the tests
+    return _execute_real_integration_tests(logger)
+
+
+def _validate_api_tokens(logger: logging.Logger) -> bool:
+    """Validate that required API tokens are configured."""
+    # Check for API tokens
+    github_token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
+    gitlab_token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN")
+    github_repo = os.environ.get("GITHUB_TEST_REPO")
+    gitlab_project = os.environ.get("GITLAB_TEST_PROJECT")
+
+    if not github_token and not gitlab_token:
+        logger.error(
+            "No API tokens found. Please set GITHUB_PERSONAL_ACCESS_TOKEN "
+            "or GITLAB_PERSONAL_ACCESS_TOKEN environment variables.",
+        )
+        return False
+
+    if github_token and not github_repo:
+        logger.error(
+            "GITHUB_PERSONAL_ACCESS_TOKEN is set but GITHUB_TEST_REPO is missing. "
+            "Please set GITHUB_TEST_REPO (format: owner/repo).",
+        )
+        return False
+
+    if gitlab_token and not gitlab_project:
+        logger.error(
+            "GITLAB_PERSONAL_ACCESS_TOKEN is set but GITLAB_TEST_PROJECT is missing. "
+            "Please set GITLAB_TEST_PROJECT.",
+        )
+        return False
+
+    return True
+
+
+def _log_configuration_status(logger: logging.Logger) -> None:
+    """Log the current configuration status."""
+    github_token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
+    gitlab_token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN")
+    github_repo = os.environ.get("GITHUB_TEST_REPO")
+    gitlab_project = os.environ.get("GITLAB_TEST_PROJECT")
+
+    if github_token and github_repo:
+        logger.info("GitHub testing enabled for repository: %s", github_repo)
     else:
-        pass
+        logger.warning("GitHub testing disabled (no token or repo configured)")
 
-    if gitlab_token:
-        pass
+    if gitlab_token and gitlab_project:
+        logger.info("GitLab testing enabled for project: %s", gitlab_project)
     else:
-        pass
+        logger.warning("GitLab testing disabled (no token or project configured)")
 
 
+def _validate_llm_configuration(logger: logging.Logger) -> bool:
+    """Validate LLM configuration."""
+    # Check for LLM configuration
+    llm_provider = os.environ.get("LLM_PROVIDER", "openai")
+    if llm_provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
+        logger.error("LLM_PROVIDER is 'openai' but OPENAI_API_KEY is not set.")
+        return False
+    if llm_provider == "openai":
+        logger.info("OpenAI LLM configured")
+
+    return True
+
+
+def _execute_real_integration_tests(logger: logging.Logger) -> bool:
+    """Execute the real integration tests."""
+    logger.info("Running real integration tests...")
     logging.basicConfig(level=logging.INFO)
 
-    # Import and run real tests (these would be in separate files)
-    # For now, we'll run our comprehensive mock tests as the real tests
-    return run_mock_tests()
+    # Import and run real integration tests
+    try:
+        loader = unittest.TestLoader()
+        real_integration_dir = str(Path(__file__).parent / "real_integration")
+        suite = loader.discover(real_integration_dir, pattern="test_*.py")
+
+        # Create a detailed test runner
+        runner = unittest.TextTestRunner(verbosity=2, stream=sys.stdout)
+        result = runner.run(suite)
+
+        # Log summary
+        _log_test_results(logger, result)
+
+        return result.wasSuccessful()
+
+    except ImportError:
+        logger.exception("Failed to import real integration tests")
+        return False
+    except (OSError, RuntimeError):
+        logger.exception("Failed to run real integration tests")
+        return False
+
+
+def _log_test_results(logger: logging.Logger, result: unittest.TestResult) -> None:
+    """Log the test results summary."""
+    logger.info("Test Results:")
+    logger.info("Tests run: %d", result.testsRun)
+    logger.info("Failures: %d", len(result.failures))
+    logger.info("Errors: %d", len(result.errors))
+
+    if result.failures:
+        logger.error("FAILURES:")
+        for test, traceback in result.failures:
+            logger.error("- %s: %s", test, traceback)
+
+    if result.errors:
+        logger.error("ERRORS:")
+        for test, traceback in result.errors:
+            logger.error("- %s: %s", test, traceback)
 
 
 def run_mock_tests() -> bool:
@@ -93,7 +200,7 @@ def run_mock_tests() -> bool:
 
         # Run comprehensive test suite
         loader = unittest.TestLoader()
-        start_dir = str(Path(__file__).parent)
+        start_dir = str(Path(__file__).parent / "mocks")
         suite = loader.discover(start_dir, pattern="test_*.py")
 
         # Create a detailed test runner
@@ -120,9 +227,7 @@ def run_mock_tests() -> bool:
 
 def run_coverage_tests() -> bool:
     """Run tests with coverage analysis (if coverage is available)."""
-    try:
-        import coverage  # noqa: PLC0415
-    except ImportError:
+    if not COVERAGE_AVAILABLE:
         return run_mock_tests()
 
     # Create coverage instance
@@ -166,6 +271,15 @@ if __name__ == "__main__":
         success = run_mock_tests()
     else:
         # Default: run comprehensive mock tests
+        success = run_unit_tests()
+        if not success:
+            sys.exit(1)
+        success = run_integration_tests()
+        if not success:
+            sys.exit(1)
         success = run_mock_tests()
+        if not success:
+            sys.exit(1)
+        success = run_coverage_tests()
 
     sys.exit(0 if success else 1)
