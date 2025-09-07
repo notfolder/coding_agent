@@ -18,10 +18,10 @@ import yaml
 
 from clients.lm_client import get_llm_client
 from clients.mcp_tool_client import MCPToolClient
-from filelock_util import FileLock
+from utils.filelock_util import FileLock
 from handlers.task_getter import TaskGetter
 from handlers.task_handler import TaskHandler
-from queueing import InMemoryTaskQueue, RabbitMQTaskQueue
+from utils.queueing import InMemoryTaskQueue, RabbitMQTaskQueue
 
 
 def setup_logger() -> None:
@@ -39,13 +39,13 @@ def setup_logger() -> None:
 
     # logging.confファイルからログ設定を読み込み
     logging.config.fileConfig(
-        "logging.conf",
+        "config/logging.conf",
         defaults={"LOGS": log_path, "loglevel": loglevel},
         disable_existing_loggers=False,
     )
 
 
-def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
+def load_config(config_file: str = "config/config.yaml") -> dict[str, Any]:
     """設定ファイルを読み込み、環境変数で上書きする.
 
     指定された設定ファイルを読み込み、環境変数で定義された値で
