@@ -25,5 +25,23 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
 
+  coding-agent:
+    image: coding-agent:nogoogle
+    restart: always
+    depends_on:
+      - rabbitmq
+    environment:
+      - GITLAB_PERSONAL_ACCESS_TOKEN=${GITLAB_PERSONAL_ACCESS_TOKEN:-dummy_token_for_test}
+      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN:-dummy_token_for_test}
+      - TASK_SOURCE=github
+      - DEBUG=true
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASSWORD=guest
+      - RABBITMQ_QUEUE=mcp_tasks
+    volumes:
+      - './logs:/app/logs'
+
 volumes:
   rabbitmq_data:

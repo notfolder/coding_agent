@@ -18,6 +18,6 @@
   "description": "",
   "dependencies": {
     "@adenot/mcp-google-search": "^0.2.0",
-    "@zereight/mcp-gitlab": "^1.0.66"
+    "@zereight/mcp-gitlab": "^2.0.4"
   }
 }
