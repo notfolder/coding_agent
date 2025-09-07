@@ -1,0 +1,69 @@
+{
+    "name": "Coding Agent Development",
+    "build": {
+        "dockerfile": "../Dockerfile",
+        "context": ".."
+    },
+    "workspaceFolder": "/app",
+    
+    // Features to add to the dev container
+    "features": {
+        "ghcr.io/devcontainers/features/git:1": {},
+        "ghcr.io/devcontainers/features/github-cli:1": {}
+    },
+
+    // Configure tool-specific properties
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-python.pylint",
+                "ms-python.black-formatter",
+                "ms-python.isort",
+                "ms-vscode.makefile-tools",
+                "redhat.vscode-yaml",
+                "ms-vscode.vscode-json"
+            ],
+            "settings": {
+                "python.defaultInterpreterPath": "/opt/conda/envs/coding-agent/bin/python",
+                "python.terminal.activateEnvironment": false
+            }
+        }
+    },
+
+    // Forward ports for external services
+    "forwardPorts": [5672, 15672, 8080],
+    "portsAttributes": {
+        "5672": {
+            "label": "RabbitMQ AMQP",
+            "onAutoForward": "ignore"
+        },
+        "15672": {
+            "label": "RabbitMQ Management", 
+            "onAutoForward": "openBrowser"
+        },
+        "8080": {
+            "label": "GitLab",
+            "onAutoForward": "ignore"
+        }
+    },
+
+    // Use 'postCreateCommand' to run commands after the container is created
+    "postCreateCommand": "conda info --envs && echo 'Dev container ready!'",
+
+    // Comment out to connect as root instead
+    "remoteUser": "root",
+
+    // Environment variables
+    "containerEnv": {
+        "TASK_SOURCE": "github",
+        "DEBUG": "true",
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${localEnv:GITHUB_PERSONAL_ACCESS_TOKEN}",
+        "GITLAB_PERSONAL_ACCESS_TOKEN": "${localEnv:GITLAB_PERSONAL_ACCESS_TOKEN}"
+    },
+
+    // Mount local directories
+    "mounts": [
+        "source=${localWorkspaceFolder}/logs,target=/app/logs,type=bind"
+    ]
+}
