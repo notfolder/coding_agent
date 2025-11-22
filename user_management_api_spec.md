@@ -34,7 +34,17 @@ http://user-config-api:8080
 ※ Docker内部のローカルネットワーク用（HTTPのみ）
 
 ### 2.2 認証
-Docker内部ネットワークのため、認証なし。
+最低限のセキュリティとして、設定ファイルから読み込んだ固定APIキーによる認証を実施する。
+
+**認証方式:**
+- リクエストヘッダーに`X-API-Key`を含める
+- APIキーは`config.yaml`の`api_server.api_key`から読み込む
+- APIキーが一致しない場合は401エラーを返す
+
+**ヘッダー例:**
+```http
+X-API-Key: your-secret-api-key
+```
 
 ### 2.3 エンドポイント
 
@@ -55,6 +65,7 @@ GET /config/{platform}/{username}
 ```http
 GET /config/github/notfolder HTTP/1.1
 Host: user-config-api:8080
+X-API-Key: your-secret-api-key
 ```
 
 **レスポンス（成功時）:**
@@ -87,6 +98,15 @@ Host: user-config-api:8080
 }
 ```
 
+**レスポンス（認証エラー時）:**
+```json
+{
+  "status": "error",
+  "message": "認証に失敗しました"
+}
+```
+HTTPステータスコード: 401 Unauthorized
+
 #### 2.3.2 ヘルスチェックAPI
 
 **エンドポイント:**
@@ -117,28 +137,81 @@ user_config_api/
 └── requirements.txt   # Python依存関係
 ```
 
-### 3.3 server.py の実装例
+### 3.3 config.yaml の設定例
+
+APIサーバー用の設定を追加した`config.yaml`の例:
+
+```yaml
+# APIサーバー設定（追加）
+api_server:
+  api_key: "your-secret-api-key-here"  # 固定APIキー
+
+# 既存のLLM設定
+llm:
+  provider: "openai"
+  function_calling: true
+  openai:
+    api_key: "sk-proj-..."
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4o"
+    max_token: 40960
+  lmstudio: null
+  ollama: null
+
+max_llm_process_num: 1000
+
+# その他の既存設定...
+```
+
+**注意:** `api_server.api_key`は環境変数で上書き可能にすることを推奨:
+```python
+API_KEY = os.environ.get("API_SERVER_KEY") or CONFIG.get("api_server", {}).get("api_key", "default-api-key")
+```
+
+### 3.4 server.py の実装例
 
 ```python
 """ユーザー設定APIモックアップサーバー."""
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import yaml
 from pathlib import Path
 
 app = Flask(__name__)
 
+# グローバル変数として設定を保持
+CONFIG = None
+API_KEY = None
+
 def load_config():
     """config.yamlを読み込む."""
+    global CONFIG, API_KEY
     config_path = Path("config.yaml")
     if not config_path.exists():
         return None
     
     with config_path.open() as f:
-        return yaml.safe_load(f)
+        CONFIG = yaml.safe_load(f)
+        # APIキーを設定から取得（設定されていない場合はデフォルト値）
+        API_KEY = CONFIG.get("api_server", {}).get("api_key", "default-api-key")
+        return CONFIG
+
+def check_api_key():
+    """APIキーを検証する."""
+    api_key = request.headers.get('X-API-Key')
+    if not api_key or api_key != API_KEY:
+        return False
+    return True
 
 @app.route('/config/<platform>/<username>', methods=['GET'])
 def get_user_config(platform, username):
     """ユーザーのLLM設定を取得（モックアップ: config.yamlを返す）."""
+    # APIキーの検証
+    if not check_api_key():
+        return jsonify({
+            "status": "error",
+            "message": "認証に失敗しました"
+        }), 401
+    
     config = load_config()
     
     if config is None:
@@ -161,21 +234,23 @@ def get_user_config(platform, username):
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """ヘルスチェック."""
+    """ヘルスチェック（認証不要）."""
     return jsonify({"status": "ok"})
 
 if __name__ == '__main__':
+    # 起動時に設定を読み込む
+    load_config()
     app.run(host='0.0.0.0', port=8080, debug=False)
 ```
 
-### 3.4 requirements.txt
+### 3.5 requirements.txt
 
 ```
 Flask==3.0.0
 PyYAML==6.0.1
 ```
 
-### 3.5 Dockerfile
+### 3.6 Dockerfile
 
 ```dockerfile
 FROM python:3.13-slim
@@ -193,7 +268,7 @@ EXPOSE 8080
 CMD ["python", "server.py"]
 ```
 
-### 3.6 docker-compose.yml への追加
+### 3.7 docker-compose.yml への追加
 
 既存の`docker-compose.yml`に以下を追加:
 
@@ -256,12 +331,18 @@ def _fetch_config_from_api(config: dict[str, Any]) -> dict[str, Any]:
     else:
         raise ValueError(f"Unknown task source: {task_source}")
     
-    # APIエンドポイント
+    # APIエンドポイントとAPIキー
     api_url = os.environ.get("USER_CONFIG_API_URL", "http://user-config-api:8080")
+    api_key = os.environ.get("USER_CONFIG_API_KEY", "")
+    
+    if not api_key:
+        raise ValueError("USER_CONFIG_API_KEY is not set")
+    
     url = f"{api_url}/config/{task_source}/{username}"
     
-    # API呼び出し
-    response = requests.get(url, timeout=5)
+    # APIキーをヘッダーに含めて呼び出し
+    headers = {"X-API-Key": api_key}
+    response = requests.get(url, headers=headers, timeout=5)
     response.raise_for_status()
     
     data = response.json()
@@ -284,6 +365,9 @@ USE_USER_CONFIG_API=true
 
 # ユーザー設定APIのURL（デフォルト: http://user-config-api:8080）
 USER_CONFIG_API_URL=http://user-config-api:8080
+
+# ユーザー設定APIのAPIキー（必須）
+USER_CONFIG_API_KEY=your-secret-api-key
 ```
 
 ### 4.3 .envファイルの例
@@ -296,6 +380,7 @@ GITHUB_PERSONAL_ACCESS_TOKEN=your_token
 # ユーザー設定API設定（オプション）
 USE_USER_CONFIG_API=true
 USER_CONFIG_API_URL=http://user-config-api:8080
+USER_CONFIG_API_KEY=your-secret-api-key
 ```
 
 ## 5. セットアップ手順
@@ -323,6 +408,14 @@ EOF
 
 # 既存のconfig.yamlをコピー
 cp ../config.yaml .
+
+# config.yamlにAPIサーバー設定を追加
+cat >> config.yaml << 'EOF'
+
+# APIサーバー設定
+api_server:
+  api_key: "your-secret-api-key-here"
+EOF
 ```
 
 ### 5.2 起動
@@ -340,14 +433,20 @@ docker run -p 8080:8080 user-config-api
 ### 5.3 動作確認
 
 ```bash
-# ヘルスチェック
+# ヘルスチェック（認証不要）
 curl http://localhost:8080/health
 
-# 設定取得
-curl http://localhost:8080/config/github/notfolder
+# 設定取得（APIキー必須）
+curl -H "X-API-Key: your-secret-api-key" http://localhost:8080/config/github/notfolder
 
 # 期待される出力:
 # {"status":"success","data":{"llm":{...},"max_llm_process_num":1000}}
+
+# 認証エラーの確認
+curl http://localhost:8080/config/github/notfolder
+
+# 期待される出力:
+# {"status":"error","message":"認証に失敗しました"}
 ```
 
 ## 6. テスト
@@ -357,27 +456,46 @@ curl http://localhost:8080/config/github/notfolder
 ```python
 import unittest
 import json
-from server import app
+from server import app, load_config
 
 class TestUserConfigAPI(unittest.TestCase):
     
     def setUp(self):
         self.client = app.test_client()
+        # テスト用に設定を読み込む
+        load_config()
     
     def test_health_check(self):
-        """ヘルスチェックのテスト."""
+        """ヘルスチェックのテスト（認証不要）."""
         response = self.client.get('/health')
         self.assertEqual(response.status_code, 200)
         data = json.loads(response.data)
         self.assertEqual(data['status'], 'ok')
     
-    def test_get_config(self):
-        """設定取得のテスト."""
-        response = self.client.get('/config/github/testuser')
+    def test_get_config_with_valid_api_key(self):
+        """正しいAPIキーでの設定取得のテスト."""
+        headers = {'X-API-Key': 'your-secret-api-key'}
+        response = self.client.get('/config/github/testuser', headers=headers)
         self.assertEqual(response.status_code, 200)
         data = json.loads(response.data)
         self.assertEqual(data['status'], 'success')
         self.assertIn('llm', data['data'])
+    
+    def test_get_config_without_api_key(self):
+        """APIキーなしでの設定取得のテスト（エラー）."""
+        response = self.client.get('/config/github/testuser')
+        self.assertEqual(response.status_code, 401)
+        data = json.loads(response.data)
+        self.assertEqual(data['status'], 'error')
+        self.assertEqual(data['message'], '認証に失敗しました')
+    
+    def test_get_config_with_invalid_api_key(self):
+        """無効なAPIキーでの設定取得のテスト（エラー）."""
+        headers = {'X-API-Key': 'invalid-key'}
+        response = self.client.get('/config/github/testuser', headers=headers)
+        self.assertEqual(response.status_code, 401)
+        data = json.loads(response.data)
+        self.assertEqual(data['status'], 'error')
 ```
 
 ## 7. 将来の拡張
@@ -393,9 +511,10 @@ class TestUserConfigAPI(unittest.TestCase):
    - SQLiteやPostgreSQLに設定を保存
    - ユーザーごとの設定を管理
 
-3. **認証機能の追加**
-   - APIトークン認証
+3. **認証機能の強化**
+   - 動的なAPIトークン管理
    - JWTトークン
+   - ユーザーごとの認証
 
 4. **設定の更新API**
    - PUT/POSTエンドポイントで設定を更新
@@ -404,8 +523,8 @@ class TestUserConfigAPI(unittest.TestCase):
 
 本仕様では、以下の特徴を持つモックアップAPIサーバーを定義した:
 
-- **シンプル**: Flask + YAML、約50行のコード
-- **最小限のセキュリティ**: Docker内部ネットワークのみ、認証なし
+- **シンプル**: Flask + YAML、約70行のコード
+- **最小限のセキュリティ**: Docker内部ネットワーク、固定APIキー認証
 - **既存設定の再利用**: config.yamlをそのまま使用
 - **段階的な移行**: 環境変数で切り替え可能
 - **将来の拡張性**: ユーザーごとの設定やDB連携に容易に対応可能
