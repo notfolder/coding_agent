@@ -1,5 +1,15 @@
 version: '3.6'
 services:
+  user-config-api:
+    build: ./user_config_api
+    container_name: user-config-api
+    # Docker内部ネットワークのみで使用（外部公開不要）
+    # テスト用に外部アクセスが必要な場合のみ、以下のコメントを外す
+    ports:
+      - "8081:8080"
+    environment:
+      API_SERVER_KEY: ${API_SERVER_KEY:-your-secret-api-key-here}
+
   web:
     image: 'gitlab/gitlab-ce:latest'
     restart: always

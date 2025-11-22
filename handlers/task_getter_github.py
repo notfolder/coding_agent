@@ -99,6 +99,10 @@ class TaskGitHubIssue(Task):
     def check(self) -> bool:
         return self.config["github"]["processing_label"] in self.labels
 
+    def get_user(self) -> str | None:
+        """Issueの作成者のユーザー名を取得する."""
+        return self.issue.get("user", {}).get("login")
+
 
 class TaskGitHubPullRequest(Task):
     def __init__(
@@ -176,6 +180,10 @@ class TaskGitHubPullRequest(Task):
 
     def check(self) -> bool:
         return self.config["github"]["processing_label"] in self.labels
+
+    def get_user(self) -> str | None:
+        """Pull Requestの作成者のユーザー名を取得する."""
+        return self.pr.get("user", {}).get("login")
 
 
 class TaskGetterFromGitHub(TaskGetter):

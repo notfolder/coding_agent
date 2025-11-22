@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import requests
 import yaml
 
 from clients.lm_client import get_llm_client
@@ -22,6 +23,7 @@ from filelock_util import FileLock
 from handlers.task_getter import TaskGetter
 from handlers.task_handler import TaskHandler
 from queueing import InMemoryTaskQueue, RabbitMQTaskQueue
+
 
 
 def setup_logger() -> None:
@@ -50,6 +52,8 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
 
     指定された設定ファイルを読み込み、環境変数で定義された値で
     設定を上書きします。LLM、MCP、RabbitMQ等の設定が対象です。
+    
+    USE_USER_CONFIG_API環境変数がtrueの場合、API経由で設定を取得します。
 
     Args:
         config_file: 読み込む設定ファイルのパス
@@ -62,17 +66,136 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
         yaml.YAMLError: YAMLの解析に失敗した場合
 
     """
+    # ロガー取得
+    logger = logging.getLogger(__name__)
+    
     # 設定ファイルを読み込み
     with Path(config_file).open() as f:
         config = yaml.safe_load(f)
-
-    # 各種設定の上書き処理
-    _override_llm_config(config)
+    
+    # 環境変数による設定上書きを先に実行
     _override_mcp_config(config)
     _override_rabbitmq_config(config)
     _override_bot_config(config)
+    
+    # API経由でLLM設定を取得するかチェック
+    use_api = os.environ.get("USE_USER_CONFIG_API", "false").lower() == "true"
+    
+    if use_api:
+        try:
+            config = _fetch_config_from_api(config, logger)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            logger.exception(f"API接続エラー、設定ファイルを使用{e}")
+        except (ValueError, requests.HTTPError) as e:
+            logger.exception(f"API設定取得エラー、設定ファイルを使用{e}")
+        except Exception as e:
+            logger.exception(f"予期しないエラー、設定ファイルを使用{e}")
+    
+    # LLM設定を環境変数で最終的に上書き
+    _override_llm_config(config)
 
     return config
+
+
+def _fetch_config_from_api(
+    config: dict[str, Any], logger: logging.Logger, username: str | None = None
+) -> dict[str, Any]:
+    """API経由で設定を取得する.
+    
+    Args:
+        config: ベースとなる設定辞書
+        logger: ロガー
+        username: ユーザー名（Noneの場合はconfig.yamlから取得）
+    
+    Returns:
+        API設定でマージされた設定辞書
+    
+    Raises:
+        ValueError: 設定エラーまたはAPI呼び出しエラー
+    """
+    # タスクソースを取得
+    task_source = os.environ.get("TASK_SOURCE", "github")
+    
+    # ユーザー名が指定されていない場合はconfig.yamlから取得
+    if username is None:
+        if task_source == "github":
+            username = config.get("github", {}).get("owner", "")
+        elif task_source == "gitlab":
+            username = config.get("gitlab", {}).get("owner", "")
+        else:
+            raise ValueError(f"Unknown task source: {task_source}")
+    
+    # APIエンドポイントとAPIキー
+    api_url = os.environ.get("USER_CONFIG_API_URL", "http://user-config-api:8080")
+    api_key = os.environ.get("USER_CONFIG_API_KEY", "")
+    
+    if not api_key:
+        raise ValueError("USER_CONFIG_API_KEY is not set")
+    
+    url = f"{api_url}/config/{task_source}/{username}"
+    
+    # Bearer トークンとしてAPIキーをヘッダーに含めて呼び出し
+    headers = {"Authorization": f"Bearer {api_key}"}
+    response = requests.get(url, headers=headers, timeout=5)
+    response.raise_for_status()
+
+    data = response.json()
+    if data.get("status") == "success":
+        # API設定を取得
+        api_data = data["data"]
+        
+        # LLM設定を上書き
+        config["llm"] = api_data["llm"]
+        
+        # システムプロンプトを上書き（環境変数で上書きされていない場合のみ）
+        if "system_prompt" in api_data:
+            config["system_prompt"] = api_data["system_prompt"]
+        
+        logger.info(f"API経由でLLM設定を取得: {task_source}:{username}")
+    else:
+        raise ValueError(f"API returned error: {data.get('message')}")
+    
+    return config
+
+
+def fetch_user_config(task: Any, base_config: dict[str, Any]) -> dict[str, Any]:
+    """タスクのユーザーに基づいて設定を取得する.
+
+    USE_USER_CONFIG_API環境変数がtrueの場合、タスクの作成者のユーザー名を使用して
+    API経由で設定を取得します。そうでない場合はbase_configをそのまま返します。
+
+    Args:
+        task: タスクオブジェクト（issue/PR/MRの情報を含む）
+        base_config: ベースとなる設定辞書
+
+    Returns:
+        ユーザー設定でマージされた設定辞書
+    """
+    # API使用フラグをチェック
+    use_api = os.environ.get("USE_USER_CONFIG_API", "false").lower() == "true"
+    if not use_api:
+        return base_config
+
+    # タスクからユーザー名を取得
+    try:
+        username = task.get_user()
+
+        if not username:
+            # ユーザー名が取得できない場合はベース設定を使用
+            logger = logging.getLogger(__name__)
+            logger.warning("タスクからユーザー名を取得できませんでした。デフォルト設定を使用します。")
+            return base_config
+
+        # API経由で設定を取得
+        logger = logging.getLogger(__name__)
+        return _fetch_config_from_api(base_config.copy(), logger, username)
+
+    except (ValueError, TypeError, AttributeError) as e:
+        # エラーが発生した場合はベース設定を使用
+        logger = logging.getLogger(__name__)
+        logger.warning("ユーザー設定の取得に失敗しました: %s。デフォルト設定を使用します。", e)
+        return base_config
+
 
 
 def _override_llm_config(config: dict[str, Any]) -> None:
