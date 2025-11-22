@@ -115,7 +115,9 @@ class TaskHandler:
         prompt = task.get_prompt()
         self.logger.info("LLMに送信するプロンプト: %s", prompt)
 
-        self.llm_client.send_system_prompt(self._make_system_prompt())
+        system_prompt = self._make_system_prompt()
+        self.logger.info("システムプロンプト: %s", system_prompt)
+        self.llm_client.send_system_prompt(system_prompt)
         self.llm_client.send_user_message(prompt)
 
     def _process_llm_interaction(self, task: Task, count: int, error_state: dict) -> bool:
@@ -240,6 +242,8 @@ class TaskHandler:
         try:
             args = error_state.get("current_args", {})
             result = self.mcp_clients[mcp_server].call_tool(tool_name, args)
+            result = f"ツール呼び出し成功: {tool_name} with args: {args} result: {result}"
+            self.logger.info(result)
             # ツール呼び出し成功時はエラーカウントリセット
             if error_state["last_tool"] == tool_name:
                 error_state["tool_error_count"] = 0
@@ -308,6 +312,10 @@ class TaskHandler:
         should_abort = False
         try:
             output = self.mcp_clients[mcp_server].call_tool(tool_name, args)
+            tool_mesg = f"ツール呼び出し成功: {tool_name} with args: {args} output: {output}"
+            self.logger.info(tool_mesg)
+            task.comment(tool_mesg)
+            output = tool_mesg
             if error_state["last_tool"] == tool:
                 error_state["tool_error_count"] = 0
         except Exception as e:

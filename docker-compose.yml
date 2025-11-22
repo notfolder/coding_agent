@@ -4,9 +4,12 @@ services:
     image: 'gitlab/gitlab-ce:latest'
     restart: always
     ports:
-      - '8080:80'
+      - '8081:80'
       - '8443:443'
       - '2222:22'
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://localhost:8081'
     volumes:
       - './gitlab/config:/etc/gitlab'
       - './gitlab/logs:/var/log/gitlab'
@@ -25,5 +28,34 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
 
+  gitlab-runner-register:
+    image: gitlab/gitlab-runner:latest
+    container_name: runner_register
+    env_file: .env
+    entrypoint:
+      - /usr/bin/gitlab-runner
+      - register
+      - --non-interactive
+      - --url
+      - "${CI_SERVER_URL}"
+      - --token
+      - "${CI_SERVER_TOKEN}"
+      - --config
+      - /etc/gitlab-runner/config.toml
+    volumes:
+      - runner-config:/etc/gitlab-runner
+    restart: "no"
+
+  gitlab-runner:
+    image: gitlab/gitlab-runner:latest
+    container_name: gitlab_runner_app
+    depends_on:
+      - gitlab-runner-register
+    volumes:
+      - runner-config:/etc/gitlab-runner
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["run", "--user=gitlab-runner", "--working-directory=/home/gitlab-runner"]
+
 volumes:
   rabbitmq_data:
+  runner-config:
