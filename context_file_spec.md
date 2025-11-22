@@ -12,8 +12,9 @@
   - ファイルロック不要
   - シンプルな実装が可能
 - **SQLiteでタスク状態管理**: ルートディレクトリに全タスクの状態をDB化
-- **UUID単位のディレクトリ**: 各タスクは独立したディレクトリで管理
+- **UUID単位のディレクトリ**: 各タスクは独立したディレクトリで管理（UUIDはキュー投入時に付与）
 - **running/completed分離**: 実行状態による物理的分離
+- **ファイルベースリクエスト**: OpenAIなど可能なクライアントはリクエストをファイル化してメモリ削減
 
 ### 1.3 期待される効果
 
@@ -27,18 +28,21 @@
 ### 2.1 全体構成
 
 ```
-logs/contexts/
+contexts/
 ├── tasks.db                    # 全タスクの状態管理DB（SQLite）
 ├── running/                    # 実行中タスク
 │   └── {uuid}/                 # タスクUUID単位のディレクトリ
 │       ├── metadata.json       # タスクメタデータ（静的）
 │       ├── messages.jsonl      # メッセージ履歴
 │       ├── summaries.jsonl     # コンテキスト要約履歴
-│       └── tools.jsonl         # ツール実行履歴
+│       ├── tools.jsonl         # ツール実行履歴
+│       └── request.json        # LLMリクエスト一時ファイル（OpenAI用）
 └── completed/                  # 完了済みタスク
     └── {uuid}/                 # 完了したタスク
         └── (running/と同じ構造)
 ```
+
+**注**: `logs/`ディレクトリは使用せず、`contexts/`を直接ルートに配置
 
 ### 2.2 tasks.db（SQLite）
 
@@ -53,7 +57,7 @@ logs/contexts/
 **tasksテーブル**:
 ```sql
 CREATE TABLE tasks (
-    uuid TEXT PRIMARY KEY,              -- タスクUUID
+    uuid TEXT PRIMARY KEY,              -- タスクUUID（キューで付与）
     task_source TEXT NOT NULL,          -- "github" or "gitlab"
     owner TEXT NOT NULL,                -- リポジトリオーナー
     repo TEXT NOT NULL,                 -- リポジトリ名
@@ -187,6 +191,24 @@ CREATE INDEX idx_tasks_user ON tasks(user);
 - `duration_ms`: 実行時間（ミリ秒）
 - `timestamp`: 実行日時
 
+### 3.5 request.json（OpenAIClient用）
+
+OpenAI APIへのリクエストを一時的に保存するファイル。メモリ削減のため、リクエストボディをファイルから読み込む。
+
+#### 内容
+
+```json
+{
+  "model": "gpt-4o",
+  "messages": [
+    {"role": "system", "content": "..."},
+    {"role": "user", "content": "..."}
+  ],
+  "functions": [...],
+  "function_call": "auto"
+}
+```
+
 ## 4. クラス設計
 
 ### 4.1 TaskContextManagerクラス
@@ -195,16 +217,16 @@ CREATE INDEX idx_tasks_user ON tasks(user);
 
 #### 責務
 
-- タスク開始時のUUID生成とディレクトリ作成
+- キューから受け取ったUUIDでディレクトリ作成
 - tasks.dbへのタスク登録・更新
 - MessageStore、SummaryStore、ToolStoreの統合管理
 - タスク完了時のディレクトリ移動
 
 #### 主要メソッド
 
-**`__init__(task_key, config)`**
-- タスクキーと設定を受け取り初期化
-- UUIDを生成
+**`__init__(task_key, uuid, config)`**
+- タスクキー、UUID（キューで付与済み）、設定を受け取り初期化
+- **変更点**: UUIDは引数として受け取る（生成しない）
 - `running/{uuid}/`ディレクトリを作成
 - `metadata.json`を作成
 - tasks.dbにタスクを登録（status='running'）
@@ -366,6 +388,7 @@ CREATE INDEX idx_tasks_user ON tasks(user);
 **`__init__(message_store, summary_store, llm_client, config)`**
 - 各ストアとLLMクライアントを受け取り初期化
 - 設定から`context_length`と`compression_threshold`を取得
+- 設定から`summary_prompt`を取得（config.yamlから）
 - `min_messages_to_summarize`を設定（デフォルト10）
 
 **`should_compress()`**
@@ -382,7 +405,7 @@ CREATE INDEX idx_tasks_user ON tasks(user);
 - 処理手順:
   1. 最新の要約を取得（summary_storeから）
   2. 要約以降の未要約メッセージを取得（最新5件は除外）
-  3. 要約プロンプトを作成
+  3. 設定から取得した要約プロンプトを使用
   4. LLMに要約を依頼
   5. 要約結果を取得
   6. summary_storeに保存
@@ -390,8 +413,9 @@ CREATE INDEX idx_tasks_user ON tasks(user);
 - 戻り値: 要約ID
 
 **`create_summary_prompt(messages)`**
-- メッセージリストから要約プロンプトを生成
-- 形式: "以下の会話履歴を要約してください。\n[USER]: ...\n[ASSISTANT]: ..."
+- メッセージリストと設定の要約プロンプトから最終プロンプトを生成
+- config.yamlの`summary_prompt`をテンプレートとして使用
+- `{messages}`プレースホルダーにメッセージ履歴を挿入
 - 戻り値: プロンプト文字列
 
 ## 5. 既存クラスの変更
@@ -404,7 +428,8 @@ CREATE INDEX idx_tasks_user ON tasks(user);
 - 変更なし（既存通り）
 
 **`handle(task)`メソッド**
-- 処理の最初に`TaskContextManager`を初期化
+- **変更点**: タスクからUUIDを取得（task.get_uuid()）
+- 処理の最初に`TaskContextManager`を初期化（UUIDを渡す）
 - 処理の最後に`context_manager.complete()`または`context_manager.fail()`を呼び出す
 
 #### 追加処理
@@ -412,10 +437,11 @@ CREATE INDEX idx_tasks_user ON tasks(user);
 **タスク開始時**:
 ```
 1. task_keyを取得（task.get_task_key()）
-2. TaskContextManager初期化
-   context_manager = TaskContextManager(task_key, config)
-3. UUIDをログに記録
-   logger.info(f"Task started: {context_manager.uuid}")
+2. UUIDを取得（task.get_uuid()） ← キューで付与済み
+3. TaskContextManager初期化
+   context_manager = TaskContextManager(task_key, uuid, config)
+4. UUIDをログに記録
+   logger.info(f"Task started: {uuid}")
 ```
 
 **タスク処理中**:
@@ -438,14 +464,22 @@ CREATE INDEX idx_tasks_user ON tasks(user);
 - 失敗時: context_manager.fail(error_message)
 ```
 
-### 5.2 LLMClientクラス（OpenAIClient等）
+### 5.2 OpenAIClientクラス
 
 #### 変更点
 
+**メモリ最適化の方針**:
+- OpenAI Python SDKはリクエストボディをメモリ上で構築する
+- 大量のメッセージがある場合、メモリを大量消費
+- 解決策: リクエストボディを一時ファイル（request.json）に保存し、HTTPリクエストを自前で送信
+
 **`__init__`メソッド**
 - `message_store`を引数として受け取る
+- `context_dir`を引数として受け取る（request.json保存先）
 - 既存の`self.messages`リストを削除
 - `self.message_store = message_store`を設定
+- `self.context_dir = context_dir`を設定
+- **変更点**: `openai.OpenAI`の使用を廃止し、`requests`ライブラリを使用する準備
 
 **`send_system_prompt(prompt)`メソッド**
 - `self.messages.append(...)`を削除
@@ -460,23 +494,121 @@ CREATE INDEX idx_tasks_user ON tasks(user);
 - `self.messages.append(...)`を削除
 - `self.message_store.add_message("tool", json.dumps(result), tool_name=name)`に変更
 
-**`get_response()`メソッド**
-- `messages = self.messages`を削除
-- `messages = self.message_store.get_messages_for_llm(summary_store)`に変更
-  - summary_storeは引数として渡す必要がある
-- LLM呼び出し後、応答をmessage_storeに追加:
-  `self.message_store.add_message("assistant", reply_content)`
+**`get_response(summary_store)`メソッド**
+- **大幅な変更**: ファイルベースリクエストの実装
+- 処理手順:
+  1. `messages = self.message_store.get_messages_for_llm(summary_store)`でメッセージ取得
+  2. リクエストボディを構築（dict）
+  3. `request.json`ファイルに保存（`context_dir/request.json`）
+  4. `requests`ライブラリでHTTP POSTリクエスト送信
+     - ヘッダー: Authorization, Content-Type
+     - ボディ: request.jsonの内容を読み込んで送信
+  5. レスポンスをパース
+  6. 応答をmessage_storeに追加
+  7. request.jsonを削除（クリーンアップ）
+- 戻り値: (応答テキスト, 関数呼び出しリスト)
 
-#### 追加引数
+**詳細な実装仕様**:
+```
+1. リクエストボディ作成:
+   request_body = {
+       "model": self.model,
+       "messages": messages,  # message_storeから取得
+       "functions": self.functions,
+       "function_call": "auto"
+   }
 
-- `summary_store`を`get_response()`の引数に追加
-  - または、`__init__`で受け取ってインスタンス変数として保持
+2. ファイル保存:
+   request_path = self.context_dir / "request.json"
+   with open(request_path, 'w') as f:
+       json.dump(request_body, f)
 
-### 5.3 TaskGetterクラス（TaskGetterFromGitHub等）
+3. HTTPリクエスト送信:
+   import requests
+   with open(request_path, 'r') as f:
+       response = requests.post(
+           f"{self.base_url}/v1/chat/completions",
+           headers={
+               "Authorization": f"Bearer {self.api_key}",
+               "Content-Type": "application/json"
+           },
+           data=f  # ファイルオブジェクトを直接渡す
+       )
+
+4. レスポンス処理:
+   response_data = response.json()
+   choice = response_data["choices"][0]
+   message = choice["message"]
+   
+5. クリーンアップ:
+   request_path.unlink()  # ファイル削除
+```
+
+**メモリ削減効果**:
+- メッセージリストをメモリに保持しない（message_storeのキャッシュのみ）
+- リクエストボディもメモリに保持せず、ファイル経由で送信
+- 推定削減: 80-95%
+
+### 5.3 OllamaClientクラス（clients/ollama_client.py）
 
 #### 変更点
 
-なし（タスク取得のロジックは変更不要）
+**`__init__`メソッド**
+- `message_store`を引数として受け取る
+- 既存の`self.messages`リストを削除
+- `self.message_store = message_store`を設定
+
+**`send_system_prompt(prompt)`メソッド**
+- `self.messages = [...]`を削除
+- `self.message_store.add_message("system", prompt)`に変更
+
+**`send_user_message(message)`メソッド**
+- `self.messages.append(...)`を削除
+- `self.message_store.add_message("user", message)`に変更
+- トークン管理ロジック削除
+
+**`get_response(summary_store)`メソッド**
+- 引数に`summary_store`を追加
+- `messages = self.message_store.get_messages_for_llm(summary_store)`でメッセージ取得
+- Ollama APIの`chat()`関数は引数でメッセージを受け取るため、メモリ上の構築は必要
+- **注**: Ollama SDKはファイルベースリクエスト非対応のため、従来通りメモリ上で構築
+- 応答をmessage_storeに追加: `self.message_store.add_message("assistant", reply)`
+
+**メモリ削減効果**:
+- メッセージリストをメモリに保持しない
+- ただしリクエスト時は一時的にメモリ上でメッセージリスト構築が必要
+- 推定削減: 60-70%
+
+### 5.4 LMStudioClientクラス（clients/lmstudio_client.py内の最初のクラス）
+
+#### 変更点
+
+**`__init__`メソッド**
+- `message_store`を引数として受け取る
+- `self.message_store = message_store`を設定
+- `self.chat = lms.Chat()`は保持（LMStudio SDKが内部で管理）
+
+**`send_system_prompt(prompt)`メソッド**
+- `self.chat.add_system_prompt(prompt)`はそのまま
+- **追加**: `self.message_store.add_message("system", prompt)`でファイルにも記録
+
+**`send_user_message(message)`メソッド**
+- `self.chat.add_user_message(message)`はそのまま
+- **追加**: `self.message_store.add_message("user", message)`でファイルにも記録
+
+**`get_response(summary_store)`メソッド**
+- 引数に`summary_store`を追加（使用しない）
+- LMStudio SDKは独自のChat管理を行うため、message_storeからの復元は不可
+- 応答をmessage_storeに追加: `self.message_store.add_message("assistant", str(result))`
+
+**メモリ削減効果**:
+- LMStudio SDKが内部でメッセージを管理しているため、限定的
+- ファイルへの記録によりデバッグ性は向上
+- 推定削減: 20-30%（SDK内部のメモリは削減不可）
+
+### 5.5 lmstudio_client.py内のOllamaClientクラス
+
+このファイルには2つのOllamaClientクラス定義がある（重複）。変更内容は4.3と同じ。
 
 ## 6. 処理フロー
 
@@ -485,25 +617,27 @@ CREATE INDEX idx_tasks_user ON tasks(user);
 ```
 1. キューからタスク取得
    task = task_queue.get()
+   uuid = task.get_uuid()  # キューで付与済みのUUID
 
 2. TaskHandler.handle(task)呼び出し
    
 3. TaskHandler内:
    a. task_key = task.get_task_key()
-   b. context_manager = TaskContextManager(task_key, config)
-      - UUID生成
+   b. uuid = task.get_uuid()
+   c. context_manager = TaskContextManager(task_key, uuid, config)
+      - 既存のUUIDを使用
       - running/{uuid}/ディレクトリ作成
       - metadata.json作成
       - tasks.dbにINSERT（status='running'）
       - MessageStore, SummaryStore, ToolStore初期化
    
-   c. message_store = context_manager.get_message_store()
+   d. message_store = context_manager.get_message_store()
       summary_store = context_manager.get_summary_store()
       tool_store = context_manager.get_tool_store()
    
-   d. llm_client初期化（message_storeを渡す）
+   e. llm_client初期化（message_store, context_dirを渡す）
    
-   e. compressor = ContextCompressor(message_store, summary_store, llm_client, config)
+   f. compressor = ContextCompressor(message_store, summary_store, llm_client, config)
 ```
 
 ### 6.2 LLM呼び出しフロー
@@ -522,13 +656,19 @@ CREATE INDEX idx_tasks_user ON tasks(user);
       - 未要約メッセージ取得
       - トークン数調整
    
-   b. LLM API呼び出し
-      response = openai.chat.completions.create(messages=messages, ...)
+   b. OpenAIClientの場合:
+      - request.jsonにリクエストボディを保存
+      - requestsライブラリでHTTP POST
+      - レスポンスをパース
+      - request.json削除
    
-   c. 応答をmessage_storeに追加
+   c. Ollama/LMStudioの場合:
+      - SDK経由でAPI呼び出し
+   
+   d. 応答をmessage_storeに追加
       message_store.add_message("assistant", response_content)
    
-   d. 統計更新
+   e. 統計更新
       context_manager.update_statistics(llm_calls=1, tokens=used_tokens)
    
 4. 圧縮判定
@@ -591,28 +731,36 @@ CREATE INDEX idx_tasks_user ON tasks(user);
 - ただし直近5件は除外（要約対象外として残す）
 - システムプロンプト（seq=1）は除外
 
-### 7.3 要約プロンプト
+### 7.3 要約プロンプトの設定
 
+要約プロンプトは`config.yaml`に記述し、ContextCompressorが読み込む。
+
+#### config.yamlの記述例
+
+```yaml
+context_storage:
+  summary_prompt: |
+    あなたは会話履歴を要約するアシスタントです。
+    以下のメッセージ履歴を簡潔かつ包括的に要約してください。
+    
+    要約には以下を含めてください：
+    1. 重要な決定事項
+    2. 実施したコード変更
+    3. 発生した問題とその解決
+    4. 残存タスク
+    
+    元の30-40%の長さを目標としてください。
+    
+    === 要約対象メッセージ ===
+    {messages}
+    
+    要約のみを出力してください。
 ```
-あなたは会話履歴を要約するアシスタントです。
-以下のメッセージ履歴を簡潔かつ包括的に要約してください。
 
-要約には以下を含めてください：
-1. 重要な決定事項
-2. 実施したコード変更
-3. 発生した問題とその解決
-4. 残存タスク
+#### 使用方法
 
-元の30-40%の長さを目標としてください。
-
-=== 要約対象メッセージ ===
-[USER]: Fix the authentication bug
-[ASSISTANT]: I'll help you fix the bug...
-[TOOL]: github_get_file_contents -> (file content)
-...
-
-要約のみを出力してください。
-```
+- `{messages}`プレースホルダーに実際のメッセージ履歴が挿入される
+- ContextCompressor.create_summary_prompt()で最終プロンプトを生成
 
 ### 7.4 圧縮後の処理
 
@@ -626,7 +774,7 @@ CREATE INDEX idx_tasks_user ON tasks(user);
 
 ### 8.1 初期化
 
-アプリケーション起動時、`logs/contexts/tasks.db`が存在しない場合:
+アプリケーション起動時、`contexts/tasks.db`が存在しない場合:
 
 1. SQLiteデータベースを作成
 2. tasksテーブルを作成
@@ -678,10 +826,28 @@ WHERE status = 'completed'
 # コンテキストストレージ設定
 context_storage:
   enabled: true                    # コンテキストファイル化を有効化
-  base_dir: "logs/contexts"        # ベースディレクトリ
+  base_dir: "contexts"             # ベースディレクトリ（logs/不要）
   max_memory_messages: 20          # メモリキャッシュサイズ
   compression_threshold: 0.7       # 圧縮開始閾値（70%）
   min_messages_to_summarize: 10    # 要約に必要な最小メッセージ数
+  
+  # 要約プロンプト（config.yamlに記述）
+  summary_prompt: |
+    あなたは会話履歴を要約するアシスタントです。
+    以下のメッセージ履歴を簡潔かつ包括的に要約してください。
+    
+    要約には以下を含めてください：
+    1. 重要な決定事項
+    2. 実施したコード変更
+    3. 発生した問題とその解決
+    4. 残存タスク
+    
+    元の30-40%の長さを目標としてください。
+    
+    === 要約対象メッセージ ===
+    {messages}
+    
+    要約のみを出力してください。
 
 # LLM設定（既存）にcontext_lengthを追加
 llm:
@@ -690,6 +856,7 @@ llm:
     model: "gpt-4o"
     context_length: 128000         # モデルのコンテキスト長
     api_key: "${OPENAI_API_KEY}"
+    base_url: "https://api.openai.com/"
   ollama:
     model: "qwen3-30b"
     context_length: 32768          # モデルのコンテキスト長
@@ -710,19 +877,19 @@ COMPRESSION_THRESHOLD=0.7
 
 **SQLiteクエリ**:
 ```bash
-sqlite3 logs/contexts/tasks.db "SELECT * FROM tasks WHERE uuid='...'"
+sqlite3 contexts/tasks.db "SELECT * FROM tasks WHERE uuid='...'"
 ```
 
 **ファイル確認**:
 ```bash
 # メッセージ履歴
-cat logs/contexts/running/{uuid}/messages.jsonl | jq
+cat contexts/running/{uuid}/messages.jsonl | jq
 
 # 最新10件
-tail -10 logs/contexts/running/{uuid}/messages.jsonl | jq
+tail -10 contexts/running/{uuid}/messages.jsonl | jq
 
 # 要約履歴
-cat logs/contexts/running/{uuid}/summaries.jsonl | jq
+cat contexts/running/{uuid}/summaries.jsonl | jq
 ```
 
 ### 10.2 統計情報
@@ -752,7 +919,8 @@ WHERE status = 'completed';
 
 ```
 try:
-    context_manager = TaskContextManager(task_key, config)
+    uuid = task.get_uuid()  # キューから取得
+    context_manager = TaskContextManager(task_key, uuid, config)
     # タスク処理...
     context_manager.complete()
 except Exception as e:
@@ -773,44 +941,17 @@ except Exception as e:
 - INSERT/UPDATE失敗: リトライ（最大3回）
 - テーブル不存在: 自動作成
 
-## 12. 実装の優先順位
-
-### フェーズ1: 基本機能（2週間）
-
-1. TaskContextManagerクラス
-2. MessageStoreクラス
-3. tasks.dbの作成と基本操作
-4. TaskHandlerの統合
-
-### フェーズ2: 要約機能（2週間）
-
-1. SummaryStoreクラス
-2. ContextCompressorクラス
-3. 要約トリガーとLLM呼び出し
-
-### フェーズ3: 完全統合（1週間）
-
-1. ToolStoreクラス
-2. LLMClient統合
-3. 全体的なテスト
-
-### フェーズ4: 運用機能（1週間）
-
-1. デバッグツール
-2. クリーンアップスクリプト
-3. モニタリング機能
-
-合計: 6週間
-
-## 13. まとめ
+## 12. まとめ
 
 ### 主要な設計決定
 
 1. **1タスク=1プロセス**: ロック不要でシンプル
 2. **SQLiteで状態管理**: 全タスクを一元管理
-3. **UUID単位のディレクトリ**: 完全な分離
+3. **UUID単位のディレクトリ**: 完全な分離（UUIDはキューで付与）
 4. **JSONLines**: 人間が読める、追記型で高速
 5. **running/completed分離**: 状態による物理的分離
+6. **ファイルベースリクエスト**: OpenAIはrequest.jsonを使用してメモリ削減
+7. **要約プロンプトのconfig.yaml化**: 柔軟な要約戦略
 
 ### 実装のポイント
 
@@ -818,10 +959,11 @@ except Exception as e:
 - シンプルで理解しやすい実装
 - デバッグとモニタリングが容易
 - 拡張性を考慮（将来の改善に対応可能）
+- メモリ最適化を徹底（特にOpenAIClient）
 
 ---
 
-**ドキュメントバージョン**: 3.0  
+**ドキュメントバージョン**: 4.0  
 **最終更新**: 2024-01-15  
 **ステータス**: 実装準備完了  
-**対象**: 1タスク=1プロセス環境
+**対象**: 1タスク=1プロセス環境、ファイルベースリクエスト対応
