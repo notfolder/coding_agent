@@ -846,7 +846,6 @@ from fastapi import FastAPI, HTTPException, Header, Depends
 from pydantic import BaseModel
 from typing import Optional, Literal
 import os
-import jwt
 
 app = FastAPI(title="User Management API", version="1.0.0")
 
@@ -890,7 +889,7 @@ async def get_llm_config(
             status_code=404,
             detail={
                 "code": "CONFIG_NOT_FOUND",
-                "message": f"LLM configuration not found for user '{platform}:{username}'"
+                "message": f"LLM configuration not found for user \"{platform}:{username}\""
             }
         )
     
