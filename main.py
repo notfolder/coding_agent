@@ -92,12 +92,15 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
     return config
 
 
-def _fetch_config_from_api(config: dict[str, Any], logger: logging.Logger) -> dict[str, Any]:
+def _fetch_config_from_api(
+    config: dict[str, Any], logger: logging.Logger, username: str | None = None
+) -> dict[str, Any]:
     """API経由で設定を取得する.
     
     Args:
         config: ベースとなる設定辞書
         logger: ロガー
+        username: ユーザー名（Noneの場合はconfig.yamlから取得）
     
     Returns:
         API設定でマージされた設定辞書
@@ -105,16 +108,17 @@ def _fetch_config_from_api(config: dict[str, Any], logger: logging.Logger) -> di
     Raises:
         ValueError: 設定エラーまたはAPI呼び出しエラー
     """
-    # タスクソースとユーザー名を取得
+    # タスクソースを取得
     task_source = os.environ.get("TASK_SOURCE", "github")
     
-    # config.yamlからユーザー名を取得
-    if task_source == "github":
-        username = config.get("github", {}).get("owner", "")
-    elif task_source == "gitlab":
-        username = config.get("gitlab", {}).get("owner", "")
-    else:
-        raise ValueError(f"Unknown task source: {task_source}")
+    # ユーザー名が指定されていない場合はconfig.yamlから取得
+    if username is None:
+        if task_source == "github":
+            username = config.get("github", {}).get("owner", "")
+        elif task_source == "gitlab":
+            username = config.get("gitlab", {}).get("owner", "")
+        else:
+            raise ValueError(f"Unknown task source: {task_source}")
     
     # APIエンドポイントとAPIキー
     api_url = os.environ.get("USER_CONFIG_API_URL", "http://user-config-api:8080")
@@ -152,6 +156,54 @@ def _fetch_config_from_api(config: dict[str, Any], logger: logging.Logger) -> di
         raise ValueError(f"API returned error: {data.get('message')}")
     
     return config
+
+
+def fetch_user_config(task: Any, base_config: dict[str, Any]) -> dict[str, Any]:
+    """タスクのユーザーに基づいて設定を取得する.
+    
+    USE_USER_CONFIG_API環境変数がtrueの場合、タスクの作成者のユーザー名を使用して
+    API経由で設定を取得します。そうでない場合はbase_configをそのまま返します。
+    
+    Args:
+        task: タスクオブジェクト（issue/PR/MRの情報を含む）
+        base_config: ベースとなる設定辞書
+    
+    Returns:
+        ユーザー設定でマージされた設定辞書
+    """
+    # API使用フラグをチェック
+    use_api = os.environ.get("USE_USER_CONFIG_API", "false").lower() == "true"
+    if not use_api:
+        return base_config
+    
+    # タスクからユーザー名を取得
+    username = None
+    try:
+        # GitHub Issue/PR の場合
+        if hasattr(task, "issue") and task.issue:
+            username = task.issue.get("user", {}).get("login")
+        # GitHub PR の場合（別フィールド）
+        elif hasattr(task, "pr") and task.pr:
+            username = task.pr.get("user", {}).get("login")
+        # GitLab Issue/MR の場合
+        elif hasattr(task, "mr") and task.mr:
+            username = task.mr.get("author", {}).get("username")
+        
+        if not username:
+            # ユーザー名が取得できない場合はベース設定を使用
+            logger = logging.getLogger(__name__)
+            logger.warning("タスクからユーザー名を取得できませんでした。デフォルト設定を使用します。")
+            return base_config
+        
+        # API経由で設定を取得
+        logger = logging.getLogger(__name__)
+        return _fetch_config_from_api(base_config.copy(), logger, username)
+    
+    except Exception as e:
+        # エラーが発生した場合はベース設定を使用
+        logger = logging.getLogger(__name__)
+        logger.warning(f"ユーザー設定の取得に失敗しました: {e}。デフォルト設定を使用します。")
+        return base_config
 
 
 

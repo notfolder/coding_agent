@@ -94,12 +94,15 @@ class TaskHandler:
             task: 処理対象のタスクオブジェクト
 
         """
+        # タスク固有の設定を取得
+        task_config = self._get_task_config(task)
+        
         # 初期設定
-        self._setup_task_handling(task)
+        self._setup_task_handling(task, task_config)
 
         # 処理ループの初期化
         count = 0
-        max_count = self.config.get("max_llm_process_num", 1000)
+        max_count = task_config.get("max_llm_process_num", 1000)
 
         # 連続ツールエラー管理用の状態
         error_state = {"last_tool": None, "tool_error_count": 0}
@@ -110,12 +113,47 @@ class TaskHandler:
                 break
             count += 1
 
-    def _setup_task_handling(self, task: Task) -> None:
-        """タスク処理の初期設定を行う."""
+    def _get_task_config(self, task: Task) -> dict[str, Any]:
+        """タスクに応じた設定を取得する.
+        
+        USE_USER_CONFIG_API環境変数がtrueの場合、タスクのユーザーに基づいて
+        API経由で設定を取得します。
+        
+        Args:
+            task: タスクオブジェクト
+        
+        Returns:
+            タスク用の設定辞書
+        """
+        import os
+        
+        # API使用フラグをチェック
+        use_api = os.environ.get("USE_USER_CONFIG_API", "false").lower() == "true"
+        if not use_api:
+            return self.config
+        
+        # main.pyのfetch_user_configを使用
+        try:
+            from main import fetch_user_config
+            return fetch_user_config(task, self.config)
+        except Exception as e:
+            self.logger.warning(f"ユーザー設定の取得に失敗しました: {e}。デフォルト設定を使用します。")
+            return self.config
+
+    def _setup_task_handling(self, task: Task, task_config: dict[str, Any] | None = None) -> None:
+        """タスク処理の初期設定を行う.
+        
+        Args:
+            task: タスクオブジェクト
+            task_config: タスク固有の設定（Noneの場合はself.configを使用）
+        """
+        if task_config is None:
+            task_config = self.config
+            
         prompt = task.get_prompt()
         self.logger.info("LLMに送信するプロンプト: %s", prompt)
 
-        self.llm_client.send_system_prompt(self._make_system_prompt())
+        self.llm_client.send_system_prompt(self._make_system_prompt(task_config))
         self.llm_client.send_user_message(prompt)
 
     def _process_llm_interaction(self, task: Task, count: int, error_state: dict) -> bool:
@@ -336,20 +374,26 @@ class TaskHandler:
 
     def get_system_prompt(self) -> str:
         """システムプロンプトを取得する(テスト用の公開メソッド)."""
-        return self._make_system_prompt()
+        return self._make_system_prompt(self.config)
 
-    def _make_system_prompt(self) -> str:
+    def _make_system_prompt(self, task_config: dict[str, Any] | None = None) -> str:
         """システムプロンプトを生成する.
 
         設定に基づいてfunction callingの有無を判定し、
         適切なシステムプロンプトファイルを読み込んで、
-        MCPプロンプトを埋め込んで返します。
+        MCPプロンプトを埋め込んで返します.
+        
+        Args:
+            task_config: タスク固有の設定（Noneの場合はself.configを使用）
 
         Returns:
             生成されたシステムプロンプト文字列
 
         """
-        if self.config.get("llm", {}).get("function_calling", True):
+        if task_config is None:
+            task_config = self.config
+            
+        if task_config.get("llm", {}).get("function_calling", True):
             # function callingが有効な場合
             with Path("system_prompt_function_call.txt").open() as f:
                 prompt = f.read()
