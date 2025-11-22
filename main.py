@@ -73,21 +73,26 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
     with Path(config_file).open() as f:
         config = yaml.safe_load(f)
     
+    # 環境変数による設定上書きを先に実行
+    _override_mcp_config(config)
+    _override_rabbitmq_config(config)
+    _override_bot_config(config)
+    
     # API経由でLLM設定を取得するかチェック
     use_api = os.environ.get("USE_USER_CONFIG_API", "false").lower() == "true"
     
     if use_api:
         try:
             config = _fetch_config_from_api(config, logger)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            logger.exception(f"API接続エラー、設定ファイルを使用{e}")
+        except (ValueError, requests.HTTPError) as e:
+            logger.exception(f"API設定取得エラー、設定ファイルを使用{e}")
         except Exception as e:
-            logger.warning(f"API経由の設定取得に失敗、設定ファイルを使用: {e}")
-            # フォールバック: 従来通り設定ファイルを使用
-
-    # 各種設定の上書き処理
+            logger.exception(f"予期しないエラー、設定ファイルを使用{e}")
+    
+    # LLM設定を環境変数で最終的に上書き
     _override_llm_config(config)
-    _override_mcp_config(config)
-    _override_rabbitmq_config(config)
-    _override_bot_config(config)
 
     return config
 
@@ -133,23 +138,18 @@ def _fetch_config_from_api(
     headers = {"Authorization": f"Bearer {api_key}"}
     response = requests.get(url, headers=headers, timeout=5)
     response.raise_for_status()
-    
+
     data = response.json()
     if data.get("status") == "success":
         # API設定を取得
         api_data = data["data"]
         
-        # LLM設定を上書き（環境変数で上書きされていない場合のみ）
-        if not os.environ.get("LLM_PROVIDER"):
-            config["llm"] = api_data["llm"]
+        # LLM設定を上書き
+        config["llm"] = api_data["llm"]
         
         # システムプロンプトを上書き（環境変数で上書きされていない場合のみ）
-        if "system_prompt" in api_data and not os.environ.get("SYSTEM_PROMPT"):
+        if "system_prompt" in api_data:
             config["system_prompt"] = api_data["system_prompt"]
-        
-        # max_llm_process_numを上書き（環境変数で上書きされていない場合のみ）
-        if "max_llm_process_num" in api_data and not os.environ.get("MAX_LLM_PROCESS_NUM"):
-            config["max_llm_process_num"] = api_data["max_llm_process_num"]
         
         logger.info(f"API経由でLLM設定を取得: {task_source}:{username}")
     else:
@@ -160,14 +160,14 @@ def _fetch_config_from_api(
 
 def fetch_user_config(task: Any, base_config: dict[str, Any]) -> dict[str, Any]:
     """タスクのユーザーに基づいて設定を取得する.
-    
+
     USE_USER_CONFIG_API環境変数がtrueの場合、タスクの作成者のユーザー名を使用して
     API経由で設定を取得します。そうでない場合はbase_configをそのまま返します。
-    
+
     Args:
         task: タスクオブジェクト（issue/PR/MRの情報を含む）
         base_config: ベースとなる設定辞書
-    
+
     Returns:
         ユーザー設定でマージされた設定辞書
     """
@@ -175,34 +175,25 @@ def fetch_user_config(task: Any, base_config: dict[str, Any]) -> dict[str, Any]:
     use_api = os.environ.get("USE_USER_CONFIG_API", "false").lower() == "true"
     if not use_api:
         return base_config
-    
+
     # タスクからユーザー名を取得
-    username = None
     try:
-        # GitHub Issue/PR の場合
-        if hasattr(task, "issue") and task.issue:
-            username = task.issue.get("user", {}).get("login")
-        # GitHub PR の場合（別フィールド）
-        elif hasattr(task, "pr") and task.pr:
-            username = task.pr.get("user", {}).get("login")
-        # GitLab Issue/MR の場合
-        elif hasattr(task, "mr") and task.mr:
-            username = task.mr.get("author", {}).get("username")
-        
+        username = task.get_user()
+
         if not username:
             # ユーザー名が取得できない場合はベース設定を使用
             logger = logging.getLogger(__name__)
             logger.warning("タスクからユーザー名を取得できませんでした。デフォルト設定を使用します。")
             return base_config
-        
+
         # API経由で設定を取得
         logger = logging.getLogger(__name__)
         return _fetch_config_from_api(base_config.copy(), logger, username)
-    
-    except Exception as e:
+
+    except (ValueError, TypeError, AttributeError) as e:
         # エラーが発生した場合はベース設定を使用
         logger = logging.getLogger(__name__)
-        logger.warning(f"ユーザー設定の取得に失敗しました: {e}。デフォルト設定を使用します。")
+        logger.warning("ユーザー設定の取得に失敗しました: %s。デフォルト設定を使用します。", e)
         return base_config
 
 

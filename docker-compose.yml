@@ -5,12 +5,10 @@ services:
     container_name: user-config-api
     # Docker内部ネットワークのみで使用（外部公開不要）
     # テスト用に外部アクセスが必要な場合のみ、以下のコメントを外す
-    # ports:
-    #   - "8080:8080"
+    ports:
+      - "8081:8080"
     environment:
       API_SERVER_KEY: ${API_SERVER_KEY:-your-secret-api-key-here}
-    networks:
-      - coding-agent-network
 
   web:
     image: 'gitlab/gitlab-ce:latest'
@@ -24,8 +22,6 @@ services:
       - './gitlab/logs:/var/log/gitlab'
       - './gitlab/data:/var/opt/gitlab'
     shm_size: '256m'
-    networks:
-      - coding-agent-network
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -38,12 +34,6 @@ services:
       RABBITMQ_DEFAULT_PASS: guest
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
-    networks:
-      - coding-agent-network
-
-networks:
-  coding-agent-network:
-    driver: bridge
 
 volumes:
   rabbitmq_data:

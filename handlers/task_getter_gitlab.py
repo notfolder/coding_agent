@@ -87,6 +87,10 @@ class TaskGitLabIssue(Task):
     def check(self) -> bool:
         return self.config["gitlab"]["processing_label"] in self.issue.get("labels", [])
 
+    def get_user(self) -> str | None:
+        """Issueの作成者のユーザー名を取得する."""
+        return self.issue.get("author", {}).get("username")
+
 
 class TaskGitLabMergeRequest(Task):
     def __init__(
@@ -162,6 +166,10 @@ class TaskGitLabMergeRequest(Task):
 
     def check(self) -> bool:
         return self.config["gitlab"]["processing_label"] in self.labels
+
+    def get_user(self) -> str | None:
+        """Merge Requestの作成者のユーザー名を取得する."""
+        return self.mr.get("author", {}).get("username")
 
 
 class TaskGetterFromGitLab(TaskGetter):

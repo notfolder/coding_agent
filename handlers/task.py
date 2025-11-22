@@ -79,3 +79,12 @@ class Task(ABC):
             タスクの一意なキーオブジェクト
 
         """
+
+    @abstractmethod
+    def get_user(self) -> str | None:
+        """タスクの作成者のユーザー名を取得する.
+
+        Returns:
+            ユーザー名、取得できない場合はNone
+
+        """
