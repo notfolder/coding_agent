@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import requests
 import yaml
 
 from clients.lm_client import get_llm_client
@@ -22,6 +23,7 @@ from filelock_util import FileLock
 from handlers.task_getter import TaskGetter
 from handlers.task_handler import TaskHandler
 from queueing import InMemoryTaskQueue, RabbitMQTaskQueue
+
 
 
 def setup_logger() -> None:
@@ -103,8 +105,6 @@ def _fetch_config_from_api(config: dict[str, Any], logger: logging.Logger) -> di
     Raises:
         ValueError: 設定エラーまたはAPI呼び出しエラー
     """
-    import requests
-    
     # タスクソースとユーザー名を取得
     task_source = os.environ.get("TASK_SOURCE", "github")
     
