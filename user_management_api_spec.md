@@ -1098,16 +1098,29 @@ FastAPIの自動ドキュメント生成機能を利用:
 ## 14. 参考資料
 
 ### 14.1 関連ドキュメント
-- [OpenAPI Specification](https://swagger.io/specification/)
-- [REST API Best Practices](https://restfulapi.net/)
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [PostgreSQL JSONB Documentation](https://www.postgresql.org/docs/current/datatype-json.html)
+以下の標準仕様やベストプラクティスを参考にしています：
+
+- [OpenAPI Specification](https://swagger.io/specification/) - REST API仕様の標準フォーマット
+- [REST API Best Practices](https://restfulapi.net/) - RESTful API設計のベストプラクティス
+- [FastAPI Documentation](https://fastapi.tiangolo.com/) - Python高速Webフレームワーク
+- [PostgreSQL JSONB Documentation](https://www.postgresql.org/docs/current/datatype-json.html) - JSON型データの効率的な保存
 
 ### 14.2 コーディングエージェント関連
-- [README.md](README.md) - プロジェクト概要
+本プロジェクトの関連ドキュメント：
+
+- [README.md](README.md) - プロジェクト概要と使用方法
 - [config.yaml](config.yaml) - 現在の設定ファイル例
 - [main.py](main.py) - メインエントリーポイント
 - [clients/lm_client.py](clients/lm_client.py) - LLMクライアント実装
+
+### 14.3 次のステップ
+この仕様書を基に、以下のドキュメントや実装を進めることができます：
+
+1. **APIサーバー実装** - FastAPIを使用したサーバー開発
+2. **データベース設計** - PostgreSQL/MySQLのマイグレーションスクリプト
+3. **クライアントライブラリ** - Python/TypeScriptクライアントSDK
+4. **ユーザーガイド** - エンドユーザー向けの利用手順書
+5. **運用マニュアル** - デプロイ・監視・トラブルシューティング
 
 ---
 
