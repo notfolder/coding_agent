@@ -104,7 +104,7 @@ GET /health
 ## 3. モックアップサーバー実装
 
 ### 3.1 実装方式
-- **言語**: Python 3.11+
+- **言語**: Python 3.13+
 - **フレームワーク**: Flask（軽量・シンプル）
 - **設定読み込み**: YAMLファイル（既存のconfig.yaml）
 
@@ -147,7 +147,8 @@ def get_user_config(platform, username):
             "message": "設定ファイルの読み込みに失敗しました"
         }), 500
     
-    # platformとusernameは現在無視し、config.yamlの内容をそのまま返す
+    # モックアップ版: platformとusernameは現在無視し、config.yamlの内容をそのまま返す
+    # 将来の実装: configs/{platform}_{username}.yamlから個別設定を読み込む
     response_data = {
         "llm": config.get("llm", {}),
         "max_llm_process_num": config.get("max_llm_process_num", 1000)
@@ -177,7 +178,7 @@ PyYAML==6.0.1
 ### 3.5 Dockerfile
 
 ```dockerfile
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
@@ -200,8 +201,10 @@ CMD ["python", "server.py"]
   user-config-api:
     build: ./user_config_api
     container_name: user-config-api
-    ports:
-      - "8080:8080"
+    # Docker内部ネットワークのみで使用（外部公開不要）
+    # テスト用に外部アクセスが必要な場合のみ、以下のコメントを外す
+    # ports:
+    #   - "8080:8080"
     networks:
       - coding-agent-network
 
