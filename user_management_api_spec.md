@@ -37,13 +37,13 @@ http://user-config-api:8080
 最低限のセキュリティとして、設定ファイルから読み込んだ固定APIキーによる認証を実施する。
 
 **認証方式:**
-- リクエストヘッダーに`X-API-Key`を含める
-- APIキーは`config.yaml`の`api_server.api_key`から読み込む
+- リクエストヘッダーに`Authorization: Bearer`を含める
+- APIキーは`config.yaml`の`api_server.api_key`から読み込む（固定キー、JWTではない）
 - APIキーが一致しない場合は401エラーを返す
 
 **ヘッダー例:**
 ```http
-X-API-Key: your-secret-api-key
+Authorization: Bearer your-secret-api-key
 ```
 
 ### 2.3 エンドポイント
@@ -65,7 +65,7 @@ GET /config/{platform}/{username}
 ```http
 GET /config/github/notfolder HTTP/1.1
 Host: user-config-api:8080
-X-API-Key: your-secret-api-key
+Authorization: Bearer your-secret-api-key
 ```
 
 **レスポンス（成功時）:**
@@ -85,6 +85,7 @@ X-API-Key: your-secret-api-key
       "lmstudio": null,
       "ollama": null
     },
+    "system_prompt": "あなたは優秀なコーディングアシスタントです...",
     "max_llm_process_num": 1000
   }
 }
@@ -125,7 +126,7 @@ GET /health
 
 ### 3.1 実装方式
 - **言語**: Python 3.13+
-- **フレームワーク**: Flask（軽量・シンプル）
+- **フレームワーク**: FastAPI（軽量・高速・自動ドキュメント生成）
 - **設定読み込み**: YAMLファイル（既存のconfig.yaml）
 
 ### 3.2 ディレクトリ構成
@@ -158,6 +159,9 @@ llm:
   lmstudio: null
   ollama: null
 
+# システムプロンプト（追加）
+system_prompt: "あなたは優秀なコーディングアシスタントです..."
+
 max_llm_process_num: 1000
 
 # その他の既存設定...
@@ -168,89 +172,15 @@ max_llm_process_num: 1000
 API_KEY = os.environ.get("API_SERVER_KEY") or CONFIG.get("api_server", {}).get("api_key", "default-api-key")
 ```
 
-### 3.4 server.py の実装例
-
-```python
-"""ユーザー設定APIモックアップサーバー."""
-from flask import Flask, jsonify, request
-import yaml
-import os
-from pathlib import Path
-
-app = Flask(__name__)
-
-# グローバル変数として設定を保持
-CONFIG = None
-API_KEY = None
-
-def load_config():
-    """config.yamlを読み込む."""
-    global CONFIG, API_KEY
-    config_path = Path("config.yaml")
-    if not config_path.exists():
-        return None
-    
-    with config_path.open() as f:
-        CONFIG = yaml.safe_load(f)
-        # APIキーを設定から取得（設定されていない場合はデフォルト値）
-        API_KEY = CONFIG.get("api_server", {}).get("api_key", "default-api-key")
-        return CONFIG
-
-def check_api_key():
-    """APIキーを検証する."""
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or api_key != API_KEY:
-        return False
-    return True
-
-@app.route('/config/<platform>/<username>', methods=['GET'])
-def get_user_config(platform, username):
-    """ユーザーのLLM設定を取得（モックアップ: config.yamlを返す）."""
-    # APIキーの検証
-    if not check_api_key():
-        return jsonify({
-            "status": "error",
-            "message": "認証に失敗しました"
-        }), 401
-    
-    # 設定がまだ読み込まれていない場合のみ読み込む
-    if CONFIG is None:
-        return jsonify({
-            "status": "error",
-            "message": "設定ファイルの読み込みに失敗しました"
-        }), 500
-    
-    # モックアップ版: platformとusernameは現在無視し、config.yamlの内容をそのまま返す
-    # 将来の実装: configs/{platform}_{username}.yamlから個別設定を読み込む
-    response_data = {
-        "llm": CONFIG.get("llm", {}),
-        "max_llm_process_num": CONFIG.get("max_llm_process_num", 1000)
-    }
-    
-    return jsonify({
-        "status": "success",
-        "data": response_data
-    })
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    """ヘルスチェック（認証不要）."""
-    return jsonify({"status": "ok"})
-
-if __name__ == '__main__':
-    # 起動時に設定を読み込む
-    load_config()
-    app.run(host='0.0.0.0', port=8080, debug=False)
-```
-
-### 3.5 requirements.txt
+### 3.4 requirements.txt
 
 ```
-Flask==3.0.0
+fastapi==0.104.1
+uvicorn==0.24.0
 PyYAML==6.0.1
 ```
 
-### 3.6 Dockerfile
+### 3.5 Dockerfile
 
 ```dockerfile
 FROM python:3.13-slim
@@ -265,10 +195,10 @@ COPY config.yaml .
 
 EXPOSE 8080
 
-CMD ["python", "server.py"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
-### 3.7 docker-compose.yml への追加
+### 3.6 docker-compose.yml への追加
 
 既存の`docker-compose.yml`に以下を追加:
 
@@ -340,16 +270,28 @@ def _fetch_config_from_api(config: dict[str, Any]) -> dict[str, Any]:
     
     url = f"{api_url}/config/{task_source}/{username}"
     
-    # APIキーをヘッダーに含めて呼び出し
-    headers = {"X-API-Key": api_key}
+    # Bearer トークンとしてAPIキーをヘッダーに含めて呼び出し
+    headers = {"Authorization": f"Bearer {api_key}"}
     response = requests.get(url, headers=headers, timeout=5)
     response.raise_for_status()
     
     data = response.json()
     if data.get("status") == "success":
-        # LLM設定を上書き
-        config["llm"] = data["data"]["llm"]
-        config["max_llm_process_num"] = data["data"]["max_llm_process_num"]
+        # API設定を取得
+        api_data = data["data"]
+        
+        # LLM設定を上書き（環境変数で上書きされていない場合のみ）
+        if not os.environ.get("LLM_PROVIDER"):
+            config["llm"] = api_data["llm"]
+        
+        # システムプロンプトを上書き（環境変数で上書きされていない場合のみ）
+        if "system_prompt" in api_data and not os.environ.get("SYSTEM_PROMPT"):
+            config["system_prompt"] = api_data["system_prompt"]
+        
+        # max_llm_process_numを上書き（環境変数で上書きされていない場合のみ）
+        if "max_llm_process_num" in api_data and not os.environ.get("MAX_LLM_PROCESS_NUM"):
+            config["max_llm_process_num"] = api_data["max_llm_process_num"]
+        
         logger.info(f"API経由でLLM設定を取得: {task_source}:{username}")
     else:
         raise ValueError(f"API returned error: {data.get('message')}")
@@ -394,11 +336,12 @@ cd user_config_api
 
 # ファイル作成
 cat > server.py << 'EOF'
-# （上記3.3のserver.pyの内容）
+# （FastAPIを使用したAPIサーバー実装）
 EOF
 
 cat > requirements.txt << 'EOF'
-Flask==3.0.0
+fastapi==0.104.1
+uvicorn==0.24.0
 PyYAML==6.0.1
 EOF
 
@@ -436,11 +379,11 @@ docker run -p 8080:8080 user-config-api
 # ヘルスチェック（認証不要）
 curl http://localhost:8080/health
 
-# 設定取得（APIキー必須）
-curl -H "X-API-Key: your-secret-api-key" http://localhost:8080/config/github/notfolder
+# 設定取得（Bearer トークン必須）
+curl -H "Authorization: Bearer your-secret-api-key" http://localhost:8080/config/github/notfolder
 
 # 期待される出力:
-# {"status":"success","data":{"llm":{...},"max_llm_process_num":1000}}
+# {"status":"success","data":{"llm":{...},"system_prompt":"...","max_llm_process_num":1000}}
 
 # 認証エラーの確認
 curl http://localhost:8080/config/github/notfolder
@@ -451,83 +394,22 @@ curl http://localhost:8080/config/github/notfolder
 
 ## 6. テスト
 
-### 6.1 単体テスト
+### 6.1 テスト方針
 
-```python
-import unittest
-import json
-from server import app, load_config, API_KEY
+- ヘルスチェックエンドポイントの動作確認（認証不要）
+- 正しいBearer トークンでの設定取得の確認
+- Bearer トークンなしでのアクセス拒否（401エラー）の確認
+- 無効なBearer トークンでのアクセス拒否の確認
+- レスポンスに`llm`、`system_prompt`、`max_llm_process_num`が含まれることの確認
 
-class TestUserConfigAPI(unittest.TestCase):
-    
-    def setUp(self):
-        self.client = app.test_client()
-        # テスト用に設定を読み込む
-        load_config()
-    
-    def test_health_check(self):
-        """ヘルスチェックのテスト（認証不要）."""
-        response = self.client.get('/health')
-        self.assertEqual(response.status_code, 200)
-        data = json.loads(response.data)
-        self.assertEqual(data['status'], 'ok')
-    
-    def test_get_config_with_valid_api_key(self):
-        """正しいAPIキーでの設定取得のテスト."""
-        # 設定から読み込まれたAPIキーを使用
-        headers = {'X-API-Key': API_KEY}
-        response = self.client.get('/config/github/testuser', headers=headers)
-        self.assertEqual(response.status_code, 200)
-        data = json.loads(response.data)
-        self.assertEqual(data['status'], 'success')
-        self.assertIn('llm', data['data'])
-    
-    def test_get_config_without_api_key(self):
-        """APIキーなしでの設定取得のテスト（エラー）."""
-        response = self.client.get('/config/github/testuser')
-        self.assertEqual(response.status_code, 401)
-        data = json.loads(response.data)
-        self.assertEqual(data['status'], 'error')
-        self.assertEqual(data['message'], '認証に失敗しました')
-    
-    def test_get_config_with_invalid_api_key(self):
-        """無効なAPIキーでの設定取得のテスト（エラー）."""
-        headers = {'X-API-Key': 'invalid-key'}
-        response = self.client.get('/config/github/testuser', headers=headers)
-        self.assertEqual(response.status_code, 401)
-        data = json.loads(response.data)
-        self.assertEqual(data['status'], 'error')
-```
-
-## 7. 将来の拡張
-
-現在はモックアップのため、すべてのユーザーに同じconfig.yamlの内容を返しているが、将来的には以下の拡張が可能:
-
-1. **ユーザーごとの設定ファイル**
-   ```python
-   config_path = Path(f"configs/{platform}_{username}.yaml")
-   ```
-
-2. **データベース連携**
-   - SQLiteやPostgreSQLに設定を保存
-   - ユーザーごとの設定を管理
-
-3. **認証機能の強化**
-   - 動的なAPIトークン管理
-   - JWTトークン
-   - ユーザーごとの認証
-
-4. **設定の更新API**
-   - PUT/POSTエンドポイントで設定を更新
-
-## 8. まとめ
+## 7. まとめ
 
 本仕様では、以下の特徴を持つモックアップAPIサーバーを定義した:
 
-- **シンプル**: Flask + YAML、約70行のコード
-- **最小限のセキュリティ**: Docker内部ネットワーク、固定APIキー認証
+- **シンプル**: FastAPI + YAML、最小限のコード
+- **最小限のセキュリティ**: Docker内部ネットワーク、固定Bearer トークン認証
 - **既存設定の再利用**: config.yamlをそのまま使用
 - **段階的な移行**: 環境変数で切り替え可能
-- **将来の拡張性**: ユーザーごとの設定やDB連携に容易に対応可能
+- **環境変数優先**: API設定より環境変数が優先される
 
 このモックアップにより、マルチユーザー対応のアーキテクチャを検証しながら、最小限の実装で機能を実現できる。
