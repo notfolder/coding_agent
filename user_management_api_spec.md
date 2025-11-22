@@ -174,6 +174,7 @@ API_KEY = os.environ.get("API_SERVER_KEY") or CONFIG.get("api_server", {}).get("
 """ユーザー設定APIモックアップサーバー."""
 from flask import Flask, jsonify, request
 import yaml
+import os
 from pathlib import Path
 
 app = Flask(__name__)
@@ -212,9 +213,8 @@ def get_user_config(platform, username):
             "message": "認証に失敗しました"
         }), 401
     
-    config = load_config()
-    
-    if config is None:
+    # 設定がまだ読み込まれていない場合のみ読み込む
+    if CONFIG is None:
         return jsonify({
             "status": "error",
             "message": "設定ファイルの読み込みに失敗しました"
@@ -223,8 +223,8 @@ def get_user_config(platform, username):
     # モックアップ版: platformとusernameは現在無視し、config.yamlの内容をそのまま返す
     # 将来の実装: configs/{platform}_{username}.yamlから個別設定を読み込む
     response_data = {
-        "llm": config.get("llm", {}),
-        "max_llm_process_num": config.get("max_llm_process_num", 1000)
+        "llm": CONFIG.get("llm", {}),
+        "max_llm_process_num": CONFIG.get("max_llm_process_num", 1000)
     }
     
     return jsonify({
@@ -456,7 +456,7 @@ curl http://localhost:8080/config/github/notfolder
 ```python
 import unittest
 import json
-from server import app, load_config
+from server import app, load_config, API_KEY
 
 class TestUserConfigAPI(unittest.TestCase):
     
@@ -474,7 +474,8 @@ class TestUserConfigAPI(unittest.TestCase):
     
     def test_get_config_with_valid_api_key(self):
         """正しいAPIキーでの設定取得のテスト."""
-        headers = {'X-API-Key': 'your-secret-api-key'}
+        # 設定から読み込まれたAPIキーを使用
+        headers = {'X-API-Key': API_KEY}
         response = self.client.get('/config/github/testuser', headers=headers)
         self.assertEqual(response.status_code, 200)
         data = json.loads(response.data)
