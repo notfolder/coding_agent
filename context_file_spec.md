@@ -4,55 +4,23 @@
 
 ### 1.1 目的
 
-コーディングエージェントがコードや仕様を読み込みながら処理を行う際、すべてのコンテキスト（会話履歴、システムプロンプト、ツール実行結果など）をメモリ上に保持すると、大量のメモリを消費します。本仕様では、**JSONLinesファイルベース**でコンテキストを永続化することで省メモリ化を実現し、マルチユーザー・マルチプロセス環境での安全な動作と、LLMによるインテリジェントなコンテキスト長管理を定義します。
+コーディングエージェントがコードや仕様を読み込みながら処理を行う際、すべてのコンテキスト（会話履歴、システムプロンプト、ツール実行結果など）をメモリ上に保持すると、大量のメモリを消費します。本仕様では、**JSONLinesファイルベース**でコンテキストを永続化することで省メモリ化を実現し、**1タスク=1プロセス**の前提でシンプルな実装を行います。
 
-### 1.2 背景と課題
+### 1.2 設計前提
 
-現在の実装における問題点：
+- **1タスク=1プロセス**: 同一タスクに複数プロセスが同時アクセスしない
+  - ファイルロック不要
+  - シンプルな実装が可能
+- **SQLiteでタスク状態管理**: ルートディレクトリに全タスクの状態をDB化
+- **UUID単位のディレクトリ**: 各タスクは独立したディレクトリで管理
+- **running/completed分離**: 実行状態による物理的分離
 
-- **メモリ使用量の増大**: LLMクライアントが会話履歴全体をメモリ上の`messages`リストで保持
-- **スケーラビリティの欠如**: 長時間実行や複数タスク同時処理時にメモリ不足のリスク
-- **永続性の欠如**: プロセス終了時にコンテキストが失われ、中断・再開ができない
-- **デバッグの困難さ**: メモリ上のデータのため、処理過程の追跡や監査が困難
-- **マルチプロセス非対応**: 複数プロセスが同時にキューからタスクを取得する際の競合管理が未実装
-- **コンテキスト長管理の不足**: 古いメッセージの単純削除により重要情報が失われる
+### 1.3 期待される効果
 
-### 1.3 設計方針
-
-1. **JSONLinesファイルベース**: 
-   - シンプルで人間が読める形式
-   - 外部ツール（jq, grep等）での解析が容易
-   - 追記型で高速な書き込み
-   - 将来的なSQLite移行を考慮した設計
-
-2. **UUIDベースのディレクトリ管理**:
-   - 各タスクに一意のUUIDを割り当て
-   - UUID単位でディレクトリを作成し、関連ファイルを集約
-   - タスク間の完全な分離を実現
-
-3. **実行状態による物理的分離**:
-   - `running/`: 実行中タスクのコンテキスト
-   - `completed/`: 完了済みタスクのコンテキスト
-   - 状態遷移時にディレクトリを移動
-
-4. **マルチプロセス対応**:
-   - ファイルロックによる排他制御
-   - UUIDによるタスク分離で競合を最小化
-   - 状態ファイルによる処理状況の可視化
-
-5. **LLMによるコンテキスト圧縮**:
-   - モデルのコンテキスト長を設定から取得
-   - 閾値（例: 70%）到達時にLLMに要約を依頼
-   - 要約結果を新たなコンテキストとして利用
-
-### 1.4 期待される効果
-
-- **メモリ効率**: 60-80%のメモリ削減（要約使用時は90%以上）
-- **永続性**: タスクの中断・再開が可能
-- **可視性**: 人間が直接ファイルを確認してデバッグ可能
-- **スケーラビリティ**: マルチプロセス対応で並行処理が可能
-- **保守性**: シンプルな実装で運用負荷が低い
-- **拡張性**: 将来的なSQLite移行が容易
+- **メモリ削減**: 60-80%のメモリ使用量削減（要約使用時90%以上）
+- **永続性**: プロセス終了後もコンテキストが保持される
+- **デバッグ性**: 人間が直接ファイルを確認可能
+- **シンプルさ**: ロック不要で実装が容易
 
 ## 2. ディレクトリ構造
 
@@ -60,66 +28,73 @@
 
 ```
 logs/contexts/
+├── tasks.db                    # 全タスクの状態管理DB（SQLite）
 ├── running/                    # 実行中タスク
-│   ├── {uuid-1}/              # タスクUUID単位のディレクトリ
-│   │   ├── metadata.json      # タスクメタデータ
-│   │   ├── state.json         # 実行状態
-│   │   ├── messages.jsonl     # メッセージ履歴
-│   │   ├── summaries.jsonl    # コンテキスト要約履歴
-│   │   ├── tools.jsonl        # ツール実行履歴
-│   │   └── .lock              # ファイルロック
-│   └── {uuid-2}/
-│       └── ...
+│   └── {uuid}/                 # タスクUUID単位のディレクトリ
+│       ├── metadata.json       # タスクメタデータ（静的）
+│       ├── messages.jsonl      # メッセージ履歴
+│       ├── summaries.jsonl     # コンテキスト要約履歴
+│       └── tools.jsonl         # ツール実行履歴
 └── completed/                  # 完了済みタスク
-    ├── {uuid-3}/
-    │   └── (running/と同じ構造)
-    └── {uuid-4}/
-        └── ...
+    └── {uuid}/                 # 完了したタスク
+        └── (running/と同じ構造)
 ```
 
-### 2.2 ディレクトリの役割
+### 2.2 tasks.db（SQLite）
 
-#### 2.2.1 `running/` ディレクトリ
+#### 目的
 
-- **目的**: 現在実行中のタスクのコンテキストを格納
-- **アクセス**: プロセスが頻繁に読み書き
-- **ライフサイクル**: タスク開始時に作成、完了時に`completed/`へ移動
-- **ファイルロック**: `.lock`ファイルで排他制御
+- 全タスクの状態を一元管理
+- タスク検索・集計を高速化
+- 実行中タスクの監視
 
-#### 2.2.2 `completed/` ディレクトリ
+#### テーブル定義
 
-- **目的**: 完了したタスクのコンテキストをアーカイブ
-- **アクセス**: 主に参照のみ（デバッグ、監査、統計）
-- **保持期間**: 設定可能（デフォルト30日）
-- **圧縮**: 古いものは自動的にgzip圧縮可能
+**tasksテーブル**:
+```sql
+CREATE TABLE tasks (
+    uuid TEXT PRIMARY KEY,              -- タスクUUID
+    task_source TEXT NOT NULL,          -- "github" or "gitlab"
+    owner TEXT NOT NULL,                -- リポジトリオーナー
+    repo TEXT NOT NULL,                 -- リポジトリ名
+    task_type TEXT NOT NULL,            -- "issue" or "pull_request"
+    task_id TEXT NOT NULL,              -- タスクID（issue番号等）
+    status TEXT NOT NULL,               -- "running" or "completed" or "failed"
+    created_at TEXT NOT NULL,           -- 作成日時（ISO 8601）
+    started_at TEXT,                    -- 開始日時
+    completed_at TEXT,                  -- 完了日時
+    process_id INTEGER,                 -- プロセスID
+    hostname TEXT,                      -- 実行ホスト名
+    llm_provider TEXT,                  -- LLMプロバイダー
+    model TEXT,                         -- モデル名
+    context_length INTEGER,             -- コンテキスト長
+    llm_call_count INTEGER DEFAULT 0,   -- LLM呼び出し回数
+    tool_call_count INTEGER DEFAULT 0,  -- ツール呼び出し回数
+    total_tokens INTEGER DEFAULT 0,     -- 総トークン数
+    compression_count INTEGER DEFAULT 0, -- 圧縮回数
+    error_message TEXT,                 -- エラーメッセージ（失敗時）
+    user TEXT                           -- ユーザー名
+);
 
-### 2.3 UUID生成とディレクトリ作成
+CREATE INDEX idx_tasks_status ON tasks(status);
+CREATE INDEX idx_tasks_created_at ON tasks(created_at);
+CREATE INDEX idx_tasks_user ON tasks(user);
+```
 
-#### UUID生成ルール
+#### 更新タイミング
 
-- **形式**: UUID v4（ランダム生成）
-- **生成タイミング**: タスク取得直後、コンテキスト初期化前
-- **用途**: ディレクトリ名、ログ出力、トレーシング
-
-#### ディレクトリ作成手順
-
-1. UUID生成
-2. `running/{uuid}/`ディレクトリ作成
-3. `metadata.json`作成（タスク情報記録）
-4. `state.json`作成（初期状態: `initializing`）
-5. `.lock`ファイル作成（プロセスID記録）
+- タスク開始時: INSERT（status='running'）
+- LLM呼び出し後: UPDATE（llm_call_count, total_tokens等）
+- ツール実行後: UPDATE（tool_call_count）
+- 圧縮実行後: UPDATE（compression_count）
+- タスク完了時: UPDATE（status='completed', completed_at）
+- エラー発生時: UPDATE（status='failed', error_message）
 
 ## 3. ファイル仕様
 
 ### 3.1 metadata.json
 
-タスクの基本情報を記録する静的ファイル。
-
-#### 目的
-
-- タスクの識別情報と設定を保持
-- デバッグ時の情報参照
-- 統計集計時のフィルタリング
+タスクの基本情報を記録する静的ファイル。タスク開始時に一度だけ作成。
 
 #### 内容
 
@@ -140,319 +115,489 @@ logs/contexts/
     "llm_provider": "openai",
     "model": "gpt-4o",
     "context_length": 128000,
-    "compression_threshold": 0.7
+    "compression_threshold": 0.7,
+    "max_memory_messages": 20
   },
   "user": "notfolder"
 }
 ```
 
-#### フィールド説明
+### 3.2 messages.jsonl
 
-| フィールド | 型 | 必須 | 説明 |
-|-----------|---|------|------|
-| uuid | string | ✓ | タスクの一意識別子 |
-| task_key | object | ✓ | タスクの識別情報（ソース、リポジトリ等） |
-| created_at | string | ✓ | タスク作成日時（ISO 8601） |
-| process_id | integer | ✓ | 処理プロセスのPID |
-| hostname | string | ✓ | 実行ホスト名 |
-| config | object | ✓ | 実行時の設定（LLM、コンテキスト長等） |
-| user | string | - | タスク作成ユーザー |
-
-### 3.2 state.json
-
-タスクの実行状態を記録する動的ファイル。プロセスが定期的に更新。
-
-#### 目的
-
-- 実行状況のリアルタイム把握
-- 異常終了時の状態復元
-- プロセス監視とヘルスチェック
-
-#### 内容
-
-```json
-{
-  "status": "processing",
-  "started_at": "2024-01-15T10:30:01.000000Z",
-  "updated_at": "2024-01-15T10:35:22.456789Z",
-  "completed_at": null,
-  "llm_call_count": 45,
-  "tool_call_count": 12,
-  "total_tokens_used": 45678,
-  "current_context_tokens": 32000,
-  "compression_count": 2,
-  "last_activity": "tool_execution",
-  "error": null
-}
-```
-
-#### ステータス値
-
-- `initializing`: 初期化中
-- `processing`: 処理中（LLMとの対話）
-- `compressing`: コンテキスト圧縮中
-- `completing`: 完了処理中
-- `completed`: 正常完了
-- `failed`: エラー終了
-- `timeout`: タイムアウト
-
-#### 更新タイミング
-
-- LLM呼び出し前後
-- ツール実行前後
-- コンテキスト圧縮時
-- 最低でも30秒ごと（ハートビート）
-
-### 3.3 messages.jsonl
-
-LLMとの会話履歴をJSONLines形式で記録。
-
-#### 目的
-
-- 全ての会話履歴を時系列で保存
-- LLMへの入力コンテキスト生成の元データ
-- デバッグ時の詳細な追跡
-
-#### 形式
-
-1行1メッセージのJSON形式。ファイル末尾に追記。
-
-```jsonl
-{"seq":1,"role":"system","content":"You are an AI coding assistant...","timestamp":"2024-01-15T10:30:01.123Z","token_count":250}
-{"seq":2,"role":"user","content":"Fix the bug in...","timestamp":"2024-01-15T10:30:02.456Z","token_count":120}
-{"seq":3,"role":"assistant","content":"I'll help you fix...","timestamp":"2024-01-15T10:30:15.789Z","token_count":450}
-{"seq":4,"role":"tool","content":"{\"output\":\"...\"}","timestamp":"2024-01-15T10:30:20.123Z","token_count":1200,"tool_name":"github_get_file_contents"}
-```
-
-#### フィールド説明
-
-| フィールド | 型 | 必須 | 説明 |
-|-----------|---|------|------|
-| seq | integer | ✓ | シーケンス番号（1から開始） |
-| role | string | ✓ | メッセージの役割（system/user/assistant/tool） |
-| content | string | ✓ | メッセージ内容 |
-| timestamp | string | ✓ | 作成日時（ISO 8601） |
-| token_count | integer | ✓ | 推定トークン数（4文字=1トークン） |
-| tool_name | string | - | ツール実行時のツール名 |
-| function_call | object | - | 関数呼び出し情報 |
-| is_summarized | boolean | - | 要約済みフラグ（デフォルト: false） |
-
-#### 機密情報のマスキング
-
-書き込み前に以下のパターンをマスキング：
-
-- GitHubトークン: `ghp_*`, `github_pat_*` → `[GITHUB_TOKEN]`
-- OpenAI APIキー: `sk-*` → `[OPENAI_KEY]`
-- GitLabトークン: `glpat-*` → `[GITLAB_TOKEN]`
-- メールアドレス: `*@*.*` → `[EMAIL]`
-
-### 3.4 summaries.jsonl
-
-LLMによるコンテキスト要約の履歴。
-
-#### 目的
-
-- コンテキスト圧縮の記録
-- 要約内容の再利用
-- 圧縮効果の測定
+メッセージ履歴をJSONLines形式で記録。1行1メッセージ。
 
 #### 形式
 
 ```jsonl
-{"summary_id":1,"start_seq":10,"end_seq":50,"summary":"Fixed authentication bug by updating...","created_at":"2024-01-15T10:32:00.000Z","original_tokens":12000,"summary_tokens":800,"compression_ratio":0.067}
-{"summary_id":2,"start_seq":51,"end_seq":90,"summary":"Implemented new feature for...","created_at":"2024-01-15T10:34:30.000Z","original_tokens":15000,"summary_tokens":950,"compression_ratio":0.063}
+{"seq":1,"role":"system","content":"You are an AI...","timestamp":"2024-01-15T10:30:01Z","tokens":250}
+{"seq":2,"role":"user","content":"Fix the bug...","timestamp":"2024-01-15T10:30:02Z","tokens":120}
+{"seq":3,"role":"assistant","content":"I'll help...","timestamp":"2024-01-15T10:30:15Z","tokens":450}
+{"seq":4,"role":"tool","tool_name":"github_get_file","content":"{...}","timestamp":"2024-01-15T10:30:20Z","tokens":1200}
 ```
 
-#### フィールド説明
+#### フィールド
 
-| フィールド | 型 | 必須 | 説明 |
-|-----------|---|------|------|
-| summary_id | integer | ✓ | 要約のID（1から開始） |
-| start_seq | integer | ✓ | 要約対象の開始シーケンス番号 |
-| end_seq | integer | ✓ | 要約対象の終了シーケンス番号 |
-| summary | string | ✓ | LLMが生成した要約テキスト |
-| created_at | string | ✓ | 要約作成日時 |
-| original_tokens | integer | ✓ | 元のトークン数 |
-| summary_tokens | integer | ✓ | 要約後のトークン数 |
-| compression_ratio | float | ✓ | 圧縮率（summary_tokens/original_tokens） |
+- `seq`: シーケンス番号（1から開始）
+- `role`: メッセージの役割（system/user/assistant/tool）
+- `content`: メッセージ内容
+- `timestamp`: 作成日時（ISO 8601）
+- `tokens`: 推定トークン数（4文字=1トークン）
+- `tool_name`: ツール名（role="tool"の場合）
+- `summarized`: 要約済みフラグ（要約対象となった場合true）
 
-### 3.5 tools.jsonl
+### 3.3 summaries.jsonl
 
-ツール（MCP）実行の履歴。
-
-#### 目的
-
-- ツール実行の詳細記録
-- エラー発生時の調査
-- パフォーマンス分析
+コンテキスト要約の履歴。
 
 #### 形式
 
 ```jsonl
-{"seq":1,"tool_name":"github_get_file_contents","arguments":{"owner":"notfolder","repo":"coding_agent","path":"main.py"},"result":"...file content...","status":"success","duration_ms":234,"timestamp":"2024-01-15T10:30:20.123Z"}
-{"seq":2,"tool_name":"github_create_branch","arguments":{"owner":"notfolder","repo":"coding_agent","branch":"fix-bug"},"result":null,"status":"error","error":"Branch already exists","duration_ms":123,"timestamp":"2024-01-15T10:31:15.456Z"}
+{"id":1,"start_seq":10,"end_seq":50,"summary":"Fixed auth bug...","original_tokens":12000,"summary_tokens":800,"ratio":0.067,"timestamp":"2024-01-15T10:32:00Z"}
 ```
 
-#### フィールド説明
+#### フィールド
 
-| フィールド | 型 | 必須 | 説明 |
-|-----------|---|------|------|
-| seq | integer | ✓ | ツール実行のシーケンス番号 |
-| tool_name | string | ✓ | 実行したツール名 |
-| arguments | object | ✓ | ツールへの引数 |
-| result | string/object | - | 実行結果（成功時） |
-| status | string | ✓ | 実行結果（success/error） |
-| error | string | - | エラーメッセージ（失敗時） |
-| duration_ms | integer | ✓ | 実行時間（ミリ秒） |
-| timestamp | string | ✓ | 実行日時 |
+- `id`: 要約ID（1から開始）
+- `start_seq`: 要約対象開始シーケンス
+- `end_seq`: 要約対象終了シーケンス
+- `summary`: 要約テキスト
+- `original_tokens`: 元のトークン数
+- `summary_tokens`: 要約後のトークン数
+- `ratio`: 圧縮率（summary_tokens/original_tokens）
+- `timestamp`: 要約作成日時
 
-### 3.6 .lock ファイル
+### 3.4 tools.jsonl
 
-プロセス間の排他制御用ロックファイル。
+ツール実行履歴。
 
-#### 目的
+#### 形式
 
-- 同一タスクへの複数プロセスアクセス防止
-- プロセスの生存確認（ヘルスチェック）
-- 異常終了時のクリーンアップ判断
-
-#### 内容
-
-```json
-{
-  "process_id": 12345,
-  "hostname": "worker-node-1",
-  "acquired_at": "2024-01-15T10:30:00.000Z",
-  "heartbeat_at": "2024-01-15T10:35:30.000Z"
-}
+```jsonl
+{"seq":1,"tool":"github_get_file_contents","args":{"path":"main.py"},"result":"...","status":"success","duration_ms":234,"timestamp":"2024-01-15T10:30:20Z"}
 ```
 
-#### ロック取得手順
+#### フィールド
 
-1. `.lock`ファイルの存在確認
-2. 存在する場合:
-   - 内容を読み取り
-   - `heartbeat_at`が60秒以上古い場合は失効と判断
-   - プロセスが実際に存在するか確認（kill -0）
-   - 失効していれば上書き、有効なら取得失敗
-3. 存在しない場合:
-   - 新規作成（アトミック操作）
+- `seq`: 実行シーケンス番号
+- `tool`: ツール名
+- `args`: 引数
+- `result`: 実行結果（成功時）
+- `status`: "success" or "error"
+- `error`: エラーメッセージ（失敗時）
+- `duration_ms`: 実行時間（ミリ秒）
+- `timestamp`: 実行日時
 
-#### ロック更新
+## 4. クラス設計
 
-- 30秒ごとに`heartbeat_at`を更新
-- `state.json`更新と同時に実施
+### 4.1 TaskContextManagerクラス
 
-#### ロック解放
-
-- タスク完了時に削除
-- completed/へ移動時に削除
-
-## 4. コンテキスト管理
-
-### 4.1 メッセージストアの役割
-
-メッセージストアは、JSONLinesファイルとメモリキャッシュを組み合わせてコンテキストを管理します。
+タスクコンテキスト全体を管理する新規クラス。
 
 #### 責務
 
-- メッセージの追加（メモリ + ファイル）
-- LLM用メッセージリストの生成（コンテキスト長考慮）
-- 古いメッセージの要約トリガー
-- 統計情報の提供
+- タスク開始時のUUID生成とディレクトリ作成
+- tasks.dbへのタスク登録・更新
+- MessageStore、SummaryStore、ToolStoreの統合管理
+- タスク完了時のディレクトリ移動
 
-#### メモリキャッシュ
+#### 主要メソッド
 
-**目的**: LLM呼び出し時の高速アクセス
+**`__init__(task_key, config)`**
+- タスクキーと設定を受け取り初期化
+- UUIDを生成
+- `running/{uuid}/`ディレクトリを作成
+- `metadata.json`を作成
+- tasks.dbにタスクを登録（status='running'）
+- MessageStore等のサブストアを初期化
 
-**内容**:
-- システムプロンプト（常に保持）
-- 最新の要約（あれば1件）
-- 最新Nメッセージ（設定可能、デフォルト20件）
+**`update_status(status, error_message=None)`**
+- tasks.dbのstatusを更新
+- error_messageがあればそれも記録
 
-**更新タイミング**:
-- メッセージ追加時
-- 要約作成時
-- プロセス起動時（ファイルから復元）
+**`update_statistics(llm_calls=0, tool_calls=0, tokens=0, compressions=0)`**
+- tasks.dbの統計カウンターを更新
+- llm_call_count, tool_call_count等をインクリメント
 
-#### ファイルストレージ
+**`complete()`**
+- tasks.dbのstatusを'completed'に更新
+- completed_atを記録
+- ディレクトリを`running/{uuid}/`から`completed/{uuid}/`へ移動
 
-**目的**: 全履歴の永続化
+**`fail(error_message)`**
+- tasks.dbのstatusを'failed'に更新
+- error_messageを記録
+- ディレクトリを`completed/`へ移動
 
-**書き込み**: 
-- メッセージ追加ごとに`messages.jsonl`に追記
-- バッファリングせず即時書き込み（データ損失防止）
+**`get_message_store()`**
+- MessageStoreインスタンスを返す
 
-**読み込み**:
-- プロセス起動時に最新N件をキャッシュに読み込み
-- LLM用メッセージ生成時に必要に応じて追加読み込み
+**`get_summary_store()`**
+- SummaryStoreインスタンスを返す
 
-### 4.2 LLM用メッセージリストの生成
+**`get_tool_store()`**
+- ToolStoreインスタンスを返す
 
-#### 生成ロジック
+### 4.2 MessageStoreクラス
 
-コンテキスト長制限内で最大限の情報を含めるため、以下の優先順位で構築：
+メッセージ履歴を管理する新規クラス。
 
-1. **システムプロンプト**（必須）
-   - 常に先頭に配置
-   - トークン数: 約200-500
+#### 責務
 
-2. **最新の要約**（あれば）
-   - 過去の会話の要約を1件
-   - トークン数: 約500-1000
+- messages.jsonlへの読み書き
+- メモリキャッシュ管理（最新N件）
+- LLM用メッセージリストの生成
+- トークン数の計算と管理
 
-3. **最新メッセージ群**
-   - 要約以降のメッセージを新しい順に追加
-   - コンテキスト長の閾値（例: 70%）を超えないまで
+#### 主要メソッド
 
-#### トークン数計算
+**`__init__(context_dir, config)`**
+- コンテキストディレクトリと設定を受け取り初期化
+- messages.jsonlのパスを設定
+- メモリキャッシュを初期化（空のリスト）
+- 設定から`max_memory_messages`と`context_length`を取得
 
-**推定方式**: 4文字 = 1トークン（簡易計算）
+**`add_message(role, content, tool_name=None)`**
+- 新しいメッセージを追加
+- シーケンス番号を採番（現在の最大seq + 1）
+- トークン数を計算（len(content) // 4）
+- messages.jsonlに1行追記
+- メモリキャッシュに追加
+- キャッシュサイズが`max_memory_messages`を超えたら古いものを削除
+- 戻り値: メッセージのシーケンス番号
 
-**実装**:
-- 各メッセージ追加時にトークン数を計算して記録
-- LLM用リスト生成時に累積トークン数を計算
+**`get_messages_for_llm(summary_store)`**
+- LLM呼び出し用のメッセージリストを生成
+- 処理手順:
+  1. システムプロンプト取得（seq=1のメッセージ、必ず含める）
+  2. 最新の要約を取得（summary_storeから、あれば1件）
+  3. 要約以降の未要約メッセージを取得
+  4. トークン数を計算しながら`context_length * 0.7`以内に収める
+  5. [システムプロンプト, 要約（あれば）, 未要約メッセージ群]の順でリスト化
+- 戻り値: メッセージのリスト（dict形式）
 
-#### コンテキスト長の取得
+**`load_recent_messages(n)`**
+- messages.jsonlから最新n件を読み込み
+- メモリキャッシュに格納
+- 起動時の初期化で使用
 
-設定ファイル（config.yaml）からモデルごとのコンテキスト長を取得：
+**`mark_as_summarized(start_seq, end_seq)`**
+- 指定範囲のメッセージに要約済みフラグをマーク
+- 注: JSONLinesは追記型なので実際にはファイル更新しない
+- メモリキャッシュ上でのみフラグ管理
 
-```yaml
-llm:
-  openai:
-    model: "gpt-4o"
-    context_length: 128000
-  ollama:
-    model: "qwen3-30b"
-    context_length: 32768
+**`get_unsummarized_token_count()`**
+- 未要約メッセージの総トークン数を計算
+- messages.jsonl全体を読み、`summarized`フラグがないメッセージを集計
+- 戻り値: トークン数の合計
+
+**`count_messages()`**
+- 総メッセージ数を返す
+- messages.jsonlの行数をカウント
+
+### 4.3 SummaryStoreクラス
+
+コンテキスト要約を管理する新規クラス。
+
+#### 責務
+
+- summaries.jsonlへの読み書き
+- 最新の要約の取得
+- 要約の作成と保存
+
+#### 主要メソッド
+
+**`__init__(context_dir)`**
+- コンテキストディレクトリを受け取り初期化
+- summaries.jsonlのパスを設定
+
+**`add_summary(start_seq, end_seq, summary_text, original_tokens, summary_tokens)`**
+- 新しい要約を追加
+- IDを採番（現在の最大id + 1）
+- 圧縮率を計算（summary_tokens / original_tokens）
+- summaries.jsonlに1行追記
+- 戻り値: 要約ID
+
+**`get_latest_summary()`**
+- 最新の要約を取得
+- summaries.jsonlの最終行を読み取り
+- 戻り値: 要約のdict、なければNone
+
+**`count_summaries()`**
+- 総要約数を返す
+- summaries.jsonlの行数をカウント
+
+### 4.4 ToolStoreクラス
+
+ツール実行履歴を管理する新規クラス。
+
+#### 責務
+
+- tools.jsonlへの読み書き
+- ツール実行記録の保存
+
+#### 主要メソッド
+
+**`__init__(context_dir)`**
+- コンテキストディレクトリを受け取り初期化
+- tools.jsonlのパスを設定
+
+**`add_tool_call(tool_name, args, result, status, duration_ms, error=None)`**
+- 新しいツール実行を記録
+- シーケンス番号を採番
+- tools.jsonlに1行追記
+- 戻り値: シーケンス番号
+
+**`count_tool_calls()`**
+- 総ツール実行数を返す
+- tools.jsonlの行数をカウント
+
+### 4.5 ContextCompressorクラス
+
+コンテキスト圧縮を管理する新規クラス。
+
+#### 責務
+
+- コンテキスト長の監視
+- 圧縮トリガーの判定
+- LLMによる要約の実行
+
+#### 主要メソッド
+
+**`__init__(message_store, summary_store, llm_client, config)`**
+- 各ストアとLLMクライアントを受け取り初期化
+- 設定から`context_length`と`compression_threshold`を取得
+- `min_messages_to_summarize`を設定（デフォルト10）
+
+**`should_compress()`**
+- 圧縮が必要か判定
+- 判定ロジック:
+  1. 未要約メッセージのトークン数を取得
+  2. `context_length * compression_threshold`と比較
+  3. 超えている場合はTrue
+  4. 未要約メッセージ数が`min_messages_to_summarize`未満ならFalse
+- 戻り値: bool
+
+**`compress()`**
+- コンテキストを圧縮（要約）
+- 処理手順:
+  1. 最新の要約を取得（summary_storeから）
+  2. 要約以降の未要約メッセージを取得（最新5件は除外）
+  3. 要約プロンプトを作成
+  4. LLMに要約を依頼
+  5. 要約結果を取得
+  6. summary_storeに保存
+  7. message_storeで対象メッセージを要約済みにマーク
+- 戻り値: 要約ID
+
+**`create_summary_prompt(messages)`**
+- メッセージリストから要約プロンプトを生成
+- 形式: "以下の会話履歴を要約してください。\n[USER]: ...\n[ASSISTANT]: ..."
+- 戻り値: プロンプト文字列
+
+## 5. 既存クラスの変更
+
+### 5.1 TaskHandlerクラス
+
+#### 変更点
+
+**`__init__`メソッド**
+- 変更なし（既存通り）
+
+**`handle(task)`メソッド**
+- 処理の最初に`TaskContextManager`を初期化
+- 処理の最後に`context_manager.complete()`または`context_manager.fail()`を呼び出す
+
+#### 追加処理
+
+**タスク開始時**:
+```
+1. task_keyを取得（task.get_task_key()）
+2. TaskContextManager初期化
+   context_manager = TaskContextManager(task_key, config)
+3. UUIDをログに記録
+   logger.info(f"Task started: {context_manager.uuid}")
 ```
 
-### 4.3 コンテキスト圧縮（要約）
+**タスク処理中**:
+```
+- LLM呼び出し前: 変更なし
+- LLM呼び出し後: 
+  1. message_store.add_message()でメッセージ追加
+  2. context_manager.update_statistics()で統計更新
+  3. compressor.should_compress()で圧縮判定
+  4. 必要なら compressor.compress()実行
+  
+- ツール実行後:
+  1. tool_store.add_tool_call()でツール実行記録
+  2. context_manager.update_statistics()で統計更新
+```
 
-#### トリガー条件
+**タスク完了時**:
+```
+- 成功時: context_manager.complete()
+- 失敗時: context_manager.fail(error_message)
+```
 
-以下のいずれかを満たす場合に圧縮を実行：
+### 5.2 LLMClientクラス（OpenAIClient等）
 
-- 未要約メッセージの累積トークン数が閾値を超過
-  - 閾値 = `context_length * compression_threshold`
-  - デフォルト: `context_length * 0.7`
-- 未要約メッセージ数が一定数以上（最低10件）
+#### 変更点
 
-#### 要約対象の選択
+**`__init__`メソッド**
+- `message_store`を引数として受け取る
+- 既存の`self.messages`リストを削除
+- `self.message_store = message_store`を設定
 
-- 最新の要約（あれば）以降のメッセージ
-- ただし、直近5件は残す（要約対象外）
-- システムプロンプトは除外
+**`send_system_prompt(prompt)`メソッド**
+- `self.messages.append(...)`を削除
+- `self.message_store.add_message("system", prompt)`に変更
 
-#### 要約プロンプト
+**`send_user_message(message)`メソッド**
+- `self.messages.append(...)`を削除
+- `self.message_store.add_message("user", message)`に変更
+- 既存のトークン管理ロジック削除（message_storeが管理）
 
-LLMに以下のようなプロンプトで要約を依頼：
+**`send_function_result(name, result)`メソッド**
+- `self.messages.append(...)`を削除
+- `self.message_store.add_message("tool", json.dumps(result), tool_name=name)`に変更
+
+**`get_response()`メソッド**
+- `messages = self.messages`を削除
+- `messages = self.message_store.get_messages_for_llm(summary_store)`に変更
+  - summary_storeは引数として渡す必要がある
+- LLM呼び出し後、応答をmessage_storeに追加:
+  `self.message_store.add_message("assistant", reply_content)`
+
+#### 追加引数
+
+- `summary_store`を`get_response()`の引数に追加
+  - または、`__init__`で受け取ってインスタンス変数として保持
+
+### 5.3 TaskGetterクラス（TaskGetterFromGitHub等）
+
+#### 変更点
+
+なし（タスク取得のロジックは変更不要）
+
+## 6. 処理フロー
+
+### 6.1 タスク開始フロー
 
 ```
-あなたは会話履歴を要約する補助AIです。
+1. キューからタスク取得
+   task = task_queue.get()
+
+2. TaskHandler.handle(task)呼び出し
+   
+3. TaskHandler内:
+   a. task_key = task.get_task_key()
+   b. context_manager = TaskContextManager(task_key, config)
+      - UUID生成
+      - running/{uuid}/ディレクトリ作成
+      - metadata.json作成
+      - tasks.dbにINSERT（status='running'）
+      - MessageStore, SummaryStore, ToolStore初期化
+   
+   c. message_store = context_manager.get_message_store()
+      summary_store = context_manager.get_summary_store()
+      tool_store = context_manager.get_tool_store()
+   
+   d. llm_client初期化（message_storeを渡す）
+   
+   e. compressor = ContextCompressor(message_store, summary_store, llm_client, config)
+```
+
+### 6.2 LLM呼び出しフロー
+
+```
+1. llm_client.send_system_prompt(system_prompt)
+   → message_store.add_message("system", system_prompt)
+   
+2. llm_client.send_user_message(user_prompt)
+   → message_store.add_message("user", user_prompt)
+   
+3. llm_client.get_response(summary_store)
+   a. messages = message_store.get_messages_for_llm(summary_store)
+      - システムプロンプト取得
+      - 最新要約取得（あれば）
+      - 未要約メッセージ取得
+      - トークン数調整
+   
+   b. LLM API呼び出し
+      response = openai.chat.completions.create(messages=messages, ...)
+   
+   c. 応答をmessage_storeに追加
+      message_store.add_message("assistant", response_content)
+   
+   d. 統計更新
+      context_manager.update_statistics(llm_calls=1, tokens=used_tokens)
+   
+4. 圧縮判定
+   if compressor.should_compress():
+       compressor.compress()
+       context_manager.update_statistics(compressions=1)
+```
+
+### 6.3 ツール実行フロー
+
+```
+1. ツール実行
+   start_time = time.time()
+   result = mcp_client.call_tool(tool_name, args)
+   duration_ms = (time.time() - start_time) * 1000
+   
+2. 実行記録
+   tool_store.add_tool_call(
+       tool_name=tool_name,
+       args=args,
+       result=result,
+       status="success",
+       duration_ms=duration_ms
+   )
+   
+3. 統計更新
+   context_manager.update_statistics(tool_calls=1)
+   
+4. 結果をLLMに送信
+   llm_client.send_function_result(tool_name, result)
+   → message_store.add_message("tool", json.dumps(result), tool_name=tool_name)
+```
+
+### 6.4 タスク完了フロー
+
+```
+1. 正常完了時:
+   a. context_manager.complete()
+      - tasks.db UPDATE（status='completed', completed_at=now）
+      - ディレクトリ移動: running/{uuid}/ → completed/{uuid}/
+   
+2. エラー時:
+   a. context_manager.fail(error_message)
+      - tasks.db UPDATE（status='failed', error_message=msg）
+      - ディレクトリ移動: running/{uuid}/ → completed/{uuid}/
+```
+
+## 7. コンテキスト圧縮の詳細
+
+### 7.1 圧縮トリガー条件
+
+以下の全てを満たす場合に圧縮を実行:
+
+1. 未要約メッセージのトークン数 > `context_length * compression_threshold`
+2. 未要約メッセージ数 >= `min_messages_to_summarize`（デフォルト10）
+
+### 7.2 圧縮対象の選択
+
+- 最新の要約以降のメッセージ
+- ただし直近5件は除外（要約対象外として残す）
+- システムプロンプト（seq=1）は除外
+
+### 7.3 要約プロンプト
+
+```
+あなたは会話履歴を要約するアシスタントです。
 以下のメッセージ履歴を簡潔かつ包括的に要約してください。
 
-要約には以下を含めること：
+要約には以下を含めてください：
 1. 重要な決定事項
 2. 実施したコード変更
 3. 発生した問題とその解決
@@ -461,638 +606,222 @@ LLMに以下のようなプロンプトで要約を依頼：
 元の30-40%の長さを目標としてください。
 
 === 要約対象メッセージ ===
-[USER]: Fix the bug in authentication
-[ASSISTANT]: I'll help you fix the authentication bug...
+[USER]: Fix the authentication bug
+[ASSISTANT]: I'll help you fix the bug...
 [TOOL]: github_get_file_contents -> (file content)
 ...
 
-要約のみを出力してください。説明は不要です。
+要約のみを出力してください。
 ```
 
-#### 要約結果の保存
+### 7.4 圧縮後の処理
 
-1. LLMから要約テキストを取得
+1. 要約テキストを取得
 2. トークン数を計算
-3. `summaries.jsonl`に追記
-4. 元のメッセージに`is_summarized: true`フラグをマーク
-   - 注: JSONLinesは追記型のため、実際にはフラグ更新は不要
-   - メモリ上の管理でのみ使用
+3. summary_storeに保存
+4. 対象メッセージを要約済みとしてマーク
+5. 次回のLLM呼び出し時、要約がコンテキストに含まれる
 
-#### 圧縮効果の測定
+## 8. tasks.dbの運用
 
-- 元のトークン数 vs 要約後のトークン数
-- 圧縮率の記録（compression_ratio）
-- 目標: 60-70%削減
+### 8.1 初期化
 
-### 4.4 状態遷移とディレクトリ移動
+アプリケーション起動時、`logs/contexts/tasks.db`が存在しない場合:
 
-#### タスクライフサイクル
+1. SQLiteデータベースを作成
+2. tasksテーブルを作成
+3. インデックスを作成
 
-```
-[開始] 
-  ↓
-(running/{uuid}/ 作成)
-  ↓
-[initializing] ← state.json
-  ↓
-[processing] ← LLMとの対話、ツール実行
-  ↓
-[compressing] ← コンテキスト圧縮（必要時）
-  ↓
-[completing] ← 完了処理
-  ↓
-(completed/{uuid}/ へ移動)
-  ↓
-[completed]
+### 8.2 クエリ例
+
+**実行中タスクの一覧**:
+```sql
+SELECT uuid, task_source, owner, repo, task_type, task_id, started_at
+FROM tasks
+WHERE status = 'running'
+ORDER BY started_at DESC;
 ```
 
-#### ディレクトリ移動手順
-
-タスク完了時に`running/`から`completed/`へ移動：
-
-1. `state.json`のステータスを`completing`に更新
-2. 最終的な統計情報を`state.json`に書き込み
-3. `.lock`ファイルを削除
-4. ディレクトリ全体を`completed/{uuid}/`へ移動（アトミック操作）
-5. 移動完了後、`state.json`のステータスを`completed`に更新
-
-#### 異常終了時の処理
-
-プロセスが異常終了した場合（`.lock`の heartbeat が60秒以上更新されない）：
-
-- 別プロセスがクリーンアップ
-- `state.json`のステータスを`failed`に更新
-- `error`フィールドにエラー内容を記録
-- `completed/`へ移動
-
-## 5. マルチプロセス対応
-
-### 5.1 タスク分離による競合回避
-
-#### 基本方針
-
-- **UUID単位の完全分離**: 各タスクは独立したディレクトリで管理
-- **同一タスクへの排他制御**: `.lock`ファイルによるロック
-- **異なるタスクは並行実行**: 競合なし
-
-#### タスクキューとの連携
-
-1. プロセスがキューからタスクを取得
-2. UUID生成
-3. `running/{uuid}/`ディレクトリ作成
-4. `.lock`ファイル作成（ロック取得）
-5. タスク処理
-6. 完了後、`completed/`へ移動
-7. `.lock`ファイル削除（ロック解放）
-
-### 5.2 ファイルロックの詳細
-
-#### ロック取得のアルゴリズム
-
-**目的**: 同一タスクへの複数プロセスアクセスを防止
-
-**手順**:
-
-1. `.lock`ファイルが存在するか確認
-2. 存在しない → 新規作成して取得成功
-3. 存在する → 内容を確認:
-   - `heartbeat_at`が60秒以内 → ロック有効、取得失敗
-   - `heartbeat_at`が60秒以上前 → 失効と判断:
-     - プロセスIDのプロセスが存在するか確認
-     - 存在しない → 失効確定、ロック取得
-     - 存在する → ロック有効、取得失敗
-
-#### ロック更新（ハートビート）
-
-- **間隔**: 30秒ごと
-- **実装**: `state.json`更新と同時に実行
-- **内容**: `heartbeat_at`タイムスタンプを更新
-
-#### ロック解放
-
-- タスク完了時
-- `completed/`へのディレクトリ移動時
-- 異常終了時（別プロセスが検出して削除）
-
-### 5.3 ファイルI/O の排他制御
-
-#### JSONLinesファイルへの追記
-
-**課題**: 複数プロセスが同時に追記すると行が混在する可能性
-
-**対策**: 
-- 基本的にUUIDで分離されているため競合なし
-- 万が一の場合に備え、1行単位のアトミック書き込み
-- Pythonの`open()`はデフォルトでバッファリングされるが、`flush()`で即座にディスクへ
-
-#### state.jsonの更新
-
-**課題**: 頻繁に更新されるため、読み書き競合の可能性
-
-**対策**:
-- ロックファイル（`.state.lock`）を使用
-- 読み取り前にロック取得、読み書き後に解放
-- タイムアウト付きロック取得（5秒）
-
-### 5.4 プロセス監視とクリーンアップ
-
-#### 監視プロセスの役割
-
-定期的に`running/`配下をスキャンし、以下を実施：
-
-**死活監視**:
-- `.lock`ファイルのheartbeatを確認
-- 60秒以上更新されていない場合、プロセス存在確認
-- プロセスが存在しない場合、異常終了と判断
-
-**クリーンアップ**:
-- `state.json`にエラー情報を記録
-- `completed/`へ移動
-- ステータスを`failed`に更新
-
-#### クリーンアップの実行頻度
-
-- **デフォルト**: 5分ごと
-- **設定可能**: 環境変数またはconfig.yamlで調整
-
-## 6. マルチユーザー対応
-
-### 6.1 ユーザーごとの設定分離
-
-#### USER_CONFIG_API連携
-
-既存のUSER_CONFIG_API機能を活用：
-
-- タスク取得時にユーザー名を特定
-- APIからユーザー固有の設定を取得
-- LLM設定、コンテキスト長等がユーザーごとに異なる
-
-#### コンテキストディレクトリの分離
-
-ユーザー情報は`metadata.json`に記録：
-
-```json
-{
-  "user": "notfolder",
-  "config": {
-    "llm_provider": "openai",
-    "context_length": 128000
-  }
-}
+**ユーザーごとのタスク数**:
+```sql
+SELECT user, status, COUNT(*) as count
+FROM tasks
+GROUP BY user, status;
 ```
 
-ディレクトリ自体はUUID単位で分離されているため、ユーザーごとの物理分離は不要。
-
-### 6.2 統計とレポート
-
-#### ユーザーごとの集計
-
-`metadata.json`の`user`フィールドを利用して集計：
-
-- ユーザーごとのタスク数
-- ユーザーごとのトークン使用量
-- ユーザーごとの平均実行時間
-
-#### プライバシー保護
-
-- 機密情報のマスキング（既述）
-- ユーザー間のコンテキスト共有は不可
-- 管理者のみが全タスクにアクセス可能
-
-## 7. パフォーマンスと最適化
-
-### 7.1 メモリ使用量の削減
-
-#### 削減効果の見積もり
-
-| シナリオ | 従来方式 | ファイル方式 | 削減率 |
-|---------|---------|------------|--------|
-| 100回LLM呼び出し | 8.5MB | 1.5MB | 82% |
-| 1000回LLM呼び出し | 85MB | 2.0MB | 98% |
-| 要約使用時 | 85MB | 1.0MB | 99% |
-
-#### メモリキャッシュのチューニング
-
-**max_memory_messages**パラメータ:
-- デフォルト: 20件
-- 少ないとファイル読み込み頻度増加
-- 多いとメモリ使用量増加
-- 推奨: 10-30件
-
-### 7.2 ディスク使用量
-
-#### 推定値
-
-- 1タスクあたり: 5-10MB（要約なし）
-- 1タスクあたり: 2-5MB（要約あり）
-- 1日10タスク: 20-100MB/日
-- 30日保持: 600MB-3GB/月
-
-#### 削減策
-
-- 30日経過後の自動削除
-- 7日経過後のgzip圧縮（70%削減）
-- 重要タスクのみ長期保存
-
-### 7.3 ファイルI/Oパフォーマンス
-
-#### 書き込み
-
-- **追記型**: 既存ファイルを読まず末尾に追加のみ
-- **バッファなし**: データ損失を防ぐため即座にflush
-- **影響**: LLM呼び出し時間に比べて無視できるレベル
-
-#### 読み込み
-
-- **起動時**: 最新N件のみ読み込み（高速）
-- **LLM用リスト生成時**: 必要分のみ読み込み
-- **最適化**: システムプロンプトと要約はキャッシュ
-
-## 8. 運用
-
-### 8.1 日常運用
-
-#### ディスク容量監視
-
-**アラート設定**:
-- 総容量が10GBを超えたら警告
-- 総容量が50GBを超えたらクリティカル
-
-**対応**:
-- 古いタスクの削除
-- 圧縮の実施
-
-#### クリーンアップスクリプト
-
-**実行頻度**: 毎日深夜（cronで自動実行）
-
-**処理内容**:
-1. 30日以上経過した`completed/`タスクを削除
-2. 7日以上経過した`completed/`タスクをgzip圧縮
-3. `running/`の失効ロックをクリーンアップ
-4. 統計レポート生成
-
-### 8.2 トラブルシューティング
-
-#### ディスク容量不足
-
-**症状**: "No space left on device"
-
-**診断**:
-```bash
-du -sh logs/contexts/running
-du -sh logs/contexts/completed
+**失敗タスクの検索**:
+```sql
+SELECT uuid, error_message, created_at
+FROM tasks
+WHERE status = 'failed'
+ORDER BY created_at DESC
+LIMIT 10;
 ```
 
-**対応**:
-- 緊急削除: 14日以上経過したタスクを削除
-- 圧縮: 全てのcompletedタスクをgzip圧縮
+### 8.3 クリーンアップ
 
-#### ファイルロック問題
+30日以上前の完了タスクを削除:
 
-**症状**: タスクが処理されない
-
-**診断**:
-- `running/*/`に滞留している`.lock`ファイルを確認
-- `heartbeat_at`が古いか確認
-
-**対応**:
-- プロセスが存在しなければ`.lock`を手動削除
-- 監視プロセスの動作確認
-
-#### 要約失敗
-
-**症状**: コンテキストが肥大化
-
-**診断**:
-- `state.json`の`compression_count`が0
-- ログに要約エラーが記録
-
-**対応**:
-- LLMの接続確認
-- 要約プロンプトの見直し
-- 手動での要約実行
-
-### 8.3 監視とアラート
-
-#### 監視項目
-
-1. **ディスク使用量**
-   - `running/`のサイズ
-   - `completed/`のサイズ
-
-2. **タスク滞留**
-   - `running/`配下のタスク数
-   - 長時間（6時間以上）実行中のタスク
-
-3. **失敗率**
-   - `completed/`配下の`failed`ステータス比率
-
-4. **平均実行時間**
-   - タスク開始から完了までの時間
-
-#### アラート
-
-- ディスク使用量 > 10GB: 警告
-- 失敗率 > 10%: 警告
-- 滞留タスク > 100件: 警告
-
-### 8.4 バックアップとリストア
-
-#### バックアップ対象
-
-- `completed/`全体（完了タスクのアーカイブ）
-- `running/`は除外（一時的なデータ）
-
-#### バックアップ頻度
-
-- 毎日1回（深夜）
-- 世代管理: 7世代保持
-
-#### リストア
-
-- 特定タスクの調査時
-- システム障害からの復旧時
-
-## 9. デバッグとトラブルシューティング
-
-### 9.1 コンテキストビューア
-
-#### 目的
-
-人間が直接ファイルを確認してデバッグ可能にする。
-
-#### 使用方法
-
-**コマンドラインツール**:
-```bash
-# 特定タスクの詳細表示
-python -m tools.context_viewer --uuid {uuid}
-
-# メッセージ履歴表示
-python -m tools.context_viewer --uuid {uuid} --messages
-
-# 要約履歴表示
-python -m tools.context_viewer --uuid {uuid} --summaries
-
-# ツール実行履歴表示
-python -m tools.context_viewer --uuid {uuid} --tools
+```sql
+DELETE FROM tasks
+WHERE status = 'completed'
+  AND completed_at < datetime('now', '-30 days');
 ```
 
-**出力例**:
+対応するディレクトリも削除が必要。
+
+## 9. 設定ファイル
+
+### 9.1 config.yaml への追加
+
+```yaml
+# コンテキストストレージ設定
+context_storage:
+  enabled: true                    # コンテキストファイル化を有効化
+  base_dir: "logs/contexts"        # ベースディレクトリ
+  max_memory_messages: 20          # メモリキャッシュサイズ
+  compression_threshold: 0.7       # 圧縮開始閾値（70%）
+  min_messages_to_summarize: 10    # 要約に必要な最小メッセージ数
+
+# LLM設定（既存）にcontext_lengthを追加
+llm:
+  provider: "openai"
+  openai:
+    model: "gpt-4o"
+    context_length: 128000         # モデルのコンテキスト長
+    api_key: "${OPENAI_API_KEY}"
+  ollama:
+    model: "qwen3-30b"
+    context_length: 32768          # モデルのコンテキスト長
 ```
-Task UUID: 550e8400-e29b-41d4-a716-446655440000
-Status: completed
-Repository: github/notfolder/coding_agent
-Task: issue #27
-Started: 2024-01-15 10:30:00
-Completed: 2024-01-15 10:45:23
-Duration: 15分23秒
 
-Statistics:
-  LLM calls: 45
-  Tool calls: 12
-  Total tokens: 45,678
-  Compressions: 2
-  
-Messages: 150 (showing last 10)
-  [148] user: Commit the changes
-  [149] tool: github_create_commit -> Success
-  [150] assistant: {"done": true, "comment": "Completed"}
-  
-Summaries: 2
-  [1] seq 10-50: Fixed authentication bug...
-  [2] seq 51-90: Implemented new feature...
-```
-
-#### 手動確認
-
-JSONLinesファイルは人間が読める形式のため、直接確認も可能：
+### 9.2 環境変数
 
 ```bash
-# メッセージ履歴を確認
-cat logs/contexts/completed/{uuid}/messages.jsonl | jq
-
-# 最新10件のメッセージ
-tail -10 logs/contexts/completed/{uuid}/messages.jsonl | jq
-
-# 特定の role のメッセージのみ
-grep '"role":"assistant"' logs/contexts/completed/{uuid}/messages.jsonl | jq
+# 既存の環境変数に加えて
+CONTEXT_STORAGE_ENABLED=true
+CONTEXT_STORAGE_MAX_MEMORY=20
+COMPRESSION_THRESHOLD=0.7
 ```
 
-### 9.2 統計ツール
+## 10. デバッグとモニタリング
 
-#### 全体統計
+### 10.1 タスク状態確認
 
+**SQLiteクエリ**:
 ```bash
-python -m tools.context_stats --summary
+sqlite3 logs/contexts/tasks.db "SELECT * FROM tasks WHERE uuid='...'"
 ```
 
-**出力例**:
-```
-Context Storage Statistics
-==========================
-
-Total contexts: 1,234
-  - Running: 12
-  - Completed: 1,222
-
-Disk usage:
-  - Running: 120 MB
-  - Completed: 5.4 GB (2.1 GB after compression)
-
-Average per task:
-  - Messages: 85
-  - Tokens: 42,000
-  - Duration: 12分30秒
-  - Compressions: 1.8
-
-By user:
-  - notfolder: 890 tasks (72%)
-  - user2: 244 tasks (20%)
-  - user3: 100 tasks (8%)
-```
-
-#### タスク検索
-
+**ファイル確認**:
 ```bash
-# ユーザーでフィルタ
-python -m tools.context_stats --user notfolder
+# メッセージ履歴
+cat logs/contexts/running/{uuid}/messages.jsonl | jq
 
-# 日付範囲でフィルタ
-python -m tools.context_stats --from 2024-01-01 --to 2024-01-31
+# 最新10件
+tail -10 logs/contexts/running/{uuid}/messages.jsonl | jq
 
-# 失敗タスクのみ
-python -m tools.context_stats --status failed
+# 要約履歴
+cat logs/contexts/running/{uuid}/summaries.jsonl | jq
 ```
 
-### 9.3 ログとトレース
+### 10.2 統計情報
 
-#### ログ出力
-
-各処理でUUIDを含めてログ出力：
-
-```
-2024-01-15 10:30:01 INFO [uuid:550e8400] Task started: github/notfolder/coding_agent#27
-2024-01-15 10:30:05 INFO [uuid:550e8400] LLM call #1: 250 tokens
-2024-01-15 10:30:20 INFO [uuid:550e8400] Tool execution: github_get_file_contents
-2024-01-15 10:32:00 INFO [uuid:550e8400] Context compression triggered
-2024-01-15 10:32:15 INFO [uuid:550e8400] Compression completed: 12000 -> 800 tokens
-2024-01-15 10:45:23 INFO [uuid:550e8400] Task completed successfully
+**タスク数**:
+```sql
+SELECT status, COUNT(*) FROM tasks GROUP BY status;
 ```
 
-#### トレースID
+**平均実行時間**:
+```sql
+SELECT AVG(julianday(completed_at) - julianday(started_at)) * 24 * 60 as avg_minutes
+FROM tasks
+WHERE status = 'completed';
+```
 
-UUIDをトレースIDとして使用し、全ログとファイルを追跡可能。
+**トークン使用量**:
+```sql
+SELECT SUM(total_tokens) as total, AVG(total_tokens) as average
+FROM tasks
+WHERE status = 'completed';
+```
 
-## 10. 将来の拡張
+## 11. エラーハンドリング
 
-### 10.1 SQLiteへの移行
+### 11.1 タスク処理中のエラー
 
-#### 移行の容易性
+```
+try:
+    context_manager = TaskContextManager(task_key, config)
+    # タスク処理...
+    context_manager.complete()
+except Exception as e:
+    logger.exception("Task processing failed")
+    context_manager.fail(str(e))
+    raise
+```
 
-JSONLinesベースで設計しているため、SQLiteへの移行は比較的容易：
+### 11.2 ファイルI/Oエラー
 
-**メリット**:
-- トランザクション保証
-- 高速なクエリ（インデックス）
-- WALモードでマルチプロセス対応
+- ディレクトリ作成失敗: 例外を上位に伝播
+- JSONLines書き込み失敗: 例外を上位に伝播
+- 読み込み失敗: 空のリストを返す、またはデフォルト値
 
-**移行手順**:
-1. MessageStoreインターフェースは維持
-2. バックエンドをJSONLines → SQLiteに切り替え
-3. 既存データのマイグレーションツール作成
+### 11.3 SQLiteエラー
 
-**データモデル**:
+- 接続失敗: 例外を上位に伝播
+- INSERT/UPDATE失敗: リトライ（最大3回）
+- テーブル不存在: 自動作成
 
-現在のJSONLinesのフィールドはSQLiteテーブルに直接マッピング可能：
+## 12. 実装の優先順位
 
-- `messages.jsonl` → `messages`テーブル
-- `summaries.jsonl` → `summaries`テーブル
-- `tools.jsonl` → `tool_calls`テーブル
+### フェーズ1: 基本機能（2週間）
 
-### 10.2 高度な機能
+1. TaskContextManagerクラス
+2. MessageStoreクラス
+3. tasks.dbの作成と基本操作
+4. TaskHandlerの統合
 
-#### セマンティック検索
+### フェーズ2: 要約機能（2週間）
 
-過去のコンテキストから類似タスクを検索：
+1. SummaryStoreクラス
+2. ContextCompressorクラス
+3. 要約トリガーとLLM呼び出し
 
-- メッセージ内容のベクトル化（Embedding）
-- ベクトルDBへの保存（Pinecone/Weaviate）
-- 類似タスクの参照による品質向上
+### フェーズ3: 完全統合（1週間）
 
-#### インテリジェント要約
+1. ToolStoreクラス
+2. LLMClient統合
+3. 全体的なテスト
 
-現在の要約は全メッセージを対象としているが、さらに高度化：
+### フェーズ4: 運用機能（1週間）
 
-- 重要度スコアリング（LLMまたは機械学習）
-- 重要メッセージは要約せず保持
-- 階層的要約（要約の要約）
+1. デバッグツール
+2. クリーンアップスクリプト
+3. モニタリング機能
 
-#### コスト最適化
+合計: 6週間
 
-- LLM応答のキャッシング（同じコンテキストで同じ応答を再利用）
-- トークン使用量の最小化（コードの圧縮、参照化）
+## 13. まとめ
 
-## 11. セキュリティ
+### 主要な設計決定
 
-### 11.1 機密情報保護
+1. **1タスク=1プロセス**: ロック不要でシンプル
+2. **SQLiteで状態管理**: 全タスクを一元管理
+3. **UUID単位のディレクトリ**: 完全な分離
+4. **JSONLines**: 人間が読める、追記型で高速
+5. **running/completed分離**: 状態による物理的分離
 
-#### マスキング
+### 実装のポイント
 
-`messages.jsonl`書き込み前に自動マスキング：
-
-- GitHubトークン
-- APIキー
-- メールアドレス
-- その他の機密パターン
-
-#### ファイルパーミッション
-
-- ディレクトリ: 700（所有者のみ）
-- ファイル: 600（所有者のみ読み書き）
-
-### 11.2 アクセス制御
-
-#### ユーザー分離
-
-- 各ユーザーは自分のタスクのみアクセス可能
-- 管理者は全タスクにアクセス可能
-
-#### 監査ログ
-
-- コンテキストへのアクセスを記録
-- 誰がいつどのファイルにアクセスしたか
-
-## 12. まとめ
-
-### 12.1 主要な設計決定
-
-1. **JSONLinesベース**: シンプルで人間が読める、外部ツールで解析容易
-2. **UUID管理**: タスクごとに一意のディレクトリ、完全な分離
-3. **running/completed分離**: 状態による物理的な分離で管理が容易
-4. **LLM要約**: コンテキスト長を賢く管理、情報保持率90%以上
-5. **ファイルロック**: マルチプロセス対応、競合を最小化
-
-### 12.2 期待される効果
-
-- **メモリ削減**: 60-99%（要約使用時）
-- **永続性**: 中断・再開が可能
-- **デバッグ性**: ファイルを直接確認可能
-- **スケーラビリティ**: マルチプロセス対応
-- **シンプルさ**: 追加の依存なし、運用が容易
-
-### 12.3 実装スケジュール
-
-フルスタック実装のため、以下のフェーズで進める：
-
-1. **Phase 1（2週間）**: MessageStore実装
-   - JSONLinesファイルI/O
-   - メモリキャッシュ
-   - ディレクトリ管理
-
-2. **Phase 2（2週間）**: ContextCompressor実装
-   - コンテキスト長監視
-   - LLM要約機能
-   - 要約の保存と利用
-
-3. **Phase 3（2週間）**: LLMClient統合
-   - OpenAIClient改修
-   - OllamaClient改修
-   - コンテキスト長対応
-
-4. **Phase 4（1週間）**: TaskHandler統合
-   - UUID生成とディレクトリ作成
-   - 状態管理
-   - ディレクトリ移動
-
-5. **Phase 5（2週間）**: マルチプロセス対応
-   - ファイルロック実装
-   - ハートビート機構
-   - 監視とクリーンアップ
-
-6. **Phase 6（2週間）**: 運用ツール
-   - コンテキストビューア
-   - 統計ツール
-   - クリーンアップスクリプト
-
-**合計: 約11週間（3ヶ月弱）**
-
-### 12.4 成功指標
-
-| 指標 | 目標値 | 測定方法 |
-|------|--------|---------|
-| メモリ削減率 | 80%以上 | プロセス監視 |
-| ディスク使用量 | < 5GB/月 | `du`コマンド |
-| タスク失敗率 | < 5% | `state.json`集計 |
-| 要約成功率 | > 95% | `summaries.jsonl`集計 |
-| 平均実行時間増加 | < 10% | タスク完了時間比較 |
+- 既存コードへの影響を最小化
+- シンプルで理解しやすい実装
+- デバッグとモニタリングが容易
+- 拡張性を考慮（将来の改善に対応可能）
 
 ---
 
-**ドキュメントバージョン**: 2.0  
-**作成日**: 2024-01-15  
+**ドキュメントバージョン**: 3.0  
 **最終更新**: 2024-01-15  
-**ステータス**: 詳細設計完了  
-**対象システム**: Coding Agent v1.x  
-**想定環境**: マルチユーザー・マルチプロセス本番環境
+**ステータス**: 実装準備完了  
+**対象**: 1タスク=1プロセス環境
