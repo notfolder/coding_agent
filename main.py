@@ -50,6 +50,8 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
 
     指定された設定ファイルを読み込み、環境変数で定義された値で
     設定を上書きします。LLM、MCP、RabbitMQ等の設定が対象です。
+    
+    USE_USER_CONFIG_API環境変数がtrueの場合、API経由で設定を取得します。
 
     Args:
         config_file: 読み込む設定ファイルのパス
@@ -62,9 +64,22 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
         yaml.YAMLError: YAMLの解析に失敗した場合
 
     """
+    # ロガー取得
+    logger = logging.getLogger(__name__)
+    
     # 設定ファイルを読み込み
     with Path(config_file).open() as f:
         config = yaml.safe_load(f)
+    
+    # API経由でLLM設定を取得するかチェック
+    use_api = os.environ.get("USE_USER_CONFIG_API", "false").lower() == "true"
+    
+    if use_api:
+        try:
+            config = _fetch_config_from_api(config, logger)
+        except Exception as e:
+            logger.warning(f"API経由の設定取得に失敗、設定ファイルを使用: {e}")
+            # フォールバック: 従来通り設定ファイルを使用
 
     # 各種設定の上書き処理
     _override_llm_config(config)
@@ -73,6 +88,71 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
     _override_bot_config(config)
 
     return config
+
+
+def _fetch_config_from_api(config: dict[str, Any], logger: logging.Logger) -> dict[str, Any]:
+    """API経由で設定を取得する.
+    
+    Args:
+        config: ベースとなる設定辞書
+        logger: ロガー
+    
+    Returns:
+        API設定でマージされた設定辞書
+    
+    Raises:
+        ValueError: 設定エラーまたはAPI呼び出しエラー
+    """
+    import requests
+    
+    # タスクソースとユーザー名を取得
+    task_source = os.environ.get("TASK_SOURCE", "github")
+    
+    # config.yamlからユーザー名を取得
+    if task_source == "github":
+        username = config.get("github", {}).get("owner", "")
+    elif task_source == "gitlab":
+        username = config.get("gitlab", {}).get("owner", "")
+    else:
+        raise ValueError(f"Unknown task source: {task_source}")
+    
+    # APIエンドポイントとAPIキー
+    api_url = os.environ.get("USER_CONFIG_API_URL", "http://user-config-api:8080")
+    api_key = os.environ.get("USER_CONFIG_API_KEY", "")
+    
+    if not api_key:
+        raise ValueError("USER_CONFIG_API_KEY is not set")
+    
+    url = f"{api_url}/config/{task_source}/{username}"
+    
+    # Bearer トークンとしてAPIキーをヘッダーに含めて呼び出し
+    headers = {"Authorization": f"Bearer {api_key}"}
+    response = requests.get(url, headers=headers, timeout=5)
+    response.raise_for_status()
+    
+    data = response.json()
+    if data.get("status") == "success":
+        # API設定を取得
+        api_data = data["data"]
+        
+        # LLM設定を上書き（環境変数で上書きされていない場合のみ）
+        if not os.environ.get("LLM_PROVIDER"):
+            config["llm"] = api_data["llm"]
+        
+        # システムプロンプトを上書き（環境変数で上書きされていない場合のみ）
+        if "system_prompt" in api_data and not os.environ.get("SYSTEM_PROMPT"):
+            config["system_prompt"] = api_data["system_prompt"]
+        
+        # max_llm_process_numを上書き（環境変数で上書きされていない場合のみ）
+        if "max_llm_process_num" in api_data and not os.environ.get("MAX_LLM_PROCESS_NUM"):
+            config["max_llm_process_num"] = api_data["max_llm_process_num"]
+        
+        logger.info(f"API経由でLLM設定を取得: {task_source}:{username}")
+    else:
+        raise ValueError(f"API returned error: {data.get('message')}")
+    
+    return config
+
 
 
 def _override_llm_config(config: dict[str, Any]) -> None:
