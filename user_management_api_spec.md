@@ -266,11 +266,28 @@ POST /users/llm-configs/batch
     "configs": [
       {
         "user_id": "github:user1",
-        "llm_config": { /* ... */ }
+        "llm_config": {
+          "provider": "openai",
+          "function_calling": true,
+          "openai": {
+            "api_key": "sk-proj-...",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o",
+            "max_token": 40960
+          }
+        }
       },
       {
         "user_id": "gitlab:user2",
-        "llm_config": { /* ... */ }
+        "llm_config": {
+          "provider": "ollama",
+          "function_calling": true,
+          "ollama": {
+            "endpoint": "http://localhost:11434",
+            "model": "qwen3-30b-a3b-mlx",
+            "max_token": 32768
+          }
+        }
       }
     ],
     "not_found": []
@@ -1078,3 +1095,22 @@ FastAPIの自動ドキュメント生成機能を利用:
 5. **段階的移行**: 後方互換性を保ちながらの段階的な移行計画
 
 この仕様に基づいてAPIサーバーを実装することで、複数ユーザーが独自のLLM設定を管理できるようになり、システムの拡張性とセキュリティが向上する。
+
+## 14. 参考資料
+
+### 14.1 関連ドキュメント
+- [OpenAPI Specification](https://swagger.io/specification/)
+- [REST API Best Practices](https://restfulapi.net/)
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [PostgreSQL JSONB Documentation](https://www.postgresql.org/docs/current/datatype-json.html)
+
+### 14.2 コーディングエージェント関連
+- [README.md](README.md) - プロジェクト概要
+- [config.yaml](config.yaml) - 現在の設定ファイル例
+- [main.py](main.py) - メインエントリーポイント
+- [clients/lm_client.py](clients/lm_client.py) - LLMクライアント実装
+
+---
+
+**文書履歴:**
+- v1.0.0 (2025-11-22): 初版作成
