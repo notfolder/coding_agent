@@ -497,23 +497,23 @@ planning:
 ```yaml
 # プランニング機能の設定
 planning:
-  # プランニング機能の有効/無効
+  # プランニング機能の有効/無効（デフォルト: true）
   enabled: true
   
-  # プランニング戦略
+  # プランニング戦略（デフォルト: chain_of_thought）
   # 選択肢: "chain_of_thought", "hierarchical", "simple"
   strategy: "chain_of_thought"
   
-  # 最大サブタスク数（タスク分解の上限）
-  max_subtasks: 10
+  # 最大サブタスク数（デフォルト: 100）
+  max_subtasks: 100
   
-  # タスク分解の詳細度
+  # タスク分解の詳細度（デフォルト: moderate）
   # 選択肢: "detailed", "moderate", "minimal"
   decomposition_level: "moderate"
   
   # リフレクション設定
   reflection:
-    # リフレクション機能の有効/無効
+    # リフレクション機能の有効/無効（デフォルト: true）
     enabled: true
     
     # エラー発生時に自動的にリフレクション実行
@@ -559,32 +559,27 @@ planning:
 - `REFLECTION_INTERVAL`: リフレクション実行間隔
 - `MAX_PLAN_REVISIONS`: 最大計画修正回数
 
-### 9.3 タスク別設定
+### 9.3 user_config_apiによる設定上書き
 
-特定のタスクやリポジトリに対して異なる設定を適用可能：
+既存のuser_config_api機能を使用してユーザー別にプランニング設定を上書き可能。
 
-```yaml
-planning:
-  enabled: true
-  strategy: "chain_of_thought"
-  
-  # タスクタイプ別の設定オーバーライド
-  task_specific:
-    # GitHub Issueの場合
-    github_issue:
-      max_subtasks: 15
-      reflection:
-        trigger_interval: 5
-    
-    # GitHub Pull Requestの場合
-    github_pr:
-      strategy: "hierarchical"
-      reflection:
-        depth: "deep"
-    
-    # GitLab Issue/MRの場合
-    gitlab:
-      decomposition_level: "detailed"
+**API応答例**:
+```json
+{
+  "status": "success",
+  "data": {
+    "llm": {...},
+    "planning": {
+      "enabled": true,
+      "strategy": "chain_of_thought",
+      "max_subtasks": 100,
+      "reflection": {
+        "enabled": true,
+        "trigger_interval": 5
+      }
+    }
+  }
+}
 ```
 
 ## 10. エラーハンドリング仕様
@@ -869,37 +864,34 @@ planning:
       max_consecutive_failures: 3
 ```
 
-### 11.3 メモリ使用量の最適化
+### 11.3 ストレージ管理
 
-#### 11.3.1 計画履歴の管理
-
-**問題：** 修正履歴が蓄積してメモリを消費
-
-**対策：**
-- 最新N個の修正履歴のみ保持
-- 古い履歴は要約して保存
-- ディスクベースのストレージ活用
-
-**設定例：**
-```yaml
-planning:
-  revision:
-    # メモリに保持する履歴数
-    max_history_in_memory: 5
-    
-    # ディスクに保存する最大履歴数
-    max_history_on_disk: 50
-    
-    # 履歴の自動要約
-    auto_summarize: true
-```
-
-#### 11.3.2 コンテキストの圧縮
+#### 11.3.1 JSONLファイルベースの履歴管理
 
 **実装方針：**
-- 既存のcontext_storageモジュールとの統合
-- プランニング結果も圧縮対象に
-- 重要な情報は保持、冗長な情報は削除
+- 計画修正履歴はメモリに保持せず、JSONLファイルに永続化
+- タスクUUID毎にファイルを分割
+- 軽量で読み書き効率の良いJSONL形式を使用
+
+**ファイル構造：**
+```
+planning_history/
+├── {task_uuid_1}.jsonl
+├── {task_uuid_2}.jsonl
+└── {task_uuid_3}.jsonl
+```
+
+**JSONLフォーマット：**
+```jsonl
+{"type":"plan","timestamp":"2024-01-15T10:30:00Z","plan":{...}}
+{"type":"revision","timestamp":"2024-01-15T10:35:00Z","reason":"エラー回復","changes":[...]}
+{"type":"reflection","timestamp":"2024-01-15T10:35:01Z","evaluation":{...}}
+```
+
+**メリット：**
+- メモリ使用量の削減
+- 履歴の永続化と追跡可能性
+- 必要に応じて過去の履歴を参照可能
 
 ## 12. セキュリティ考慮事項
 
@@ -947,69 +939,6 @@ planning:
 - リソース枯渇攻撃
 - 権限昇格の試み
 - 機密情報の漏洩
-
-### 12.2 機密情報の保護
-
-#### 12.2.1 プランニング結果のログ管理
-
-**リスク：** 計画に機密情報が含まれる可能性
-
-**対策：**
-- センシティブな情報のマスキング
-- ログレベルによる出力制御
-- 機密リポジトリでは詳細ログを無効化
-
-**設定例：**
-```yaml
-planning:
-  logging:
-    # ログレベル
-    level: "INFO"  # DEBUG/INFO/WARNING/ERROR
-    
-    # 機密情報のマスキング
-    mask_sensitive_data: true
-    
-    # マスキング対象パターン
-    sensitive_patterns:
-      - "password"
-      - "token"
-      - "secret"
-      - "api_key"
-```
-
-#### 12.2.2 キャッシュデータの暗号化
-
-**対策：**
-- プランニング結果のキャッシュを暗号化
-- アクセス制御の実装
-- 定期的なキャッシュクリア
-
-### 12.3 権限管理
-
-#### 12.3.1 ユーザー別の権限
-
-**実装方針：**
-- タスク作成者の権限を継承
-- プランニング機能の利用権限
-- 危険な操作の実行権限
-
-**設定例：**
-```yaml
-planning:
-  permissions:
-    # プランニング機能を使用できるユーザー/グループ
-    allowed_users:
-      - "admin-team"
-      - "developer-group"
-    
-    # 自動実行が許可されるユーザー
-    auto_execution_allowed:
-      - "trusted-user"
-    
-    # 常に人間の承認が必要なユーザー
-    always_require_approval:
-      - "external-contributor"
-```
 
 ## 13. テスト戦略
 
@@ -1157,720 +1086,30 @@ test_cases = [
    - 中程度のタスク: < 5分
    - 複雑なタスク: < 15分
 
-## 14. 段階的な実装ロードマップ
 
-### 14.1 フェーズ1: 基本プランニング機能（MVP）
+## 14. まとめ
 
-**目標：** プランニングの基本的なフローを実装
+### プランニングプロセスの利点
 
-**実装内容：**
-1. PlanningEngineの基本実装
-   - 目標理解の骨格
-   - シンプルなタスク分解
-   - 基本的な行動計画生成
+1. **タスク理解の向上** - ユーザーの意図を正確に把握、成功基準の明確化
+2. **実行効率の改善** - 計画的なツール使用、依存関係の適切な解決
+3. **エラー対応の強化** - 問題の早期発見、効果的な計画修正
+4. **透明性の向上** - 実行計画の可視化、進捗状況の追跡可能性
 
-2. システムプロンプトの拡張
-   - プランニング指示の追加
-   - JSON応答フォーマットの定義
+### 主要な設計原則
 
-3. TaskHandlerへの統合
-   - プランニングフェーズの追加
-   - 既存の実行フローとの統合
+1. **段階的な処理** - 理解 → 分解 → 計画 → 実行 → 評価のサイクル
+2. **適応性** - フィードバックに基づく計画修正、エラーからの自動回復
+3. **効率性** - トークン使用量の最適化、JSONLファイルベースの履歴管理
+4. **安全性** - ツール使用の制限、危険操作の検出
 
-4. 基本設定の追加
-   - config.yamlへのplanning設定
-   - 有効/無効の切り替え
+### 参考文献
 
-**成功基準：**
-- シンプルなタスク（README更新など）でプランニングが動作
-- 計画に従った実行が可能
-- 既存機能に影響なし
-
-**期間：** 2週間
-
-### 14.2 フェーズ2: リフレクション機能
-
-**目標：** 実行結果の評価と計画修正機能を追加
-
-**実装内容：**
-1. ReflectionEngineの実装
-   - アクション評価機能
-   - 問題特定機能
-   - 修正提案機能
-
-2. TaskHandlerへのリフレクション統合
-   - アクション後の評価
-   - エラー時のリフレクション
-   - 定期リフレクション
-
-3. 計画修正機能
-   - PlanningEngine.revise_plan()の実装
-   - 修正履歴の管理
-   - 最大修正回数の制御
-
-4. リフレクション設定の追加
-   - trigger_on_error設定
-   - trigger_interval設定
-   - max_revisions設定
-
-**成功基準：**
-- エラー発生時に適切にリフレクション実行
-- 計画修正が機能する
-- 修正後の再実行が成功
-
-**期間：** 2週間
-
-### 14.3 フェーズ3: Chain-of-Thought強化
-
-**目標：** タスク分解の精度向上
-
-**実装内容：**
-1. Chain-of-Thoughtプロンプトの改善
-   - 思考プロセスの段階的展開
-   - 中間推論の記録
-   - より詳細な分解
-
-2. 複雑度に応じた分解戦略
-   - タスクの複雑度自動判定
-   - 適応的な分解レベル
-   - 階層的タスク構造
-
-3. 依存関係の高度な分析
-   - タスク間の依存関係自動検出
-   - 並列実行可能性の判定
-   - 最適な実行順序の決定
-
-**成功基準：**
-- 複雑なタスクも適切に分解
-- 依存関係が正しく解決
-- 実行効率の向上
-
-**期間：** 2週間
-
-### 14.4 フェーズ4: パフォーマンス最適化
-
-**目標：** 実行速度とコスト効率の改善
-
-**実装内容：**
-1. プランニング結果のキャッシュ
-   - キャッシュ機構の実装
-   - 類似タスク判定
-   - キャッシュ管理
-
-2. トークン使用量の最適化
-   - 冗長な情報の削減
-   - コンテキスト圧縮
-   - プロンプトの最適化
-
-3. 並列実行の実装
-   - 並列実行可能アクションの識別
-   - 並列実行機構
-   - 結果の統合
-
-**成功基準：**
-- LLM呼び出し回数30%削減
-- トークン使用量40%削減
-- 処理時間20%短縮
-
-**期間：** 2週間
-
-### 14.5 フェーズ5: 高度な機能
-
-**目標：** 人間フィードバック統合と高度なエラーハンドリング
-
-**実装内容：**
-1. 人間フィードバックの統合
-   - Issueコメントからのフィードバック抽出
-   - フィードバックに基づく計画修正
-   - 承認フローの実装
-
-2. 高度なエラーハンドリング
-   - 詳細なエラー分類
-   - エラーパターンの学習
-   - 自動回復戦略
-
-3. セキュリティ強化
-   - ツール使用制限
-   - 危険操作の検出
-   - 権限管理
-
-**成功基準：**
-- 人間のフィードバックが適切に反映
-- エラー回復率の向上
-- セキュリティリスクの低減
-
-**期間：** 3週間
-
-## 15. 利用例とユースケース
-
-### 15.1 基本的な使用例
-
-#### 15.1.1 READMEファイルの更新
-
-**Issueの内容：**
-```
-タイトル: READMEにインストール手順を追加
-
-本文:
-プロジェクトのREADMEファイルに、以下のインストール手順を追加してください：
-1. Node.jsのインストール
-2. npm installの実行
-3. 環境変数の設定
-
-詳細な説明を含めてください。
-```
-
-**プランニング結果：**
-```json
-{
-  "phase": "planning",
-  "goal_understanding": {
-    "main_objective": "READMEファイルにインストール手順を追加する",
-    "success_criteria": [
-      "Node.jsインストール手順が記載されている",
-      "npm installの実行方法が説明されている",
-      "環境変数の設定方法が含まれている",
-      "詳細な説明がある"
-    ],
-    "constraints": [
-      "既存のREADME構造を維持する",
-      "マークダウン形式に従う"
-    ],
-    "context": "プロジェクトのドキュメント改善"
-  },
-  "task_decomposition": {
-    "reasoning": "まず現在のREADMEの内容を確認し、適切な位置にインストール手順を挿入する必要があります。既存の構造を理解してから、新しいセクションを追加します。",
-    "subtasks": [
-      {
-        "id": "task_1",
-        "description": "README.mdファイルの現在の内容を取得",
-        "dependencies": [],
-        "estimated_complexity": "low",
-        "required_tools": ["github_get_file_contents"]
-      },
-      {
-        "id": "task_2",
-        "description": "インストール手順セクションの作成",
-        "dependencies": ["task_1"],
-        "estimated_complexity": "low",
-        "required_tools": []
-      },
-      {
-        "id": "task_3",
-        "description": "READMEファイルの更新",
-        "dependencies": ["task_2"],
-        "estimated_complexity": "low",
-        "required_tools": ["github_create_or_update_file"]
-      },
-      {
-        "id": "task_4",
-        "description": "更新内容の確認",
-        "dependencies": ["task_3"],
-        "estimated_complexity": "low",
-        "required_tools": ["github_get_file_contents"]
-      }
-    ]
-  },
-  "action_plan": {
-    "execution_order": ["task_1", "task_2", "task_3", "task_4"],
-    "actions": [
-      {
-        "task_id": "task_1",
-        "action_type": "tool_call",
-        "tool": "github_get_file_contents",
-        "purpose": "現在のREADME構造を理解する",
-        "expected_outcome": "README.mdの内容が取得される"
-      },
-      {
-        "task_id": "task_3",
-        "action_type": "tool_call",
-        "tool": "github_create_or_update_file",
-        "purpose": "インストール手順を追加したREADMEに更新",
-        "expected_outcome": "READMEが正常に更新される"
-      },
-      {
-        "task_id": "task_4",
-        "action_type": "tool_call",
-        "tool": "github_get_file_contents",
-        "purpose": "更新が正しく反映されたか確認",
-        "expected_outcome": "更新されたREADMEに新しい手順が含まれている"
-      }
-    ],
-    "total_steps": 4,
-    "estimated_complexity": "low"
-  },
-  "comment": "READMEファイルの更新計画が完成しました。4つのステップで実行します。"
-}
-```
-
-#### 15.1.2 新機能の実装
-
-**Issueの内容：**
-```
-タイトル: ユーザー認証機能の追加
-
-本文:
-以下の機能を実装してください：
-- ログイン/ログアウト機能
-- パスワードのハッシュ化
-- セッション管理
-- テストコードも追加してください
-```
-
-**プランニング結果：**
-```json
-{
-  "phase": "planning",
-  "goal_understanding": {
-    "main_objective": "ユーザー認証機能の実装",
-    "success_criteria": [
-      "ログイン機能が動作する",
-      "ログアウト機能が動作する",
-      "パスワードが安全に保存される",
-      "セッション管理が実装されている",
-      "テストコードが含まれている"
-    ],
-    "constraints": [
-      "セキュリティベストプラクティスに従う",
-      "既存のコード構造を維持する"
-    ],
-    "context": "認証機能の新規実装"
-  },
-  "task_decomposition": {
-    "reasoning": "認証機能は複数のコンポーネントから構成されます。まずプロジェクト構造を理解し、認証モジュールを作成し、既存のコードと統合し、最後にテストを追加します。セキュリティが重要なため、各ステップで慎重に実装します。",
-    "subtasks": [
-      {
-        "id": "task_1",
-        "description": "プロジェクト構造の確認",
-        "dependencies": [],
-        "estimated_complexity": "low",
-        "required_tools": ["github_search_code", "github_get_file_contents"]
-      },
-      {
-        "id": "task_2",
-        "description": "認証モジュールの設計",
-        "dependencies": ["task_1"],
-        "estimated_complexity": "medium",
-        "required_tools": []
-      },
-      {
-        "id": "task_3",
-        "description": "パスワードハッシュ化機能の実装",
-        "dependencies": ["task_2"],
-        "estimated_complexity": "medium",
-        "required_tools": ["github_create_or_update_file"]
-      },
-      {
-        "id": "task_4",
-        "description": "セッション管理機能の実装",
-        "dependencies": ["task_2"],
-        "estimated_complexity": "medium",
-        "required_tools": ["github_create_or_update_file"]
-      },
-      {
-        "id": "task_5",
-        "description": "ログイン/ログアウトエンドポイントの実装",
-        "dependencies": ["task_3", "task_4"],
-        "estimated_complexity": "high",
-        "required_tools": ["github_create_or_update_file"]
-      },
-      {
-        "id": "task_6",
-        "description": "テストコードの作成",
-        "dependencies": ["task_5"],
-        "estimated_complexity": "medium",
-        "required_tools": ["github_create_or_update_file"]
-      },
-      {
-        "id": "task_7",
-        "description": "ドキュメントの更新",
-        "dependencies": ["task_6"],
-        "estimated_complexity": "low",
-        "required_tools": ["github_create_or_update_file"]
-      }
-    ]
-  },
-  "action_plan": {
-    "execution_order": ["task_1", "task_2", "task_3", "task_4", "task_5", "task_6", "task_7"],
-    "total_steps": 7,
-    "estimated_complexity": "high"
-  },
-  "comment": "認証機能の実装計画が完成しました。7つのステップで段階的に実装します。"
-}
-```
-
-### 15.2 エラーリカバリーの例
-
-#### 15.2.1 ファイルが見つからないエラー
-
-**実行フロー：**
-
-1. **最初の実行試行：**
-```json
-{
-  "phase": "execution",
-  "current_task": "task_1",
-  "function_call": {
-    "name": "github_get_file_contents",
-    "arguments": {
-      "owner": "myorg",
-      "repo": "myrepo",
-      "path": "src/config.js"
-    }
-  }
-}
-```
-
-2. **エラー発生：**
-```
-Error: File not found: src/config.js
-```
-
-3. **リフレクション：**
-```json
-{
-  "phase": "reflection",
-  "reflection": {
-    "action_evaluated": "github_get_file_contents",
-    "status": "failure",
-    "error": "File not found: src/config.js",
-    "root_cause_analysis": "指定されたパスにファイルが存在しない。パス誤りまたはファイル未作成の可能性。",
-    "plan_revision_needed": true
-  },
-  "plan_revision": {
-    "reason": "正しいファイルパスを特定する必要がある",
-    "changes": [
-      {
-        "type": "add_action",
-        "action": {
-          "action_type": "tool_call",
-          "tool": "github_search_code",
-          "purpose": "config関連のファイルを検索",
-          "before_task": "task_1"
-        }
-      }
-    ]
-  },
-  "comment": "ファイルが見つからないため、まず正しいパスを検索します"
-}
-```
-
-4. **修正後の実行：**
-```json
-{
-  "phase": "execution",
-  "current_task": "search_config",
-  "function_call": {
-    "name": "github_search_code",
-    "arguments": {
-      "owner": "myorg",
-      "repo": "myrepo",
-      "query": "config filename:*.js"
-    }
-  }
-}
-```
-
-5. **成功：**
-正しいパス（`config/app.config.js`）が見つかり、処理が継続されます。
-
-### 15.3 人間フィードバックの統合例
-
-#### 15.3.1 実装方針の修正要求
-
-**初期の計画：**
-```json
-{
-  "action_plan": {
-    "actions": [
-      {
-        "task_id": "task_1",
-        "tool": "github_create_or_update_file",
-        "file": "src/authentication.js",
-        "description": "認証ロジックを実装"
-      }
-    ]
-  }
-}
-```
-
-**人間からのフィードバック（Issueコメント）：**
-```
-認証ロジックはTypeScriptで実装してください。
-また、既存のsrc/utils/auth.tsとの統合も考慮してください。
-```
-
-**フィードバック統合後の計画：**
-```json
-{
-  "phase": "reflection",
-  "reflection": {
-    "feedback_type": "human",
-    "feedback_source": "issue_comment",
-    "feedback_summary": "TypeScriptで実装し、既存ファイルとの統合を考慮"
-  },
-  "plan_revision": {
-    "reason": "人間からのフィードバックに基づく修正",
-    "changes": [
-      {
-        "type": "modify_action",
-        "action_id": "task_1",
-        "updates": {
-          "file": "src/authentication.ts",
-          "description": "TypeScriptで認証ロジックを実装し、src/utils/auth.tsと統合"
-        }
-      },
-      {
-        "type": "add_action",
-        "action": {
-          "task_id": "task_0",
-          "tool": "github_get_file_contents",
-          "file": "src/utils/auth.ts",
-          "description": "既存の認証ユーティリティを確認",
-          "before_task": "task_1"
-        }
-      }
-    ]
-  },
-  "comment": "フィードバックを反映して計画を修正しました。TypeScriptで実装し、既存コードとの統合を行います。"
-}
-```
-
-## 16. モニタリングとメトリクス
-
-### 16.1 プランニングの品質メトリクス
-
-#### 16.1.1 計画の精度
-
-**測定項目：**
-- 計画通りに完了したタスクの割合
-- 計画修正が必要だったタスクの割合
-- 平均計画修正回数
-
-**目標値：**
-```yaml
-metrics:
-  planning_accuracy:
-    target: 80%  # 80%のタスクが最初の計画で完了
-  
-  revision_rate:
-    target: <30%  # 30%以下のタスクのみ修正が必要
-  
-  avg_revisions:
-    target: <1.5  # 平均1.5回以下の修正
-```
-
-#### 16.1.2 タスク分解の妥当性
-
-**測定項目：**
-- サブタスクの数の適切性
-- サブタスクの粒度の一貫性
-- 依存関係の正確性
-
-**評価基準：**
-- シンプルなタスク: 2-5個のサブタスク
-- 中程度のタスク: 5-10個のサブタスク
-- 複雑なタスク: 10-15個のサブタスク
-
-### 16.2 実行パフォーマンスメトリクス
-
-#### 16.2.1 処理時間
-
-**測定項目：**
-```yaml
-performance_metrics:
-  planning_time:
-    measure: "プランニングフェーズの所要時間"
-    unit: "seconds"
-    
-  execution_time:
-    measure: "実行フェーズの所要時間"
-    unit: "seconds"
-    
-  reflection_time:
-    measure: "リフレクションフェーズの所要時間"
-    unit: "seconds"
-    
-  total_time:
-    measure: "タスク全体の所要時間"
-    unit: "seconds"
-```
-
-**ダッシュボード表示例：**
-```
-┌─────────────────────────────────────────┐
-│ プランニング平均時間: 12.3秒            │
-│ 実行平均時間: 124.5秒                   │
-│ リフレクション平均時間: 8.7秒           │
-│ 全体平均時間: 145.5秒                   │
-└─────────────────────────────────────────┘
-```
-
-#### 16.2.2 リソース使用量
-
-**測定項目：**
-```yaml
-resource_metrics:
-  llm_calls:
-    measure: "LLM API呼び出し回数"
-    breakdown:
-      - planning: "プランニング用"
-      - execution: "実行用"
-      - reflection: "リフレクション用"
-  
-  tokens_used:
-    measure: "使用トークン数"
-    breakdown:
-      - input: "入力トークン"
-      - output: "出力トークン"
-  
-  api_cost:
-    measure: "API使用コスト"
-    unit: "USD"
-```
-
-### 16.3 品質メトリクス
-
-#### 16.3.1 成功率
-
-**測定項目：**
-```yaml
-quality_metrics:
-  task_completion_rate:
-    measure: "タスク完了率"
-    calculation: "完了タスク数 / 全タスク数"
-    target: ">90%"
-  
-  first_try_success_rate:
-    measure: "初回成功率"
-    calculation: "計画修正なしで完了 / 全タスク数"
-    target: ">70%"
-  
-  error_recovery_rate:
-    measure: "エラー回復率"
-    calculation: "回復成功 / 全エラー数"
-    target: ">80%"
-```
-
-#### 16.3.2 コード品質
-
-**測定項目：**
-- 生成されたコードの構文エラー率
-- テストカバレッジ
-- コードレビューでの指摘数
-
-### 16.4 ログとトレーシング
-
-#### 16.4.1 ログフォーマット
-
-**プランニングログ：**
-```
-[2024-01-15 10:30:00] [INFO] [Planning] Task started: issue-123
-[2024-01-15 10:30:05] [INFO] [Planning] Goal understanding completed
-[2024-01-15 10:30:10] [INFO] [Planning] Task decomposition: 5 subtasks
-[2024-01-15 10:30:15] [INFO] [Planning] Action plan generated: 8 actions
-```
-
-**リフレクションログ：**
-```
-[2024-01-15 10:35:00] [INFO] [Reflection] Evaluating action: github_get_file_contents
-[2024-01-15 10:35:01] [WARN] [Reflection] Action failed: File not found
-[2024-01-15 10:35:02] [INFO] [Reflection] Issue identified: Incorrect file path
-[2024-01-15 10:35:03] [INFO] [Reflection] Plan revision suggested
-```
-
-#### 16.4.2 トレーシング
-
-**分散トレーシング対応：**
-```yaml
-tracing:
-  enabled: true
-  provider: "opentelemetry"
-  
-  spans:
-    - name: "planning.understand_goal"
-    - name: "planning.decompose_task"
-    - name: "planning.generate_action_plan"
-    - name: "execution.execute_action"
-    - name: "reflection.evaluate_action"
-    - name: "reflection.revise_plan"
-```
-
-## 17. まとめ
-
-### 17.1 プランニングプロセスの利点
-
-1. **タスク理解の向上**
-   - ユーザーの意図を正確に把握
-   - 成功基準の明確化
-   - 制約条件の早期識別
-
-2. **実行効率の改善**
-   - 計画的なツール使用
-   - 依存関係の適切な解決
-   - 無駄な試行錯誤の削減
-
-3. **エラー対応の強化**
-   - 問題の早期発見
-   - 体系的なエラー分析
-   - 効果的な計画修正
-
-4. **透明性の向上**
-   - 実行計画の可視化
-   - 進捗状況の追跡可能性
-   - 意思決定プロセスの記録
-
-### 17.2 主要な設計原則
-
-1. **段階的な処理**
-   - 理解 → 分解 → 計画 → 実行 → 評価のサイクル
-   - 各フェーズの明確な責務分離
-   - フェーズ間の適切な情報伝達
-
-2. **適応性**
-   - フィードバックに基づく計画修正
-   - エラーからの自動回復
-   - 人間の介入受け入れ
-
-3. **効率性**
-   - トークン使用量の最適化
-   - キャッシュの活用
-   - 並列実行の検討
-
-4. **安全性**
-   - ツール使用の制限
-   - 危険操作の検出
-   - 人間の承認フロー
-
-### 17.3 今後の拡張可能性
-
-1. **学習機能**
-   - 過去の計画パターンの学習
-   - 成功/失敗パターンの分析
-   - 自動最適化
-
-2. **高度なプランニング戦略**
-   - Monte Carlo Tree Search
-   - Reinforcement Learning
-   - Multi-agent collaboration
-
-3. **統合強化**
-   - CI/CDパイプラインとの連携
-   - プロジェクト管理ツール統合
-   - 他のAIエージェントとの協調
-
-### 17.4 参考文献とリソース
-
-**Chain-of-Thought関連：**
+**Chain-of-Thought:**
 - Wei et al. (2022): "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models"
 - Yao et al. (2023): "Tree of Thoughts: Deliberate Problem Solving with Large Language Models"
 
-**プランニング手法：**
-- Russell & Norvig: "Artificial Intelligence: A Modern Approach" (Planning章)
-- Hierarchical Task Network Planning
-- STRIPS Planning System
-
-**LLMエージェント設計：**
+**LLMエージェント設計:**
 - Model Context Protocol (MCP) specification
 - ReAct: Reasoning and Acting pattern
 - Reflexion: Language Agents with Verbal Reinforcement Learning
@@ -1878,6 +1117,5 @@ tracing:
 ---
 
 **文書バージョン:** 1.0  
-**最終更新日:** 2024-01-15  
-**ステータス:** 仕様確定  
-**次のステップ:** 実装フェーズ1の開始
+**最終更新日:** 2024-11-23  
+**ステータス:** 仕様確定
