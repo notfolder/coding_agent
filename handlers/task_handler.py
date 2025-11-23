@@ -97,6 +97,107 @@ class TaskHandler:
         # タスク固有の設定を取得
         task_config = self._get_task_config(task)
         
+        # Check if context storage is enabled
+        context_storage_enabled = task_config.get("context_storage", {}).get("enabled", False)
+        
+        if context_storage_enabled and task.uuid:
+            # Use file-based context storage
+            self._handle_with_context_storage(task, task_config)
+        else:
+            # Use legacy in-memory handling
+            self._handle_legacy(task, task_config)
+
+    def _handle_with_context_storage(self, task: Task, task_config: dict[str, Any]) -> None:
+        """Handle task with file-based context storage.
+
+        Args:
+            task: Task object
+            task_config: Task configuration
+
+        """
+        from clients.lm_client import get_llm_client
+        from context_storage import ContextCompressor, TaskContextManager
+        
+        # Initialize context manager
+        context_manager = TaskContextManager(
+            task_key=task.get_task_key(),
+            task_uuid=task.uuid,
+            config=task_config,
+            user=task.user,
+        )
+        
+        try:
+            # Get stores
+            message_store = context_manager.get_message_store()
+            summary_store = context_manager.get_summary_store()
+            tool_store = context_manager.get_tool_store()
+            
+            # Get functions and tools from MCP clients
+            functions = []
+            tools = []
+            if task_config.get("llm", {}).get("function_calling", True):
+                for mcp_client in self.mcp_clients.values():
+                    functions.extend(mcp_client.get_function_calling_functions())
+                    tools.extend(mcp_client.get_function_calling_tools())
+            
+            # Create task-specific LLM client with message store
+            task_llm_client = get_llm_client(
+                task_config,
+                functions=functions if functions else None,
+                tools=tools if tools else None,
+                message_store=message_store,
+                context_dir=context_manager.context_dir,
+            )
+            
+            # Create context compressor
+            compressor = ContextCompressor(
+                message_store,
+                summary_store,
+                task_llm_client,
+                task_config,
+            )
+            
+            # Setup task handling
+            self._setup_task_handling_with_client(task, task_config, task_llm_client)
+            
+            # Processing loop
+            count = 0
+            max_count = task_config.get("max_llm_process_num", 1000)
+            error_state = {"last_tool": None, "tool_error_count": 0}
+            
+            while count < max_count:
+                # Check if compression is needed
+                if compressor.should_compress():
+                    self.logger.info("Context compression triggered")
+                    compressor.compress()
+                    context_manager.update_statistics(compressions=1)
+                
+                # Process LLM interaction
+                if self._process_llm_interaction_with_client(
+                    task, count, error_state, task_llm_client, message_store, tool_store, context_manager
+                ):
+                    break
+                
+                count += 1
+                context_manager.update_statistics(llm_calls=1)
+            
+            # Task completed successfully
+            task.finish()
+            context_manager.complete()
+            
+        except Exception as e:
+            self.logger.exception("Task processing failed")
+            context_manager.fail(str(e))
+            raise
+
+    def _handle_legacy(self, task: Task, task_config: dict[str, Any]) -> None:
+        """Handle task using legacy in-memory approach.
+
+        Args:
+            task: Task object
+            task_config: Task configuration
+
+        """
         # 初期設定
         self._setup_task_handling(task, task_config)
 
@@ -437,3 +538,151 @@ class TaskHandler:
 
         # JSON部分を抽出してパース
         return json.loads(text[start : end + 1])
+
+    def _setup_task_handling_with_client(
+        self, task: Task, task_config: dict[str, Any], llm_client: Any
+    ) -> None:
+        """タスク処理の初期設定を行う（カスタムLLMクライアント用）.
+        
+        Args:
+            task: タスクオブジェクト
+            task_config: タスク固有の設定
+            llm_client: 使用するLLMクライアント
+        """
+        prompt = task.get_prompt()
+        self.logger.info("LLMに送信するプロンプト: %s", prompt)
+
+        llm_client.send_system_prompt(self._make_system_prompt(task_config))
+        llm_client.send_user_message(prompt)
+
+    def _process_llm_interaction_with_client(
+        self,
+        task: Task,
+        count: int,
+        error_state: dict,
+        llm_client: Any,
+        message_store: Any,
+        tool_store: Any,
+        context_manager: Any,
+    ) -> bool:
+        """LLMとの単一の対話処理を実行する（file-based mode用）.
+
+        Returns:
+            処理を終了する場合はTrue、継続する場合はFalse
+
+        """
+        import time
+        
+        # LLMからレスポンスを取得
+        resp, functions = llm_client.get_response()
+        self.logger.info("LLM応答: %s", resp)
+
+        # レスポンスの前処理
+        resp_clean = self._process_think_tags(task, resp)
+
+        # JSON応答の解析
+        try:
+            data = self._extract_json(resp_clean)
+        except Exception:
+            self.logger.exception("LLM応答JSONパース失敗")
+            if count >= MAX_JSON_PARSE_ERRORS:
+                task.comment("LLM応答エラーでスキップ")
+                return True
+            return False
+
+        # レスポンスデータの処理（ツール実行含む）
+        return self._process_response_data_with_context(
+            task, data, functions, error_state, llm_client, tool_store, context_manager
+        )
+
+    def _process_response_data_with_context(
+        self,
+        task: Task,
+        data: dict,
+        functions: list,
+        error_state: dict,
+        llm_client: Any,
+        tool_store: Any,
+        context_manager: Any,
+    ) -> bool:
+        """レスポンスデータを解析し、適切な処理を実行する（file-based mode用）.
+
+        Returns:
+            処理を終了する場合はTrue、継続する場合はFalse
+
+        """
+        import time
+        
+        # 終了条件のチェック
+        if data.get("done", False):
+            task.comment("タスク完了")
+            return True
+
+        # コメントフィールドの処理
+        if "comment" in data:
+            task.comment(data["comment"])
+
+        # 各フィールドの処理
+        if "plan" in data:
+            task.comment(str(data["plan"]))
+            llm_client.send_user_message(str(data["plan"]))
+
+        if "call_tool" in data:
+            # ツール呼び出し処理
+            for tool_call in data["call_tool"]:
+                tool_name = tool_call["tool"]
+                args = self.sanitize_arguments(tool_call.get("args", {}))
+                mcp_server, tool_func = tool_name.split("_", 1)
+                
+                try:
+                    start_time = time.time()
+                    output = self.mcp_clients[mcp_server].call_tool(tool_func, args)
+                    duration_ms = (time.time() - start_time) * 1000
+                    
+                    # Record tool execution
+                    tool_store.add_tool_call(
+                        tool_name=tool_name,
+                        args=args,
+                        result=output,
+                        status="success",
+                        duration_ms=duration_ms,
+                    )
+                    context_manager.update_statistics(tool_calls=1)
+                    
+                    # Send result to LLM
+                    llm_client.send_function_result(tool_name, output)
+                    
+                    # Reset error count on success
+                    if error_state["last_tool"] == tool_name:
+                        error_state["tool_error_count"] = 0
+                    
+                except Exception as e:
+                    duration_ms = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
+                    error_msg = str(e)
+                    
+                    # Record tool error
+                    tool_store.add_tool_call(
+                        tool_name=tool_name,
+                        args=args,
+                        result=None,
+                        status="error",
+                        duration_ms=duration_ms,
+                        error=error_msg,
+                    )
+                    context_manager.update_statistics(tool_calls=1)
+                    
+                    self.logger.exception("ツール呼び出しエラー: %s", error_msg)
+                    llm_client.send_function_result(tool_name, {"error": error_msg})
+                    
+                    # Update error state
+                    self._update_error_count(tool_name, error_state)
+                    if error_state["tool_error_count"] >= MAX_CONSECUTIVE_TOOL_ERRORS:
+                        task.comment(f"同じツール({tool_name})で3回連続エラーが発生したため処理を中止します。")
+                        return True
+
+        if "command" in data:
+            # Legacy command format
+            task.comment(data.get("comment", ""))
+            return self._process_command_field(task, data, error_state)
+
+        return False

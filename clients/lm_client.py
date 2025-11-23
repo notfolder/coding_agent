@@ -36,17 +36,19 @@ def get_llm_client(
     config: dict[str, Any],
     functions: list[dict[str, Any]] | None = None,
     tools: list[dict[str, Any]] | None = None,
+    message_store: Any = None,
+    context_dir: Any = None,
 ) -> LLMClient:
     prov = config["llm"]["provider"]
     if prov == "lmstudio":
         if functions is not None:
             msg = "LMStudio does not support functions. use openapi compatible call."
             raise ValueError(msg)
-        return LMStudioClient(config["llm"]["lmstudio"])
+        return LMStudioClient(config["llm"]["lmstudio"], message_store, context_dir)
     if prov == "ollama":
-        return OllamaClient(config["llm"]["ollama"])
+        return OllamaClient(config["llm"]["ollama"], message_store, context_dir)
     if prov == "openai":
-        return OpenAIClient(config["llm"]["openai"], functions, tools)
+        return OpenAIClient(config["llm"]["openai"], functions, tools, message_store, context_dir)
     if prov == "mock":
         if get_mock_llm_client is None:
             msg = "Mock LLM client not available - this should only be used in tests"
