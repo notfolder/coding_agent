@@ -456,6 +456,7 @@ grep "LLM" logs/agent.log
 - [仕様書](spec.md) - 詳細な仕様
 - [クラス設計](class_spec.md) - アーキテクチャ詳細
 - **[プランニングプロセス仕様書](PLANNING_SPECIFICATION.md) - LLMエージェントのプランニング機能仕様** 🆕
+- **[プランニングクイックスタート](PLANNING_QUICKSTART.md) - プランニング機能の基本設定と使い方** 🆕
 - [GitHub MCP サーバー](github-mcp-server.md) - GitHub 連携
 - [GitLab MCP サーバー](gitlab-mcp-server.md) - GitLab 連携
 - [OpenAI 設定](openai.md) - OpenAI 設定詳細
