@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 
+import pytest
+
 from webhook.validators import GitHubWebhookValidator, GitLabWebhookValidator
 
 
@@ -57,6 +59,13 @@ class TestGitHubWebhookValidator:
 
         assert validator.validate_signature(payload, signature) is True
 
+    def test_missing_secret_raises_error(self) -> None:
+        """Test that missing secret raises ValueError."""
+        config = {"webhook": {"github": {}}}
+
+        with pytest.raises(ValueError, match="GitHub webhook secret is not configured"):
+            GitHubWebhookValidator(config)
+
 
 class TestGitLabWebhookValidator:
     """Test GitLab webhook token validation."""
@@ -95,3 +104,18 @@ class TestGitLabWebhookValidator:
         validator = GitLabWebhookValidator(config, is_system_hook=True)
 
         assert validator.validate_token("wrong_token") is False
+
+    def test_missing_token_raises_error(self) -> None:
+        """Test that missing token raises ValueError."""
+        config = {"webhook": {"gitlab": {}}}
+
+        with pytest.raises(ValueError, match="GitLab webhook token is not configured"):
+            GitLabWebhookValidator(config, is_system_hook=False)
+
+    def test_missing_system_hook_token_is_allowed(self) -> None:
+        """Test that missing system hook token is allowed (returns empty string)."""
+        config = {"webhook": {"gitlab": {}}}
+
+        # System hook validator should initialize successfully with empty token
+        validator = GitLabWebhookValidator(config, is_system_hook=True)
+        assert validator.token == ""

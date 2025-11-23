@@ -40,10 +40,19 @@ class WebhookServer:
         self.task_queue = task_queue
         self.app = FastAPI(title="Coding Agent Webhook Server")
 
-        # Initialize validators
+        # Initialize validators (may raise ValueError if secrets/tokens not configured)
+        # This is intentional - webhook server should not start without proper authentication
         self.github_validator = GitHubWebhookValidator(config)
         self.gitlab_validator = GitLabWebhookValidator(config, is_system_hook=False)
-        self.gitlab_system_validator = GitLabWebhookValidator(config, is_system_hook=True)
+
+        # System hook validator is optional
+        gitlab_system_token = config.get("webhook", {}).get("gitlab", {}).get("system_hook_token")
+        if gitlab_system_token:
+            self.gitlab_system_validator = GitLabWebhookValidator(config, is_system_hook=True)
+            logger.info("GitLab system hook support enabled")
+        else:
+            self.gitlab_system_validator = None
+            logger.info("GitLab system hook support disabled (no token configured)")
 
         # Initialize task factory
         self.task_factory = WebhookTaskFactory(config, mcp_clients)
@@ -178,6 +187,14 @@ class WebhookServer:
                 JSON response with status
 
             """
+            # Check if system hook is configured
+            if not self.gitlab_system_validator:
+                logger.error("GitLab system hook endpoint called but no token configured")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="System hook not configured",
+                )
+
             payload = await request.json()
 
             # Validate token with system hook validator

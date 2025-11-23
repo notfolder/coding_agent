@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class GitHubWebhookValidator:
@@ -15,9 +18,17 @@ class GitHubWebhookValidator:
         Args:
             config: Application configuration containing webhook secret
 
+        Raises:
+            ValueError: If webhook secret is not configured
+
         """
         webhook_config = config.get("webhook", {}).get("github", {})
         self.secret = webhook_config.get("secret", "")
+
+        if not self.secret:
+            msg = "GitHub webhook secret is not configured. Set GITHUB_WEBHOOK_SECRET environment variable."
+            logger.error(msg)
+            raise ValueError(msg)
 
     def validate_signature(self, payload: bytes, signature: str | None) -> bool:
         """Validate GitHub webhook signature using HMAC-SHA256.
@@ -57,12 +68,21 @@ class GitLabWebhookValidator:
             config: Application configuration containing webhook token
             is_system_hook: Whether this is for system hook validation
 
+        Raises:
+            ValueError: If webhook token is not configured (system hook token is optional)
+
         """
         webhook_config = config.get("webhook", {}).get("gitlab", {})
         if is_system_hook:
+            # System hook token is optional - only validate if configured
             self.token = webhook_config.get("system_hook_token", "")
         else:
+            # Project webhook token is required
             self.token = webhook_config.get("token", "")
+            if not self.token:
+                msg = "GitLab webhook token is not configured. Set GITLAB_WEBHOOK_TOKEN environment variable."
+                logger.error(msg)
+                raise ValueError(msg)
 
     def validate_token(self, token: str | None) -> bool:
         """Validate GitLab webhook token.
