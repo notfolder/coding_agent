@@ -1,27 +1,22 @@
-# プランニングプロセス仕様書 (Planning Process Specification)
+# プランニングプロセス仕様書
 
 ## 1. 概要
 
 ### 1.1 目的
 
-本仕様書は、LLMエージェントが複雑なタスクを効果的に処理するためのプランニングプロセスを定義します。このプロセスにより、エージェントは以下を実現します：
-
-- ユーザーの意図を正確に理解
-- 複雑なタスクを実行可能な単位に分解
-- 効率的な実行計画の策定
-- 実行結果の監視と評価
-- エラーや問題発生時の適切な対応
+本仕様書は、LLMエージェントが複雑なタスクを効果的に処理するためのプランニングプロセスを定義します。
 
 ### 1.2 スコープ
 
 本仕様は以下をカバーします：
 
 - プランニングプロセスの5つのフェーズの詳細
-- 各フェーズの入出力形式
-- JSON応答フォーマット
-- 設定オプション
+- 各フェーズの入出力形式とJSON応答フォーマット
+- アーキテクチャ設計と実装詳細設計
+- システムプロンプト拡張仕様
+- 設定オプションと環境変数
 - エラーハンドリング戦略
-- パフォーマンスとセキュリティの考慮事項
+- テスト戦略
 
 ### 1.3 前提条件
 
@@ -32,21 +27,21 @@
 
 ## 2. プランニングプロセスの5つのフェーズ
 
-### 1. 目標の理解 (Goal Understanding)
+### 2.1 目標の理解 (Goal Understanding)
 
-エージェントはユーザーからの指示や達成すべき目標を理解します。
+エージェントはまず、ユーザーからの指示や達成すべき目標を理解します。
 
-**入力:**
+**入力：**
 - Issue/PR/MRの内容
 - ユーザーコメント
 - リポジトリコンテキスト
 
-**処理:**
+**処理：**
 - 要求の意図を分析
 - 成功基準の特定
 - 制約条件の識別
 
-**出力:**
+**出力：**
 ```json
 {
   "goal_understanding": {
@@ -58,16 +53,16 @@
 }
 ```
 
-### 2. タスクの分解 (Task Decomposition)
+### 2.2 タスクの分解 (Task Decomposition)
 
 複雑な目標を実行可能な小さなサブタスク（ステップ）に分割します。Chain-of-Thought (CoT) などの技術を使用します。
 
-**手法:**
+**手法：**
 - Chain-of-Thought (CoT): 思考プロセスを段階的に展開
 - Hierarchical Task Network: 階層的なタスク構造
 - Dependency Analysis: 依存関係の分析
 
-**出力:**
+**出力：**
 ```json
 {
   "task_decomposition": {
@@ -85,17 +80,17 @@
 }
 ```
 
-### 3. 行動系列の生成 (Action Sequence Generation)
+### 2.3 行動系列の生成 (Action Sequence Generation)
 
 分解されたサブタスクに基づき、実行順序とツール使用計画を策定します。
 
-**考慮事項:**
+**考慮事項：**
 - タスク間の依存関係
 - ツールの利用可能性
 - 実行効率
 - エラー回復戦略
 
-**出力:**
+**出力：**
 ```json
 {
   "action_plan": {
@@ -114,28 +109,27 @@
 }
 ```
 
-### 4. 実行 (Execution)
+### 2.4 実行 (Execution)
 
 計画された行動を順番に実行します。
 
-**実行フロー:**
+**実行フロー：**
 1. アクションの選択
 2. 前提条件の確認
 3. ツールの実行
 4. 結果の記録
 5. 次のアクションへ
 
-### 5. 監視と修正 (Monitoring and Reflection)
+### 2.5 監視と修正 (Monitoring and Reflection)
 
 実行結果を評価し、予期せぬ結果やエラーが発生した場合は計画を見直します。
 
-**監視対象:**
+**監視対象：**
 - アクションの成功/失敗
 - 期待される結果との差異
 - 副作用や予期しない影響
-- リソース使用状況
 
-**リフレクションタイプ:**
+**リフレクションタイプ：**
 
 #### 自動リフレクション (Automatic Reflection)
 ```json
@@ -156,7 +150,7 @@
 - PRレビューでのフィードバック
 - 明示的な修正要求
 
-**計画修正プロセス:**
+**計画修正プロセス：**
 1. 問題の特定
 2. 根本原因の分析
 3. 代替アプローチの検討
@@ -170,9 +164,9 @@
 ```json
 {
   "phase": "planning",
-  "goal_understanding": { /* ... */ },
-  "task_decomposition": { /* ... */ },
-  "action_plan": { /* ... */ },
+  "goal_understanding": { },
+  "task_decomposition": { },
+  "action_plan": { },
   "comment": "プランニング完了。実行を開始します。"
 }
 ```
@@ -185,7 +179,7 @@
   "current_task": "task_1",
   "function_call": {
     "name": "github_get_file_contents",
-    "arguments": { /* ... */ }
+    "arguments": { }
   },
   "comment": "ファイル内容を取得しています"
 }
@@ -196,11 +190,11 @@
 ```json
 {
   "phase": "reflection",
-  "reflection": { /* ... */ },
+  "reflection": { },
   "plan_revision": {
     "reason": "修正の理由",
     "changes": ["変更内容1", "変更内容2"],
-    "updated_action_plan": { /* ... */ }
+    "updated_action_plan": { }
   },
   "comment": "計画を修正しました"
 }
@@ -215,8 +209,7 @@
     "goal_achieved": true|false,
     "tasks_completed": 5,
     "tasks_failed": 0,
-    "key_outcomes": ["成果1", "成果2"],
-    "lessons_learned": ["学び1", "学び2"]
+    "key_outcomes": ["成果1", "成果2"]
   },
   "done": true,
   "comment": "すべてのタスクが完了しました"
@@ -226,168 +219,572 @@
 ## 設定オプション
 
 ```yaml
+# プランニング機能の設定（全てデフォルト値）
 planning:
-  enabled: true                    # プランニング機能の有効化
-  strategy: "chain_of_thought"     # プランニング戦略
-  max_subtasks: 10                 # 最大サブタスク数
+  # プランニング機能の有効/無効（デフォルト: true）
+  enabled: true
+  
+  # プランニング戦略（デフォルト: chain_of_thought）
+  # 選択肢: "chain_of_thought", "hierarchical", "simple"
+  strategy: "chain_of_thought"
+  
+  # 最大サブタスク数（デフォルト: 100）
+  max_subtasks: 100
+  
+  # タスク分解の詳細度（デフォルト: moderate）
+  # 選択肢: "detailed", "moderate", "minimal"
+  decomposition_level: "moderate"
+  
+  # リフレクション設定
   reflection:
-    enabled: true                  # リフレクション機能の有効化
-    trigger_on_error: true         # エラー時の自動リフレクション
-    trigger_interval: 3            # N回のアクション毎にリフレクション
+    # リフレクション機能の有効/無効（デフォルト: true）
+    enabled: true
+    
+    # エラー発生時に自動的にリフレクション実行
+    trigger_on_error: true
+    
+    # N回のアクション毎に定期的にリフレクション実行
+    trigger_interval: 3
+  
+  # 計画修正設定
   revision:
-    max_revisions: 3               # 最大計画修正回数
-    require_human_approval: false  # 人間の承認を要求するか
+    # 最大計画修正回数
+    max_revisions: 3
+  
+  # 履歴管理（JSONLファイルベース）
+  history:
+    storage_type: "jsonl"
+    directory: "planning_history"
 ```
 
-## 7. アーキテクチャ設計
+## 7. アーキテクチャ設計と実装詳細
 
-### 7.1 コンポーネント構成
+### 7.1 実装方式の結論
 
-プランニングプロセスは以下のコンポーネントで構成されます：
+**システムプロンプトの変更のみでは実装不可能。コード変更が必要。**
 
-#### 7.1.1 PlanningEngine（プランニングエンジン）
+**理由：**
+1. **状態管理が必要**: プランニング、実行、リフレクションの各フェーズ間の遷移管理
+2. **JSONLファイルベースの履歴管理**: 計画修正の履歴をファイルに永続化
+3. **複雑なフロー制御**: 計画作成→実行→評価→修正のループ処理
+4. **設定による動的制御**: config.yamlでプランニング機能の有効/無効切り替え
+
+### 7.2 全体アーキテクチャ
+
+```mermaid
+graph TB
+    subgraph "既存コンポーネント"
+        TH[TaskHandler]
+        LLM[LLMClient]
+        MCP[MCPClients]
+    end
+    
+    subgraph "新規コンポーネント"
+        PC[PlanningCoordinator]
+        PHS[PlanningHistoryStore]
+        SPP[system_prompt_planning.txt]
+    end
+    
+    subgraph "ストレージ"
+        JSONL[(planning_history/<br/>{task_uuid}.jsonl)]
+    end
+    
+    TH -->|planning.enabled=true| PC
+    TH -->|planning.enabled=false| LLM
+    PC --> PHS
+    PC --> LLM
+    PC --> MCP
+    PC --> SPP
+    PHS --> JSONL
+    
+    style PC fill:#e1f5fe
+    style PHS fill:#e1f5fe
+    style SPP fill:#e1f5fe
+    style JSONL fill:#fff3e0
+```
+
+### 7.3 プランニングフロー
+
+```mermaid
+stateDiagram-v2
+    [*] --> 初期化
+    初期化 --> プランニング確認
+    
+    プランニング確認 --> 既存計画読込: 履歴あり
+    プランニング確認 --> プランニングフェーズ: 履歴なし
+    
+    既存計画読込 --> 実行フェーズ
+    プランニングフェーズ --> 計画保存
+    計画保存 --> 実行フェーズ
+    
+    実行フェーズ --> アクション実行
+    アクション実行 --> リフレクション判定
+    
+    リフレクション判定 --> リフレクション実行: エラーまたは<br/>interval到達
+    リフレクション判定 --> 完了確認: 正常
+    
+    リフレクション実行 --> 計画修正判定
+    計画修正判定 --> 計画修正: revision_needed=true
+    計画修正判定 --> 完了確認: revision_needed=false
+    
+    計画修正 --> 修正保存
+    修正保存 --> 実行フェーズ
+    
+    完了確認 --> 完了: 全タスク完了
+    完了確認 --> アクション実行: 継続
+    
+    完了 --> [*]
+```
+
+### 7.4 コンポーネント詳細設計
+
+#### 7.4.1 PlanningCoordinator
+
+**ファイル**: `handlers/planning_coordinator.py`
 
 **責務：**
-- 目標の理解
-- タスクの分解
-- 行動計画の生成
-- 計画の修正
-
-**インターフェース：**
-- `understand_goal(task_prompt, context) -> goal_understanding`
-- `decompose_task(goal, available_tools) -> subtasks`
-- `generate_action_plan(subtasks, context) -> action_plan`
-- `revise_plan(current_plan, feedback) -> revised_plan`
-
-**入力：**
-- タスクプロンプト（Issue/MRの内容）
-- コンテキスト情報（リポジトリ情報、過去の履歴など）
-- 利用可能なツール一覧
-
-**出力：**
-- 構造化された計画（JSON形式）
-- 実行順序
-- 期待される結果
-
-#### 7.1.2 ReflectionEngine（リフレクションエンジン）
-
-**責務：**
-- アクション実行結果の評価
-- 問題の特定
-- 計画修正の提案
-- 人間フィードバックの統合
-
-**インターフェース：**
-- `evaluate_action(action, result) -> evaluation`
-- `identify_issues(evaluation) -> issues`
-- `suggest_revision(issues) -> revision_suggestion`
-- `incorporate_human_feedback(feedback) -> feedback_analysis`
-
-**入力：**
-- アクション実行結果
-- 期待される結果
-- 人間からのフィードバック
-
-**出力：**
-- 評価結果
-- 特定された問題
-- 修正提案
-
-#### 7.1.3 ExecutionCoordinator（実行コーディネーター）
-
-**責務：**
-- プランニングと実行の統合
+- プランニング機能の全体制御
 - フェーズ遷移の管理
-- 状態管理
+- TaskHandlerとの統合
+- LLMとの対話制御
 
-**インターフェース：**
-- `execute_with_planning(task) -> result`
-- `get_current_phase() -> phase`
-- `transition_phase(from_phase, to_phase) -> bool`
-
-### 7.2 データフロー
-
+**主要属性：**
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ 1. タスク入力（Issue/MR）                                    │
-└────────────────┬────────────────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 2. PlanningEngine: 目標の理解                                │
-│    - Issue内容の分析                                         │
-│    - 成功基準の特定                                          │
-│    - 制約条件の識別                                          │
-└────────────────┬────────────────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 3. PlanningEngine: タスクの分解                              │
-│    - Chain-of-Thoughtによる分解                             │
-│    - サブタスクの生成                                        │
-│    - 依存関係の分析                                          │
-└────────────────┬────────────────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 4. PlanningEngine: 行動計画の生成                            │
-│    - 実行順序の決定                                          │
-│    - ツール選択                                              │
-│    - 期待結果の定義                                          │
-└────────────────┬────────────────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 5. ExecutionCoordinator: 実行ループ                          │
-│    ┌──────────────────────────────────────────────┐         │
-│    │ 5.1 アクション実行                            │         │
-│    │ 5.2 結果取得                                  │         │
-│    │ 5.3 ReflectionEngine: 評価                   │         │
-│    │ 5.4 問題あり？                                │         │
-│    │   YES → PlanningEngine: 計画修正 → 5.1へ    │         │
-│    │   NO  → 次のアクションへ                      │         │
-│    └──────────────────────────────────────────────┘         │
-└────────────────┬────────────────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 6. 完了 & 結果サマリー                                       │
-└─────────────────────────────────────────────────────────────┘
+- config: プランニング設定
+- llm_client: LLMクライアント
+- mcp_clients: MCPクライアント群
+- task: 処理対象タスク
+- history_store: PlanningHistoryStore インスタンス
+- current_phase: 現在のフェーズ ("planning"|"execution"|"reflection")
+- current_plan: 現在の実行計画
+- action_counter: 実行したアクション数
 ```
 
-### 7.3 状態遷移図
+**主要メソッド：**
+
+**`__init__(config, llm_client, mcp_clients, task)`**
+- プランニングコーディネーターを初期化
+- PlanningHistoryStoreを生成
+- タスクUUIDを取得
+
+**`execute_with_planning() -> bool`**
+- プランニング機能付き実行のメインループ
+- 戻り値: タスクが完了したかどうか
+
+処理フロー:
+```
+1. 既存計画の確認
+   - history_store.has_plan() をチェック
+   - あれば history_store.get_latest_plan() で読み込み
+   - なければプランニングフェーズへ
+
+2. プランニングフェーズ（初回のみ）
+   - _execute_planning_phase() を実行
+   - 計画をhistory_storeに保存
+
+3. 実行ループ
+   while not self._is_complete():
+       - _execute_action() でアクション実行
+       - _should_reflect() でリフレクション判定
+       - 必要なら _execute_reflection_phase()
+       - 計画修正が必要なら _revise_plan()
+
+4. 完了
+   - done=true を返す
+```
+
+**`_execute_planning_phase() -> dict`**
+- プランニングフェーズを実行
+- システムプロンプトにプランニング指示を追加
+- LLMに計画を生成させる
+- JSON応答をパースして返す
+
+**`_execute_action() -> dict`**
+- 現在の計画から次のアクションを取得
+- LLMにfunction_callで実行させる
+- 結果を記録
+- action_counterをインクリメント
+
+**`_should_reflect(result) -> bool`**
+- リフレクションが必要かを判定
+- 判定条件:
+  - result["status"] が "error" の場合: True
+  - action_counter % reflection_interval == 0 の場合: True
+  - その他: False
+
+**`_execute_reflection_phase(result) -> dict`**
+- リフレクションフェーズを実行
+- LLMに結果評価を依頼
+- リフレクション結果をhistory_storeに保存
+
+**`_revise_plan(reflection) -> dict`**
+- 計画を修正
+- reflectionの内容に基づいて計画を更新
+- 修正をhistory_storeに保存
+- 修正回数をチェック（max_revisionsを超えたらエラー）
+
+**`_is_complete() -> bool`**
+- タスクが完了したかを判定
+- LLMの応答に "done": true があるかチェック
+
+**`_has_existing_plan() -> bool`**
+- 既存の計画があるかをhistory_storeに問い合わせ
+
+#### 7.4.2 PlanningHistoryStore
+
+**ファイル**: `handlers/planning_history_store.py`
+
+**責務：**
+- 計画と修正履歴のJSONL形式での永続化
+- 履歴の読み込みと検索
+- タスクUUID毎のファイル管理
+
+**主要属性：**
+```
+- task_uuid: タスクの一意識別子
+- filepath: JSONLファイルのパス (planning_history/{task_uuid}.jsonl)
+- directory: 履歴ディレクトリ (config.planning.history.directory)
+```
+
+**JSONLデータ形式：**
+```jsonl
+{"type":"plan","timestamp":"2024-11-23T10:30:00Z","plan":{...}}
+{"type":"revision","timestamp":"2024-11-23T10:35:00Z","reason":"エラー回復","changes":[...],"updated_plan":{...}}
+{"type":"reflection","timestamp":"2024-11-23T10:35:01Z","evaluation":{...}}
+```
+
+**主要メソッド：**
+
+**`__init__(task_uuid, config)`**
+- タスクUUIDに基づいてJSONLファイルパスを設定
+- ディレクトリが存在しない場合は作成
+
+**`save_plan(plan: dict) -> None`**
+- 初期計画をJSONL形式で保存
+- タイムスタンプを付与
+- ファイルに追記
+
+**`save_revision(revised_plan: dict, reflection: dict) -> None`**
+- 計画修正をJSONL形式で保存
+- 修正理由と変更内容を記録
+- ファイルに追記
+
+**`save_reflection(reflection: dict) -> None`**
+- リフレクション結果をJSONL形式で保存
+- ファイルに追記
+
+**`get_latest_plan() -> dict | None`**
+- 最新の有効な計画を取得
+- JSONLファイルを逆順に読み込み
+- type="plan" または type="revision" の最新エントリを返す
+
+**`has_plan() -> bool`**
+- 計画が存在するかチェック
+- ファイルの存在と内容を確認
+
+**`get_revision_history() -> list[dict]`**
+- 全ての修正履歴を取得
+- type="revision" のエントリをリストで返す
+
+**`get_all_reflections() -> list[dict]`**
+- 全てのリフレクション履歴を取得
+- type="reflection" のエントリをリストで返す
+
+**`_append_to_file(entry: dict) -> None`**
+- JSONLファイルにエントリを追記
+- エントリにタイムスタンプを自動付与
+
+**`_read_jsonl() -> list[dict]`**
+- JSONLファイルを読み込んでリストとして返す
+- ファイルが存在しない場合は空リストを返す
+
+#### 7.4.3 system_prompt_planning.txt
+
+**ファイル**: `system_prompt_planning.txt` (新規作成)
+
+**内容：**
+プランニング機能有効時に使用する専用システムプロンプト。既存のシステムプロンプトに追加される形で使用。
 
 ```
-[初期状態]
-    ↓
-[目標理解フェーズ]
-    ↓
-[タスク分解フェーズ]
-    ↓
-[行動計画生成フェーズ]
-    ↓
-[実行フェーズ] ←──────┐
-    ↓                  │
-[リフレクションフェーズ]│
-    ↓                  │
-  問題検出？            │
-    ├─ YES ─→ [計画修正]┘
-    └─ NO
-       ↓
-  全アクション完了？
-    ├─ NO ─→ [実行フェーズ]へ戻る
-    └─ YES
-       ↓
-[完了フェーズ]
+## プランニングプロセス
+
+あなたはタスクを以下のフェーズで処理します：
+
+### フェーズ1: プランニング (初回のみ)
+
+最初の応答では、以下の形式で完全な計画を提示してください：
+
+{
+  "phase": "planning",
+  "goal_understanding": {
+    "main_objective": "タスクの主要な目的",
+    "success_criteria": ["成功条件1", "成功条件2"],
+    "constraints": ["制約条件1"]
+  },
+  "task_decomposition": {
+    "reasoning": "Chain-of-Thoughtによる段階的な思考プロセス。なぜこのように分解するのか、各ステップの理由を説明。",
+    "subtasks": [
+      {
+        "id": "task_1",
+        "description": "サブタスクの説明",
+        "dependencies": [],
+        "estimated_complexity": "low",
+        "required_tools": ["tool_name"]
+      }
+    ]
+  },
+  "action_plan": {
+    "execution_order": ["task_1", "task_2"],
+    "actions": [
+      {
+        "task_id": "task_1",
+        "action_type": "tool_call",
+        "tool": "github_get_file_contents",
+        "purpose": "このアクションの目的",
+        "expected_outcome": "期待される結果"
+      }
+    ]
+  },
+  "comment": "計画が完成しました。実行を開始します。"
+}
+
+### フェーズ2: 実行
+
+計画に従って、function_callで各アクションを実行してください。
+通常のfunction_call形式で応答します。
+
+### フェーズ3: リフレクション
+
+エラー発生時、または指定された間隔（{{reflection_interval}}回のアクション毎）で、以下の形式で評価してください：
+
+{
+  "phase": "reflection",
+  "reflection": {
+    "action_evaluated": "評価対象のアクション",
+    "status": "success|failure|partial",
+    "evaluation": "結果の評価と分析",
+    "issues_identified": ["問題点1", "問題点2"],
+    "plan_revision_needed": true|false
+  },
+  "plan_revision": {
+    "reason": "計画修正が必要な理由",
+    "changes": [
+      {
+        "type": "add_action|remove_action|modify_action",
+        "details": "変更の詳細"
+      }
+    ],
+    "updated_action_plan": {
+      // 修正後の行動計画
+    }
+  },
+  "comment": "計画を修正しました"
+}
+
+### 完了
+
+すべてのタスクが完了したら：
+
+{
+  "done": true,
+  "phase": "completion",
+  "summary": {
+    "goal_achieved": true,
+    "tasks_completed": 5,
+    "key_outcomes": ["成果1", "成果2"]
+  },
+  "comment": "すべてのタスクが完了しました"
+}
+```
+
+### 7.5 TaskHandlerへの統合
+
+**ファイル**: `handlers/task_handler.py` (既存ファイルを修正)
+
+**変更内容：**
+
+**1. プランニング設定の取得**
+```
+def _get_planning_config(self, task, base_config):
+    """タスクのプランニング設定を取得"""
+    # user_config_apiから設定を取得（有効な場合）
+    config = fetch_user_config(task, base_config)
+    
+    # planning設定を抽出
+    planning_config = config.get("planning", {})
+    
+    # デフォルト値を設定
+    planning_config.setdefault("enabled", True)
+    planning_config.setdefault("strategy", "chain_of_thought")
+    planning_config.setdefault("max_subtasks", 100)
+    
+    return planning_config
+```
+
+**2. handle()メソッドの修正**
+```
+def handle(self, task: Task) -> None:
+    """タスクを処理する"""
+    # 設定取得
+    base_config = self.config
+    planning_config = self._get_planning_config(task, base_config)
+    
+    # プランニング機能の有効/無効判定
+    if planning_config.get("enabled", True):
+        # プランニング機能を使用
+        from handlers.planning_coordinator import PlanningCoordinator
+        
+        coordinator = PlanningCoordinator(
+            config=planning_config,
+            llm_client=self.llm_client,
+            mcp_clients=self.mcp_clients,
+            task=task
+        )
+        coordinator.execute_with_planning()
+    else:
+        # 既存のロジック（レガシーモード）
+        self._handle_without_planning(task)
+```
+
+**3. システムプロンプトの読み込み**
+```
+def _load_system_prompt(self, use_planning=False):
+    """システムプロンプトを読み込む"""
+    if use_planning:
+        # プランニング用プロンプトを読み込み
+        with open("system_prompt_planning.txt") as f:
+            planning_prompt = f.read()
+        
+        # 既存プロンプトに追加
+        base_prompt = self._load_base_system_prompt()
+        return base_prompt + "\n\n" + planning_prompt
+    else:
+        return self._load_base_system_prompt()
+```
+
+### 7.6 ディレクトリ構成
+
+```
+coding_agent/
+├── handlers/
+│   ├── task_handler.py           (修正)
+│   ├── planning_coordinator.py   (新規)
+│   └── planning_history_store.py (新規)
+├── planning_history/              (新規ディレクトリ)
+│   ├── {task_uuid_1}.jsonl
+│   ├── {task_uuid_2}.jsonl
+│   └── ...
+├── system_prompt.txt              (既存)
+├── system_prompt_function_call.txt (既存)
+├── system_prompt_planning.txt     (新規)
+└── config.yaml                    (修正)
+```
+
+### 7.7 データフロー詳細
+
+```mermaid
+sequenceDiagram
+    participant TH as TaskHandler
+    participant PC as PlanningCoordinator
+    participant LLM as LLMClient
+    participant PHS as PlanningHistoryStore
+    participant FS as FileSystem
+
+    TH->>PC: execute_with_planning()
+    
+    PC->>PHS: has_plan()
+    PHS->>FS: Check {task_uuid}.jsonl
+    FS-->>PHS: exists?
+    PHS-->>PC: boolean
+    
+    alt 計画なし
+        PC->>LLM: プランニング要求<br/>(system_prompt_planning.txt)
+        LLM-->>PC: 計画JSON
+        PC->>PHS: save_plan(plan)
+        PHS->>FS: Append to JSONL
+    else 計画あり
+        PC->>PHS: get_latest_plan()
+        PHS->>FS: Read JSONL
+        FS-->>PHS: JSONLデータ
+        PHS-->>PC: 最新計画
+    end
+    
+    loop 実行ループ
+        PC->>LLM: アクション実行要求
+        LLM-->>PC: function_call結果
+        
+        alt リフレクション必要
+            PC->>LLM: リフレクション要求
+            LLM-->>PC: リフレクションJSON
+            PC->>PHS: save_reflection(reflection)
+            
+            alt 計画修正必要
+                PC->>PC: _revise_plan()
+                PC->>PHS: save_revision(revised_plan)
+                PHS->>FS: Append to JSONL
+            end
+        end
+    end
+    
+    PC-->>TH: 完了
+```
+
+### 7.8 エラーハンドリング設計
+
+**階層的エラーハンドリング：**
+
+**レベル1: アクション実行エラー**
+- try-catchでツール実行エラーをキャッチ
+- リフレクションフェーズに遷移
+- 計画修正を試行
+
+**レベル2: リフレクションエラー**
+- リフレクション自体が失敗した場合
+- シンプルなエラーメッセージをログ
+- 次のアクションへ継続を試みる
+
+**レベル3: 計画修正上限超過**
+- max_revisionsを超えた場合
+- タスクにコメントを追加
+- 人間の介入を要求
+- 処理を終了
+
+**レベル4: 致命的エラー**
+- JSONパースエラー
+- ファイルI/Oエラー
+- 例外をログに記録
+- タスクにエラーコメント
+- 処理を終了
+
+```mermaid
+graph TD
+    A[アクション実行] -->|エラー| B{リフレクション可能?}
+    B -->|Yes| C[リフレクション実行]
+    B -->|No| D[エラーログ記録]
+    
+    C -->|成功| E{計画修正必要?}
+    C -->|失敗| D
+    
+    E -->|Yes| F{修正回数<br/>上限以下?}
+    E -->|No| G[次のアクション]
+    
+    F -->|Yes| H[計画修正]
+    F -->|No| I[人間の介入要求]
+    
+    H --> J[修正保存]
+    J --> K[実行継続]
+    
+    I --> L[処理終了]
+    D --> G
 ```
 
 ## 8. システムプロンプト拡張仕様
 
 ### 8.1 プランニング対応システムプロンプト
 
-既存のシステムプロンプトに以下の指示を追加する必要があります：
+プランニング機能を有効にする場合、既存のシステムプロンプトに以下の指示を追加します。
 
-#### 8.1.1 プランニングフェーズの指示
+### 8.2 プランニングプロセスの指示
 
 ```
 ## プランニングプロセス
@@ -416,7 +813,7 @@ planning:
 最初の応答では、完全な計画をJSON形式で提示してください。
 ```
 
-#### 8.1.2 実行フェーズの指示
+### 8.3 実行ルール
 
 ```
 ## 実行ルール
@@ -429,7 +826,7 @@ planning:
 4. 必要に応じて計画を修正
 ```
 
-#### 8.1.3 リフレクションの指示
+### 8.4 リフレクションルール
 
 ```
 ## リフレクションルール
@@ -444,55 +841,12 @@ planning:
 以下の場合は必ずリフレクションを実行：
 - ツール実行がエラーになった場合
 - 期待と異なる結果が得られた場合
-- 3回のアクション毎（定期リフレクション）
-```
-
-### 8.2 JSON応答フォーマットの拡張
-
-システムプロンプトに以下のJSON応答例を追加：
-
-```
-**プランニング応答:**
-{
-  "phase": "planning",
-  "goal_understanding": {
-    "main_objective": "...",
-    "success_criteria": [...],
-    "constraints": [...],
-    "context": "..."
-  },
-  "task_decomposition": {
-    "reasoning": "...",
-    "subtasks": [...]
-  },
-  "action_plan": {
-    "execution_order": [...],
-    "actions": [...]
-  },
-  "comment": "Planning completed."
-}
-
-**リフレクション応答:**
-{
-  "phase": "reflection",
-  "reflection": {
-    "action_evaluated": "...",
-    "status": "success|failure|partial",
-    "evaluation": "...",
-    "issues_identified": [...],
-    "plan_revision_needed": true|false
-  },
-  "plan_revision": {
-    "reason": "...",
-    "changes": [...]
-  },
-  "comment": "..."
-}
+- 設定された間隔（例: 3回のアクション毎）
 ```
 
 ## 9. 設定仕様
 
-### 9.1 config.yaml への追加項目
+### 9.1 config.yamlへの追加項目
 
 ```yaml
 # プランニング機能の設定
@@ -531,21 +885,14 @@ planning:
   revision:
     # 最大計画修正回数
     max_revisions: 3
-    
-    # 人間の承認を要求するか
-    # trueの場合、計画修正時にIssueにコメントして確認を待つ
-    require_human_approval: false
-    
-    # 承認待ちのタイムアウト（秒）
-    approval_timeout: 3600
   
-  # プランニング結果のキャッシュ
-  cache:
-    # キャッシュ機能の有効/無効
-    enabled: true
+  # 履歴管理
+  history:
+    # ストレージタイプ（JSONLファイルベース）
+    storage_type: "jsonl"
     
-    # キャッシュの有効期限（秒）
-    ttl: 86400
+    # 履歴ディレクトリ
+    directory: "planning_history"
 ```
 
 ### 9.2 環境変数による設定上書き
@@ -563,7 +910,7 @@ planning:
 
 既存のuser_config_api機能を使用してユーザー別にプランニング設定を上書き可能。
 
-**API応答例**:
+**API応答例：**
 ```json
 {
   "status": "success",
@@ -626,23 +973,6 @@ planning:
 2. 実現可能な部分と不可能な部分を明示
 3. 代替アプローチを提案
 
-**JSON応答例：**
-```json
-{
-  "phase": "planning",
-  "error": {
-    "type": "decomposition_failed",
-    "message": "タスクの完全な分解ができませんでした",
-    "partial_plan": {
-      "feasible_subtasks": [...],
-      "infeasible_subtasks": [...],
-      "alternative_approaches": [...]
-    }
-  },
-  "comment": "一部のタスクは実現が困難です。代替案を提示します。"
-}
-```
-
 ### 10.2 実行フェーズのエラー
 
 #### 10.2.1 ツール実行エラー
@@ -656,35 +986,7 @@ planning:
 1. リフレクションを実行して原因を分析
 2. 代替ツールまたは方法を試行
 3. 計画を修正して再試行
-4. 3回連続失敗で人間に報告
-
-**リフレクション応答例：**
-```json
-{
-  "phase": "reflection",
-  "reflection": {
-    "action_evaluated": "github_get_file_contents",
-    "status": "failure",
-    "error": "ファイルが見つかりません",
-    "root_cause_analysis": "指定されたパスが正しくない可能性",
-    "plan_revision_needed": true
-  },
-  "plan_revision": {
-    "reason": "ファイルパスの確認が必要",
-    "changes": [
-      {
-        "type": "add_action",
-        "action": {
-          "action_type": "tool_call",
-          "tool": "github_list_files",
-          "purpose": "正しいファイルパスを特定"
-        }
-      }
-    ]
-  },
-  "comment": "ファイルパスの確認を行います"
-}
-```
+4. max_revisions回連続失敗で人間に報告
 
 #### 10.2.2 予期しない結果
 
@@ -724,7 +1026,6 @@ planning:
 1. 処理を一時停止
 2. 状況の詳細をユーザーに報告
 3. 人間の介入を要求
-4. タスクを "coding agent help needed" ラベルに変更
 
 **JSON応答例：**
 ```json
@@ -743,130 +1044,13 @@ planning:
       "必要な権限が付与されているか確認してください"
     ]
   },
-  "comment": "自動処理が困難なため、人間の介入が必要です。上記の推奨事項をご確認ください。"
+  "comment": "自動処理が困難なため、人間の介入が必要です。"
 }
 ```
 
-## 11. パフォーマンス考慮事項
+## 11. ストレージ管理
 
-### 11.1 トークン効率
-
-#### 11.1.1 プランニング結果のキャッシュ
-
-**目的：** 同じようなタスクに対して重複したプランニングを避ける
-
-**実装方針：**
-- タスクの内容をハッシュ化してキャッシュキーを生成
-- 類似タスクの判定アルゴリズム（編集距離、コサイン類似度など）
-- キャッシュのTTL（Time To Live）設定
-
-**効果：**
-- LLM呼び出し回数の削減（約30-50%削減見込み）
-- 処理時間の短縮
-- コスト削減
-
-#### 11.1.2 プランニングの粒度調整
-
-**問題：** 過度に詳細な計画はトークンを消費
-
-**対策：**
-- タスクの複雑度に応じた粒度調整
-- 簡単なタスクは簡易プランニング
-- 複雑なタスクのみ詳細プランニング
-
-**設定例：**
-```yaml
-planning:
-  decomposition_level: "moderate"  # detailed/moderate/minimal
-  
-  # タスク複雑度の自動判定
-  auto_adjust_level: true
-  
-  # 複雑度の判定基準
-  complexity_threshold:
-    simple: 100    # 100トークン以下は簡易
-    moderate: 500  # 500トークン以下は中程度
-    complex: 9999  # それ以上は詳細
-```
-
-#### 11.1.3 リフレクション頻度の最適化
-
-**問題：** 全アクション後のリフレクションは非効率
-
-**対策：**
-- 重要なアクション後のみリフレクション実行
-- エラー発生時は必ずリフレクション
-- 定期リフレクションの間隔を調整可能に
-
-**推奨設定：**
-- 簡単なタスク：エラー時のみ
-- 中程度のタスク：5アクション毎
-- 複雑なタスク：3アクション毎
-
-### 11.2 実行時間の最適化
-
-#### 11.2.1 並列実行の検討
-
-**適用可能な場合：**
-- 依存関係のない複数のサブタスク
-- 複数ファイルの読み込み
-- 独立したツール呼び出し
-
-**実装方針：**
-```json
-{
-  "action_plan": {
-    "actions": [
-      {
-        "task_id": "task_1",
-        "parallel_group": 1,
-        "can_parallelize": true,
-        "tool": "github_get_file_contents"
-      },
-      {
-        "task_id": "task_2",
-        "parallel_group": 1,
-        "can_parallelize": true,
-        "tool": "github_get_file_contents"
-      },
-      {
-        "task_id": "task_3",
-        "parallel_group": 2,
-        "dependencies": ["task_1", "task_2"],
-        "tool": "github_create_or_update_file"
-      }
-    ]
-  }
-}
-```
-
-#### 11.2.2 早期終了の最適化
-
-**実装方針：**
-- 明らかな失敗は早期に検出して中断
-- 成功の十分条件が満たされたら完了
-- タイムアウト設定
-
-**設定例：**
-```yaml
-planning:
-  execution:
-    # アクション毎のタイムアウト（秒）
-    action_timeout: 60
-    
-    # タスク全体のタイムアウト（秒）
-    total_timeout: 3600
-    
-    # 早期終了の判定
-    early_termination:
-      enabled: true
-      # 連続失敗回数での中断
-      max_consecutive_failures: 3
-```
-
-### 11.3 ストレージ管理
-
-#### 11.3.1 JSONLファイルベースの履歴管理
+### 11.1 JSONLファイルベースの履歴管理
 
 **実装方針：**
 - 計画修正履歴はメモリに保持せず、JSONLファイルに永続化
@@ -883,121 +1067,96 @@ planning_history/
 
 **JSONLフォーマット：**
 ```jsonl
-{"type":"plan","timestamp":"2024-01-15T10:30:00Z","plan":{...}}
-{"type":"revision","timestamp":"2024-01-15T10:35:00Z","reason":"エラー回復","changes":[...]}
-{"type":"reflection","timestamp":"2024-01-15T10:35:01Z","evaluation":{...}}
+{"type":"plan","timestamp":"2024-11-23T10:30:00Z","plan":{...}}
+{"type":"revision","timestamp":"2024-11-23T10:35:00Z","reason":"エラー回復","changes":[...],"updated_plan":{...}}
+{"type":"reflection","timestamp":"2024-11-23T10:35:01Z","evaluation":{...}}
 ```
 
 **メリット：**
 - メモリ使用量の削減
 - 履歴の永続化と追跡可能性
 - 必要に応じて過去の履歴を参照可能
+- シンプルで読み書きが高速
 
-## 12. セキュリティ考慮事項
-
-### 12.1 プランニング結果の検証
-
-#### 12.1.1 ツール使用の制限
-
-**リスク：** LLMが危険なツールや操作を計画する可能性
-
-**対策：**
-- ホワイトリスト方式でツールを制限
-- 危険な操作（削除、権限変更など）は明示的な許可が必要
-- 人間の承認フローの実装
-
-**設定例：**
-```yaml
-planning:
-  security:
-    # 使用可能なツールのホワイトリスト
-    allowed_tools:
-      - "github_get_*"
-      - "github_create_or_update_file"
-      - "github_search_*"
-    
-    # 禁止されたツール
-    forbidden_tools:
-      - "github_delete_*"
-      - "*_admin_*"
-    
-    # 承認が必要な操作
-    require_approval:
-      - "github_create_or_update_file"  # メインブランチへの変更
-      - "github_merge_*"
-```
-
-#### 12.1.2 計画内容のサニタイゼーション
-
-**対策：**
-- プランニング結果のバリデーション
-- 危険なパターンの検出
-- 異常な計画の拒否
-
-**検証項目：**
-- 無限ループの可能性
-- リソース枯渇攻撃
-- 権限昇格の試み
-- 機密情報の漏洩
+**ファイルローテーション：**
+- 古いタスクの履歴ファイルは定期的にアーカイブ
+- 完了したタスクの履歴は90日後に削除（設定可能）
 
 ## 13. テスト戦略
 
 ### 13.1 ユニットテスト
 
-#### 13.1.1 PlanningEngineのテスト
+#### 13.1.1 PlanningCoordinatorのテスト
 
 **テストケース：**
-1. 目標理解の正確性
-   - 明確な目標 → 正しく理解される
-   - 曖昧な目標 → 明確化要求が出される
-   - 複数の目標 → すべて抽出される
+1. 基本的なプランニングフロー
+   - プランニング → 実行 → 完了
+   - 計画が正しく生成される
+   - アクションが順次実行される
 
-2. タスク分解の妥当性
-   - 単純なタスク → 適切な数のサブタスクに分解
-   - 複雑なタスク → 階層的に分解される
-   - 分解不可能なタスク → エラーが返される
+2. リフレクション機能
+   - エラー時の自動リフレクション
+   - 定期リフレクションのトリガー
+   - リフレクション結果の保存
 
-3. 行動計画の生成
-   - 依存関係の正しい解決
-   - 実行順序の妥当性
-   - ツール選択の適切性
+3. 計画修正機能
+   - 計画修正の実行
+   - 修正回数の制限
+   - 上限超過時のエラーハンドリング
 
-**テストデータ例：**
+**テストファイル：** `tests/unit/test_planning_coordinator.py`
+
 ```python
-# tests/unit/test_planning_engine.py
-test_cases = [
-    {
-        "name": "simple_task",
-        "input": "READMEにインストール手順を追加してください",
-        "expected_subtasks": 3,  # ファイル取得、編集、更新
-        "expected_tools": ["github_get_file_contents", "github_create_or_update_file"]
-    },
-    {
-        "name": "complex_task",
-        "input": "新機能の実装とテストの追加、ドキュメント更新を行ってください",
-        "expected_subtasks": 8-12,
-        "expected_tools": ["github_*"]
-    }
-]
+def test_planning_coordinator_basic_flow():
+    """基本的なプランニングフローのテスト"""
+    # Mock LLM, MCP clients
+    # プランニング実行
+    # アクション実行を確認
+    # 完了を確認
+    
+def test_reflection_on_error():
+    """エラー時のリフレクションテスト"""
+    # エラーを発生させる
+    # リフレクションが実行されることを確認
+    # 計画修正が提案されることを確認
 ```
 
-#### 13.1.2 ReflectionEngineのテスト
+#### 13.1.2 PlanningHistoryStoreのテスト
 
 **テストケース：**
-1. 成功判定の正確性
-   - 成功ケース → 正しく成功と判定
-   - 失敗ケース → 失敗を検出
-   - 部分成功 → 適切に評価
+1. 計画の保存と読み込み
+   - save_plan()の動作確認
+   - get_latest_plan()の動作確認
+   - JSONLフォーマットの検証
 
-2. 問題特定の能力
-   - エラーメッセージから根本原因を特定
-   - 副作用を検出
-   - 計画との不一致を発見
+2. 修正履歴の管理
+   - save_revision()の動作確認
+   - 複数回の修正記録
+   - 履歴の取得
 
-3. 修正提案の妥当性
-   - 適切な代替手段の提案
-   - 実現可能な修正内容
-   - 最小限の変更
+3. ファイルI/O
+   - ディレクトリ作成
+   - ファイルの追記
+   - エラーハンドリング
+
+**テストファイル：** `tests/unit/test_planning_history_store.py`
+
+```python
+def test_save_and_load_plan():
+    """計画の保存と読み込みテスト"""
+    store = PlanningHistoryStore("test-uuid")
+    plan = {"goal": "test", "subtasks": []}
+    store.save_plan(plan)
+    loaded = store.get_latest_plan()
+    assert loaded["plan"] == plan
+
+def test_revision_history():
+    """修正履歴のテスト"""
+    store = PlanningHistoryStore("test-uuid")
+    # 計画保存
+    # 修正保存
+    # 履歴取得と検証
+```
 
 ### 13.2 インテグレーションテスト
 
@@ -1009,63 +1168,42 @@ test_cases = [
    - エラーなし
    - 期待される結果が得られる
 
-2. 中程度のタスク（新機能追加）
-   - プランニング → 実行 → リフレクション → 修正 → 完了
-   - 1-2回の計画修正
+2. エラーリカバリー
+   - ファイルが見つからないエラー
+   - リフレクション → 計画修正 → 再試行
    - 最終的に成功
 
-3. 複雑なタスク（アーキテクチャ変更）
-   - プランニング → 複数回の実行とリフレクション → 完了
-   - 複数回の計画修正
-   - 人間のフィードバック統合
+3. 複数回の計画修正
+   - 初回実行失敗
+   - 1回目の修正
+   - 2回目の修正
+   - 成功
 
-**検証項目：**
-- 各フェーズの正しい遷移
-- 状態管理の正確性
-- エラーハンドリングの動作
-- ログ出力の妥当性
-
-#### 13.2.2 エラーリカバリー
-
-**テストシナリオ：**
-1. ツール実行エラー
-   - ファイルが存在しない → リフレクション → 計画修正 → 再試行
-
-2. 予期しない結果
-   - 期待と異なる出力 → 評価 → 計画修正 → 代替手段
-
-3. 計画修正の上限
-   - 3回の修正失敗 → 人間の介入要求
+**テストファイル：** `tests/integration/test_planning_workflow.py`
 
 ### 13.3 エンドツーエンドテスト
 
 #### 13.3.1 実際のGitHub/GitLab環境
 
 **テスト環境：**
-- テスト用リポジトリの作成
-- 自動生成されたIssue/MR
-- 実際のMCPサーバーとの連携
+- テスト用リポジトリ
+- 自動生成されたIssue
+- 実際のMCPサーバー
 
 **テストケース：**
 1. 実際のコーディングタスク
    - バグ修正
    - 機能追加
-   - リファクタリング
+   - ドキュメント更新
 
-2. ドキュメント更新タスク
-   - README更新
-   - APIドキュメント生成
-   - チュートリアル作成
-
-3. 複合タスク
-   - コード + テスト + ドキュメント
+2. 複雑なタスク
    - 複数ファイルの変更
-   - PR作成まで
+   - テストコード追加
+   - PR作成
 
 **成功基準：**
 - タスクが正しく完了する
 - 生成されたコードが動作する
-- ドキュメントが正確
 - 適切なコメントが投稿される
 
 ### 13.4 パフォーマンステスト
@@ -1079,13 +1217,11 @@ test_cases = [
 2. トークン使用量
    - プランニング: < 2000トークン
    - リフレクション: < 500トークン/回
-   - 全体: < 10000トークン/タスク
 
 3. 処理時間
    - シンプルなタスク: < 1分
    - 中程度のタスク: < 5分
    - 複雑なタスク: < 15分
-
 
 ## 14. まとめ
 
@@ -1103,6 +1239,23 @@ test_cases = [
 3. **効率性** - トークン使用量の最適化、JSONLファイルベースの履歴管理
 4. **安全性** - ツール使用の制限、危険操作の検出
 
+### 実装の要点
+
+1. **新規コンポーネント**
+   - PlanningCoordinator: 全体制御
+   - PlanningHistoryStore: 履歴管理
+   - system_prompt_planning.txt: プランニング指示
+
+2. **既存コンポーネントの修正**
+   - TaskHandler: プランニング有効/無効の分岐
+   - config.yaml: プランニング設定の追加
+
+3. **実装工数**
+   - Phase 1 (基本実装): 2週間
+   - Phase 2 (リフレクション): 2週間
+   - Phase 3 (最適化): 1週間
+   - **合計: 約5週間**
+
 ### 参考文献
 
 **Chain-of-Thought:**
@@ -1116,6 +1269,6 @@ test_cases = [
 
 ---
 
-**文書バージョン:** 1.0  
+**文書バージョン:** 2.0  
 **最終更新日:** 2024-11-23  
-**ステータス:** 仕様確定
+**ステータス:** 詳細設計完了
