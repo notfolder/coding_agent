@@ -256,9 +256,13 @@ class WebhookServer:
     def run(self, host: str = "0.0.0.0", port: int = 8000) -> None:  # noqa: S104
         """Run the webhook server.
 
+        Note: Default host 0.0.0.0 binds to all interfaces, required for Docker containers.
+        For production deployments, use a reverse proxy (nginx/Caddy) with HTTPS.
+        For local development without Docker, override with host='127.0.0.1'.
+
         Args:
-            host: Host to bind to
-            port: Port to bind to
+            host: Host to bind to (default: 0.0.0.0 for Docker compatibility)
+            port: Port to bind to (default: 8000)
 
         """
         logger.info("Starting webhook server on %s:%d", host, port)

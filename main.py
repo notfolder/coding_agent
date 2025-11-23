@@ -490,6 +490,8 @@ def run_webhook_server(
     from webhook.server import WebhookServer  # noqa: PLC0415
 
     # サーバー設定の取得
+    # Note: Default 0.0.0.0 is required for Docker containers to accept external connections.
+    # For local development without Docker, set WEBHOOK_SERVER_HOST=127.0.0.1
     server_config = config.get("webhook", {}).get("server", {})
     host = server_config.get("host", "0.0.0.0")  # noqa: S104
     port = server_config.get("port", 8000)

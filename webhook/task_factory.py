@@ -45,6 +45,8 @@ class WebhookTaskFactory:
             Task instance or None if event type is not supported
 
         """
+        # Import inside method to avoid circular dependency:
+        # TaskGitHubIssue -> GithubClient -> Task -> TaskFactory -> TaskGitHubIssue
         from handlers.task_getter_github import TaskGitHubIssue, TaskGitHubPullRequest  # noqa: PLC0415
 
         mcp_client = self.mcp_clients.get("github")
@@ -52,7 +54,7 @@ class WebhookTaskFactory:
             logger.error("GitHub MCP client not found")
             return None
 
-        # Import GithubClient here to avoid circular import
+        # Import inside method to avoid circular dependency
         from clients.github_client import GithubClient  # noqa: PLC0415
 
         github_client = GithubClient()
@@ -89,6 +91,8 @@ class WebhookTaskFactory:
             Task instance or None if event type is not supported
 
         """
+        # Import inside method to avoid circular dependency:
+        # TaskGitLabIssue -> GitlabClient -> Task -> TaskFactory -> TaskGitLabIssue
         from handlers.task_getter_gitlab import TaskGitLabIssue, TaskGitLabMergeRequest  # noqa: PLC0415
 
         mcp_client = self.mcp_clients.get("gitlab")
@@ -96,7 +100,7 @@ class WebhookTaskFactory:
             logger.error("GitLab MCP client not found")
             return None
 
-        # Import GitlabClient here to avoid circular import
+        # Import inside method to avoid circular dependency
         from clients.gitlab_client import GitlabClient  # noqa: PLC0415
 
         gitlab_client = GitlabClient()
