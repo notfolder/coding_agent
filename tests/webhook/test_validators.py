@@ -119,3 +119,7 @@ class TestGitLabWebhookValidator:
         # System hook validator should initialize successfully with empty token
         validator = GitLabWebhookValidator(config, is_system_hook=True)
         assert validator.token == ""
+
+        # But validation should always fail when no token is configured (security)
+        assert validator.validate_token("any_token") is False
+        assert validator.validate_token("") is False  # Important: prevent empty token bypass

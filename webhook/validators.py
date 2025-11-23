@@ -97,5 +97,9 @@ class GitLabWebhookValidator:
         if not token:
             return False
 
+        # Reject if no token is configured (security: prevent empty token bypass)
+        if not self.token:
+            return False
+
         # Use timing-attack resistant comparison
         return hmac.compare_digest(self.token, token)
