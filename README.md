@@ -23,6 +23,40 @@ GitHub Copilot のようなコーディングエージェントを作成する�
 - ✅ Docker コンテナでの実行
 - ✅ RabbitMQ を使用したキューイング
 - ✅ 設定可能なロギングシステム
+- 📋 **プランニングプロセス**（仕様策定完了）
+  - 目標の理解とタスク分解
+  - Chain-of-Thought による思考プロセス
+  - 実行結果の監視とリフレクション
+  - エラー時の計画修正と自動回復
+
+### プランニングプロセス（新機能）🆕
+
+LLMエージェントが複雑なタスクを効果的に処理するための包括的なプランニング機能の仕様を策定しました。
+
+#### プランニングの5つのフェーズ
+
+1. **目標の理解 (Goal Understanding)**
+   - ユーザーの指示や達成すべき目標を正確に理解
+   - 成功基準と制約条件の特定
+
+2. **タスクの分解 (Task Decomposition)**
+   - Chain-of-Thought (CoT) を使用した段階的思考
+   - 複雑な目標を実行可能な小さなサブタスクに分割
+
+3. **行動系列の生成 (Action Sequence Generation)**
+   - 実行順序の最適化
+   - 使用するツールの選択と計画
+
+4. **実行 (Execution)**
+   - 計画に基づいた順次実行
+   - 各アクションの結果記録
+
+5. **監視と修正 (Monitoring and Reflection)**
+   - 実行結果の評価とフィードバック
+   - エラー時の計画修正と再試行
+   - 人間のフィードバック統合
+
+詳細は[プランニングプロセス仕様書](PLANNING_SPECIFICATION.md)を参照してください。
 
 ### 対応プラットフォーム
 - **GitHub**: Issue、Pull Request の処理
@@ -421,6 +455,7 @@ grep "LLM" logs/agent.log
 
 - [仕様書](spec.md) - 詳細な仕様
 - [クラス設計](class_spec.md) - アーキテクチャ詳細
+- **[プランニングプロセス仕様書](PLANNING_SPECIFICATION.md) - LLMエージェントのプランニング機能仕様** 🆕
 - [GitHub MCP サーバー](github-mcp-server.md) - GitHub 連携
 - [GitLab MCP サーバー](gitlab-mcp-server.md) - GitLab 連携
 - [OpenAI 設定](openai.md) - OpenAI 設定詳細
