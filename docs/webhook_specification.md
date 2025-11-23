@@ -325,7 +325,7 @@ def get_task_list(self):
 │ 4. アクション確認                    │
 │    payload.object_attributes.action: │
 │      - "update" → 次へ               │
-│      - その他 → 200 OK (場合により処理)
+│      - その他 → 200 OK (無視)        │
 └──────────────┬───────────────────────┘
                │
                v
