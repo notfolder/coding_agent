@@ -91,6 +91,26 @@ gitlab:
 scheduling:
   interval: 300  # 秒
 
+# Webhook設定
+webhook:
+  enabled: true
+  server:
+    host: "0.0.0.0"
+    port: 8000
+  github:
+    secret: "${GITHUB_WEBHOOK_SECRET}"
+    events:
+      - "issues"
+      - "pull_request"
+    actions:
+      - "labeled"
+  gitlab:
+    token: "${GITLAB_WEBHOOK_TOKEN}"
+    system_hook_token: "${GITLAB_SYSTEM_HOOK_TOKEN}"
+    events:
+      - "Issue Hook"
+      - "Merge Request Hook"
+
 # RabbitMQを使う場合はtrue、使わない場合はfalse
 use_rabbitmq: true
 rabbitmq:

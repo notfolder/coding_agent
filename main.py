@@ -77,6 +77,7 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
     _override_mcp_config(config)
     _override_rabbitmq_config(config)
     _override_bot_config(config)
+    _override_webhook_config(config)
     
     # API経由でLLM設定を取得するかチェック
     use_api = os.environ.get("USE_USER_CONFIG_API", "false").lower() == "true"
@@ -309,6 +310,62 @@ def _override_bot_config(config: dict[str, Any]) -> None:
         config["gitlab"]["assignee"] = gitlab_bot_name
 
 
+def _override_webhook_config(config: dict[str, Any]) -> None:
+    """Webhook設定を環境変数で上書きする."""
+    # Webhook機能の有効/無効
+    webhook_enabled = os.environ.get("WEBHOOK_ENABLED")
+    if webhook_enabled is not None:
+        if "webhook" not in config:
+            config["webhook"] = {}
+        config["webhook"]["enabled"] = webhook_enabled.lower() == "true"
+
+    # サーバー設定
+    webhook_host = os.environ.get("WEBHOOK_SERVER_HOST")
+    webhook_port = os.environ.get("WEBHOOK_SERVER_PORT")
+    
+    if webhook_host or webhook_port:
+        if "webhook" not in config:
+            config["webhook"] = {}
+        if "server" not in config["webhook"]:
+            config["webhook"]["server"] = {}
+        
+        if webhook_host:
+            config["webhook"]["server"]["host"] = webhook_host
+        if webhook_port:
+            try:
+                config["webhook"]["server"]["port"] = int(webhook_port)
+            except (ValueError, TypeError):
+                # 変換に失敗した場合はデフォルトポート番号を使用
+                config["webhook"]["server"]["port"] = 8000
+
+    # GitHub Webhook Secret
+    github_webhook_secret = os.environ.get("GITHUB_WEBHOOK_SECRET")
+    if github_webhook_secret:
+        if "webhook" not in config:
+            config["webhook"] = {}
+        if "github" not in config["webhook"]:
+            config["webhook"]["github"] = {}
+        config["webhook"]["github"]["secret"] = github_webhook_secret
+
+    # GitLab Webhook Token
+    gitlab_webhook_token = os.environ.get("GITLAB_WEBHOOK_TOKEN")
+    if gitlab_webhook_token:
+        if "webhook" not in config:
+            config["webhook"] = {}
+        if "gitlab" not in config["webhook"]:
+            config["webhook"]["gitlab"] = {}
+        config["webhook"]["gitlab"]["token"] = gitlab_webhook_token
+
+    # GitLab System Hook Token
+    gitlab_system_hook_token = os.environ.get("GITLAB_SYSTEM_HOOK_TOKEN")
+    if gitlab_system_hook_token:
+        if "webhook" not in config:
+            config["webhook"] = {}
+        if "gitlab" not in config["webhook"]:
+            config["webhook"]["gitlab"] = {}
+        config["webhook"]["gitlab"]["system_hook_token"] = gitlab_system_hook_token
+
+
 def produce_tasks(
     config: dict[str, Any],
     mcp_clients: dict[str, MCPToolClient],
@@ -405,6 +462,45 @@ def consume_tasks(
             task.comment(f"処理中にエラーが発生しました: {e}")
 
 
+def run_webhook_server(
+    config: dict[str, Any],
+    mcp_clients: dict[str, MCPToolClient],
+    task_queue: RabbitMQTaskQueue | InMemoryTaskQueue,
+    logger: logging.Logger,
+) -> None:
+    """Webhookサーバーを起動する.
+
+    FastAPIベースのWebhookサーバーを起動し、GitHubやGitLabからの
+    Webhookイベントを受信してタスクキューに追加します。
+
+    Args:
+        config: アプリケーション設定辞書
+        mcp_clients: MCPクライアントの辞書
+        task_queue: タスクキューオブジェクト
+        logger: ログ出力用のロガー
+
+    """
+    # Webhook機能が有効かチェック
+    if not config.get("webhook", {}).get("enabled", False):
+        logger.error("Webhook機能が無効になっています。config.yamlで有効にしてください。")
+        return
+
+    # WebhookServerのインポート
+    from webhook.server import WebhookServer
+
+    # サーバー設定の取得
+    server_config = config.get("webhook", {}).get("server", {})
+    host = server_config.get("host", "0.0.0.0")
+    port = server_config.get("port", 8000)
+
+    # WebhookServerのインスタンス生成
+    webhook_server = WebhookServer(config, mcp_clients, task_queue)
+
+    # サーバー起動
+    logger.info("Webhookサーバーを起動します: %s:%d", host, port)
+    webhook_server.run(host=host, port=port)
+
+
 def main() -> None:
     """メイン関数.
 
@@ -418,8 +514,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--mode",
-        choices=["producer", "consumer"],
-        help="producer: タスク取得のみ, consumer: キューから実行のみ",
+        choices=["producer", "consumer", "webhook"],
+        help="producer: タスク取得のみ, consumer: キューから実行のみ, webhook: Webhookサーバー起動",
     )
     args = parser.parse_args()
 
@@ -496,6 +592,9 @@ def main() -> None:
             "task_source": task_source,
         }
         consume_tasks(task_queue, handler, logger, task_config)
+    elif args.mode == "webhook":
+        # Webhookサーバーモード
+        run_webhook_server(config, mcp_clients, task_queue, logger)
     else:
         # デフォルトモード
         with FileLock(str(lock_path)):

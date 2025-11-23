@@ -21,4 +21,6 @@ dependencies:
       - lmstudio
       - openai
       - ollama
+      - fastapi
+      - uvicorn[standard]
       # - hashing-mcp-server
