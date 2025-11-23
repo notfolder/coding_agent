@@ -4,91 +4,123 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ollama import chat
+import requests
 
 from .llm_base import LLMClient
 
 
 class OllamaClient(LLMClient):
+    """Ollama APIを使用するLLMクライアント.
+    
+    ファイルベースで動作し、メモリに履歴を保持しません。
+    """
+
     def __init__(
         self,
         config: dict[str, Any],
         message_store: Any = None,
         context_dir: Path | None = None,
     ) -> None:
-        self.chat = chat
-        self.model = config["model"]
-        self.max_token = config.get("max_token", 32768)
-        
-        # File-based or memory-based mode
-        self.message_store = message_store
-        self.context_dir = context_dir
-        if message_store is None:
-            # Legacy mode: use in-memory messages list
-            self.messages = []
-        else:
-            # File-based mode: no in-memory storage
-            self.messages = None
+        """Ollamaクライアントを初期化する.
 
-    def send_system_prompt(self, prompt: str) -> None:
-        if self.message_store:
-            self.message_store.add_message("system", prompt)
-        else:
-            self.messages = [{"role": "system", "content": prompt}]
-
-    def send_user_message(self, message: str) -> None:
-        if self.message_store:
-            self.message_store.add_message("user", message)
-        else:
-            self.messages.append({"role": "user", "content": message})
-            # トークン数制限: 4文字=1トークンでカウント
-            total_chars = sum(len(m["content"]) for m in self.messages)
-            while total_chars // 4 > self.max_token:
-                self.messages.pop(1)  # 最初のuserから削る
-                total_chars = sum(len(m["content"]) for m in self.messages)
-
-    def send_function_result(self, name: str, result: object) -> None:
-        msg = "Ollama does not support function calls. Use OpenAI compatible call instead."
-        raise NotImplementedError(
-            msg,
-        )
-
-    def get_response(self) -> str:
-        if self.message_store:
-            # File-based mode: read messages from current.jsonl
-            messages = self._load_messages_from_file()
-        else:
-            # Legacy mode: use in-memory messages
-            messages = self.messages
-        
-        resp = self.chat(model=self.model, messages=messages)
-        reply = resp["message"]["content"]
-        
-        if self.message_store:
-            self.message_store.add_message("assistant", reply)
-        else:
-            self.messages.append({"role": "assistant", "content": reply})
-        
-        return reply
-
-    def _load_messages_from_file(self) -> list[dict[str, Any]]:
-        """Load messages from current.jsonl file.
-
-        Returns:
-            List of messages in Ollama format
+        Args:
+            config: 設定辞書(endpoint, model等を含む)
+            message_store: MessageStoreインスタンス(必須)
+            context_dir: コンテキストディレクトリパス(必須)
 
         """
+        self.endpoint = config.get("endpoint", "http://localhost:11434")
+        self.model = config["model"]
+        self.message_store = message_store
+        self.context_dir = context_dir
+
+    def send_system_prompt(self, prompt: str) -> None:
+        """システムプロンプトをメッセージ履歴に追加する.
+
+        Args:
+            prompt: システムプロンプトの内容
+
+        """
+        self.message_store.add_message("system", prompt)
+
+    def send_user_message(self, message: str) -> None:
+        """ユーザーメッセージをメッセージ履歴に追加する.
+
+        Args:
+            message: ユーザーメッセージの内容
+
+        """
+        self.message_store.add_message("user", message)
+
+    def send_function_result(self, name: str, result: object) -> None:
+        """関数の実行結果を送信する.
+
+        Args:
+            name: 関数名
+            result: 実行結果
+
+        Raises:
+            NotImplementedError: Ollamaは関数呼び出しをサポートしていない
+
+        """
+        msg = "Ollama does not support function calls. Use OpenAI compatible call instead."
+        raise NotImplementedError(msg)
+
+    def get_response(self) -> str:
+        """Ollama APIから応答を取得する.
+
+        Returns:
+            応答テキスト
+
+        """
+        # Create request.json by streaming current.jsonl
+        request_path = self.context_dir / "request.json"
         current_file = self.message_store.current_file
-        messages = []
         
-        if current_file.exists():
-            with current_file.open() as f:
-                for line in f:
-                    msg = json.loads(line.strip())
-                    messages.append({
-                        "role": msg["role"],
-                        "content": msg["content"],
-                    })
+        with request_path.open("w") as req_file:
+            # Write JSON header for Ollama API
+            req_file.write('{"model":"')
+            req_file.write(self.model)
+            req_file.write('","messages":[')
+            
+            # Stream current.jsonl content (OpenAI format is compatible with Ollama)
+            if current_file.exists():
+                first = True
+                with current_file.open() as current_f:
+                    for line in current_f:
+                        if not first:
+                            req_file.write(',')
+                        req_file.write(line.strip())
+                        first = False
+            
+            # Write footer
+            req_file.write('],"stream":false}')
         
-        return messages
+        # Send request via HTTP POST
+        try:
+            with request_path.open('rb') as req_file:
+                response = requests.post(
+                    f"{self.endpoint.rstrip('/')}/api/chat",
+                    headers={"Content-Type": "application/json"},
+                    data=req_file,
+                    timeout=3600
+                )
+            
+            response.raise_for_status()
+            response_data = response.json()
+            
+            # Parse response - Ollama returns message in different format
+            message = response_data.get("message", {})
+            reply = message.get("content", "")
+            
+            # Add assistant response to message store
+            self.message_store.add_message("assistant", reply)
+            
+            return reply
+            
+        finally:
+            # Clean up request.json
+            if request_path.exists():
+                request_path.unlink()
+
 

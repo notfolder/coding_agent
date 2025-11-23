@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import openai
 import requests
 
 from .llm_base import LLMClient
@@ -14,6 +13,7 @@ class OpenAIClient(LLMClient):
     """OpenAI APIを使用するLLMクライアント.
 
     OpenAI ChatCompletion APIを使用してテキスト生成や関数呼び出しを実行するクライアント。
+    ファイルベースで動作し、メモリに履歴を保持しません。
     """
 
     def __init__(
@@ -30,27 +30,17 @@ class OpenAIClient(LLMClient):
             config: 設定辞書(api_key, base_url, model等を含む)
             functions: 利用可能な関数の定義リスト
             tools: 利用可能なツールの定義リスト
-            message_store: MessageStoreインスタンス(file-based mode用)
-            context_dir: コンテキストディレクトリパス(file-based mode用)
+            message_store: MessageStoreインスタンス(必須)
+            context_dir: コンテキストディレクトリパス(必須)
 
         """
         self.api_key = config.get("api_key", "OPENAI_API_KEY")
         self.base_url = config.get("base_url", "https://api.openai.com/")
-        self.openai = openai.OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=3600)
         self.model = config["model"]
-        self.max_token = config.get("max_token", 40960)
         self.functions = functions
         self.tools = tools
-        
-        # File-based or memory-based mode
         self.message_store = message_store
         self.context_dir = context_dir
-        if message_store is None:
-            # Legacy mode: use in-memory messages list
-            self.messages = []
-        else:
-            # File-based mode: no in-memory storage
-            self.messages = None
 
     def send_system_prompt(self, prompt: str) -> None:
         """システムプロンプトをメッセージ履歴に追加する.
@@ -59,28 +49,16 @@ class OpenAIClient(LLMClient):
             prompt: システムプロンプトの内容
 
         """
-        if self.message_store:
-            self.message_store.add_message("system", prompt)
-        else:
-            self.messages.append({"role": "system", "content": prompt})
+        self.message_store.add_message("system", prompt)
 
     def send_user_message(self, message: str) -> None:
         """ユーザーメッセージをメッセージ履歴に追加する.
-
-        メッセージ履歴が最大トークン数を超えた場合、古いメッセージを削除する。
 
         Args:
             message: ユーザーメッセージの内容
 
         """
-        if self.message_store:
-            self.message_store.add_message("user", message)
-        else:
-            self.messages.append({"role": "user", "content": message})
-            total_chars = sum(len(m["content"]) for m in self.messages)
-            while total_chars // 4 > self.max_token:
-                self.messages.pop(1)
-                total_chars = sum(len(m["content"]) for m in self.messages)
+        self.message_store.add_message("user", message)
 
     def send_function_result(self, name: str, result: object) -> None:
         """関数の実行結果をメッセージ履歴に追加する.
@@ -96,50 +74,10 @@ class OpenAIClient(LLMClient):
         else:
             result_str = json.dumps(result)
         
-        if self.message_store:
-            self.message_store.add_message("tool", result_str, tool_name=name)
-        else:
-            self.messages.append({"role": "tool", "name": name, "content": result_str})
-            total_chars = sum(len(m["content"]) for m in self.messages)
-            while total_chars // 4 > self.max_token:
-                self.messages.pop(1)
-                total_chars = sum(len(m["content"]) for m in self.messages)
+        self.message_store.add_message("tool", result_str, tool_name=name)
 
     def get_response(self) -> tuple[str, list[Any]]:
         """OpenAI APIから応答を取得する.
-
-        Returns:
-            tuple: (応答テキスト, 関数呼び出しリスト)
-
-        """
-        if self.message_store:
-            # File-based mode: use request.json file without loading into memory
-            return self._get_response_file_based()
-        else:
-            # Legacy mode: use in-memory messages
-            resp = self.openai.chat.completions.create(
-                model=self.model,
-                messages=self.messages,
-                functions=self.functions,
-                function_call="auto",
-            )
-            reply = ""
-            functions = []
-            for choice in resp.choices:
-                content = choice.message.content or ""
-                self.messages.append({"role": choice.message.role, "content": content})
-                reply += content
-                if choice.message.function_call is not None:
-                    func_call = choice.message.function_call
-                    reply += (
-                        f"Function call: {func_call.name} "
-                        f"with arguments {func_call.arguments}"
-                    )
-                    functions.append(choice.message.function_call)
-            return reply, functions
-
-    def _get_response_file_based(self) -> tuple[str, list[Any]]:
-        """Get response using file-based request without loading messages into memory.
 
         Returns:
             tuple: (応答テキスト, 関数呼び出しリスト)
@@ -222,4 +160,5 @@ class OpenAIClient(LLMClient):
             # Clean up request.json
             if request_path.exists():
                 request_path.unlink()
+
 

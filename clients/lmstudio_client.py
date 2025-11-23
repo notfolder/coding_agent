@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import lmstudio as lms
+import requests
 
 from .llm_base import LLMClient
 
@@ -13,6 +13,7 @@ class LMStudioClient(LLMClient):
     """LM Studioを使用するLLMクライアント.
 
     LM Studio APIを使用してローカルLLMモデルとの対話を実行するクライアント。
+    OpenAI互換APIを使用し、ファイルベースで動作します。
     """
 
     def __init__(
@@ -25,48 +26,36 @@ class LMStudioClient(LLMClient):
 
         Args:
             config: 設定辞書(base_url, model等を含む)
-            message_store: MessageStoreインスタンス(file-based mode用)
-            context_dir: コンテキストディレクトリパス(file-based mode用)
+            message_store: MessageStoreインスタンス(必須)
+            context_dir: コンテキストディレクトリパス(必須)
 
         """
-        lms.configure_default_client(config.get("base_url", "localhost:1234"))
-        self.model = lms.llm(config.get("model"))
-        
-        # File-based or memory-based mode
+        base_url = config.get("base_url", "localhost:1234")
+        # Add http:// if not present
+        if not base_url.startswith(("http://", "https://")):
+            base_url = f"http://{base_url}"
+        self.base_url = base_url
+        self.model = config.get("model", "local-model")
         self.message_store = message_store
         self.context_dir = context_dir
-        if message_store is None:
-            # Legacy mode: use LMStudio's Chat API
-            self.chat = lms.Chat()
-        else:
-            # File-based mode: no chat object
-            self.chat = None
-        
-        self.last_response = None
 
     def send_system_prompt(self, prompt: str) -> None:
-        """システムプロンプトをチャットに追加する.
+        """システムプロンプトをメッセージ履歴に追加する.
 
         Args:
             prompt: システムプロンプトの内容
 
         """
-        if self.message_store:
-            self.message_store.add_message("system", prompt)
-        else:
-            self.chat.add_system_prompt(prompt)
+        self.message_store.add_message("system", prompt)
 
     def send_user_message(self, message: str) -> None:
-        """ユーザーメッセージをチャットに追加する.
+        """ユーザーメッセージをメッセージ履歴に追加する.
 
         Args:
             message: ユーザーメッセージの内容
 
         """
-        if self.message_store:
-            self.message_store.add_message("user", message)
-        else:
-            self.chat.add_user_message(message)
+        self.message_store.add_message("user", message)
 
     def send_function_result(self, name: str, result: object) -> None:
         """関数の実行結果を送信する.
@@ -76,14 +65,13 @@ class LMStudioClient(LLMClient):
             result: 実行結果
 
         """
-        if self.message_store:
-            # File-based mode: add result as user message
-            output_message = f"output: {result}"
-            self.message_store.add_message("user", output_message)
+        # LM Studio supports tool calls in OpenAI-compatible format
+        if isinstance(result, str):
+            result_str = result
         else:
-            # Legacy mode: LM Studio does not support function calls
-            msg = "LMStudio does not support function calls. Use OpenAI compatible call instead."
-            raise NotImplementedError(msg)
+            result_str = json.dumps(result)
+        
+        self.message_store.add_message("tool", result_str, tool_name=name)
 
     def get_response(self) -> str:
         """LLMからの応答を取得する.
@@ -92,55 +80,58 @@ class LMStudioClient(LLMClient):
             LLMからの応答テキスト
 
         """
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        if self.message_store:
-            # File-based mode: need to manually create chat from messages
-            chat = lms.Chat()
-            messages = self._load_messages_from_file()
-            
-            logger.debug("メッセージ数: %d", len(messages))
-            
-            for msg in messages:
-                role = msg.get("role")
-                content = msg.get("content", "")
-                if role == "system":
-                    chat.add_system_prompt(content)
-                elif role == "user":
-                    chat.add_user_message(content)
-                elif role == "assistant":
-                    chat.add_assistant_response(content)
-            
-            result = self.model.respond(chat)
-            logger.debug("LMStudio応答型: %s, 内容: %s", type(result), str(result)[:100])
-            
-            self.message_store.add_message("assistant", str(result))
-        else:
-            # Legacy mode
-            result = self.model.respond(self.chat)
-            self.chat.add_assistant_response(result)
-        
-        return str(result)
-
-    def _load_messages_from_file(self) -> list[dict[str, Any]]:
-        """Load messages from current.jsonl file.
-
-        Returns:
-            List of messages
-
-        """
+        # Create request.json by streaming current.jsonl
+        request_path = self.context_dir / "request.json"
         current_file = self.message_store.current_file
-        messages = []
         
-        if current_file.exists():
-            with current_file.open() as f:
-                for line in f:
-                    msg = json.loads(line.strip())
-                    messages.append({
-                        "role": msg["role"],
-                        "content": msg["content"],
-                    })
+        with request_path.open("w") as req_file:
+            # Write JSON header - LM Studio uses OpenAI-compatible API
+            req_file.write('{"model":"')
+            req_file.write(self.model)
+            req_file.write('","messages":[')
+            
+            # Stream current.jsonl content (already in OpenAI format)
+            if current_file.exists():
+                first = True
+                with current_file.open() as current_f:
+                    for line in current_f:
+                        if not first:
+                            req_file.write(',')
+                        req_file.write(line.strip())
+                        first = False
+            
+            # Write footer
+            req_file.write(']}')
         
-        return messages
+        # Send request via HTTP POST to OpenAI-compatible endpoint
+        try:
+            with request_path.open('rb') as req_file:
+                response = requests.post(
+                    f"{self.base_url.rstrip('/')}/v1/chat/completions",
+                    headers={"Content-Type": "application/json"},
+                    data=req_file,
+                    timeout=3600
+                )
+            
+            response.raise_for_status()
+            response_data = response.json()
+            
+            # Parse response - OpenAI-compatible format
+            reply = ""
+            for choice in response_data.get("choices", []):
+                message = choice.get("message", {})
+                content = message.get("content") or ""
+                reply += content
+            
+            # Add assistant response to message store
+            if reply:
+                self.message_store.add_message("assistant", reply)
+            
+            return reply
+            
+        finally:
+            # Clean up request.json
+            if request_path.exists():
+                request_path.unlink()
+
 
