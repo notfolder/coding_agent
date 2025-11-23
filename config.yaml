@@ -40,12 +40,38 @@ llm:
     endpoint: "http://host.docker.internal:11434"
     model: "qwen3-30b-a3b-mlx"
     max_token: 32768
+    context_length: 32768
   openai:
     base_url: "https://api.openai.com/v1"
     api_key: "OPENAI_API_KEY"
     model: "gpt-4o"
     max_token: 40960
+    context_length: 128000
 max_llm_process_num: 1000
+
+# コンテキストストレージ設定
+context_storage:
+  enabled: true
+  base_dir: "contexts"
+  compression_threshold: 0.7
+  keep_recent_messages: 5
+  cleanup_days: 30
+  summary_prompt: |
+    あなたは会話履歴を要約するアシスタントです。
+    以下のメッセージ履歴を簡潔かつ包括的に要約してください。
+    
+    要約には以下を含めてください：
+    1. 重要な決定事項
+    2. 実施したコード変更
+    3. 発生した問題とその解決
+    4. 残存タスク
+    
+    元の30-40%の長さを目標としてください。
+    
+    === 要約対象メッセージ ===
+    {messages}
+    
+    要約のみを出力してください。
 
 github:
   owner:     "notfolder"

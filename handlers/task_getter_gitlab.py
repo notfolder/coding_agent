@@ -20,6 +20,7 @@ class TaskGitLabIssue(Task):
         gitlab_client: GitlabClient,
         config: dict[str, Any],
     ) -> None:
+        super().__init__()
         self.issue = issue
         self.project_id = issue.get("project_id")
         self.issue_iid = issue.get("iid")
@@ -100,6 +101,7 @@ class TaskGitLabMergeRequest(Task):
         gitlab_client: GitlabClient,
         config: dict[str, Any],
     ) -> None:
+        super().__init__()
         self.mr = mr
         self.project_id = mr.get("project_id")
         self.merge_request_iid = mr.get("iid")

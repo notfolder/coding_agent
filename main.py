@@ -329,6 +329,8 @@ def produce_tasks(
         logger: ログ出力用のロガー
 
     """
+    import uuid
+    
     # タスクゲッターのファクトリーメソッドでインスタンス生成
     task_getter = TaskGetter.factory(config, mcp_clients, task_source)
 
@@ -338,7 +340,10 @@ def produce_tasks(
     # 各タスクの準備処理を実行してキューに追加
     for task in tasks:
         task.prepare()  # ラベル付与などの準備処理
-        task_queue.put(task.get_task_key().to_dict())
+        task_dict = task.get_task_key().to_dict()
+        task_dict["uuid"] = str(uuid.uuid4())  # UUID v4を生成して追加
+        task_dict["user"] = task.get_user()    # ユーザー情報も追加
+        task_queue.put(task_dict)
 
     logger.info("%d件のタスクをキューに追加しました", len(tasks))
 
@@ -381,6 +386,10 @@ def consume_tasks(
         if task is None:
             logger.error("Unknown or invalid task key: %s", task_key_dict)
             continue
+
+        # UUIDとユーザー情報をタスクに設定
+        task.uuid = task_key_dict.get("uuid")
+        task.user = task_key_dict.get("user")
 
         # タスクの状態確認
         if not hasattr(task, "check") or not task.check():

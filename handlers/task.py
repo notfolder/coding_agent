@@ -18,6 +18,11 @@ class Task(ABC):
     様々なタスクを統一的に処理するためのインターフェースを定義します。
     """
 
+    def __init__(self) -> None:
+        """Initialize task with UUID placeholder."""
+        self.uuid: str | None = None
+        self.user: str | None = None
+
     @abstractmethod
     def prepare(self) -> None:
         """タスクの準備処理を実行する.
