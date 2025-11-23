@@ -217,9 +217,19 @@ class ContextCompressor:
         with request_file.open() as f:
             prompt = f.read()
         
-        # Send to LLM (simplified - actual implementation may vary)
-        # The LLM client should handle this appropriately
-        # For now, we'll use a simple approach
+        # For actual summarization, we would need to use the LLM client
+        # However, the current LLM client interface doesn't support
+        # one-off requests without affecting the message history.
+        # This is a simplified implementation that would need enhancement
+        # for production use.
+        
+        # TODO: Implement proper LLM-based summarization
+        # This requires either:
+        # 1. Adding a separate summarization method to LLM client
+        # 2. Creating a temporary LLM client instance for summarization
+        # 3. Using a dedicated summarization service
+        
+        # For now, return a placeholder to indicate compression occurred
         summary = f"[Context Summary: {len(prompt)} chars of conversation history compressed]"
         
         return summary

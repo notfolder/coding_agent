@@ -89,7 +89,11 @@ class OpenAIClient(LLMClient):
             result: 関数の実行結果
 
         """
-        result_str = json.dumps(result) if not isinstance(result, str) else result
+        # Ensure result is a string
+        if isinstance(result, str):
+            result_str = result
+        else:
+            result_str = json.dumps(result)
         
         if self.message_store:
             self.message_store.add_message("tool", result_str, tool_name=name)

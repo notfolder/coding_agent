@@ -634,8 +634,8 @@ class TaskHandler:
                 args = self.sanitize_arguments(tool_call.get("args", {}))
                 mcp_server, tool_func = tool_name.split("_", 1)
                 
+                start_time = time.time()
                 try:
-                    start_time = time.time()
                     output = self.mcp_clients[mcp_server].call_tool(tool_func, args)
                     duration_ms = (time.time() - start_time) * 1000
                     
@@ -657,7 +657,7 @@ class TaskHandler:
                         error_state["tool_error_count"] = 0
                     
                 except Exception as e:
-                    duration_ms = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
+                    duration_ms = (time.time() - start_time) * 1000
                     error_msg = str(e)
                     
                     # Record tool error

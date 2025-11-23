@@ -30,7 +30,12 @@ class MessageStore:
         self.context_dir = context_dir
         self.messages_file = context_dir / "messages.jsonl"
         self.current_file = context_dir / "current.jsonl"
-        self.context_length = config.get("llm", {}).get(config.get("llm", {}).get("provider", "openai"), {}).get("context_length", 128000)
+        
+        # Extract context length from config
+        llm_config = config.get("llm", {})
+        provider = llm_config.get("provider", "openai")
+        provider_config = llm_config.get(provider, {})
+        self.context_length = provider_config.get("context_length", 128000)
 
     def add_message(self, role: str, content: str, tool_name: str | None = None) -> int:
         """Add a new message to both messages.jsonl and current.jsonl.
