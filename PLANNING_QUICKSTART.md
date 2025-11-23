@@ -1,6 +1,6 @@
 # プランニング機能クイックスタートガイド
 
-> **Note**: 本ガイドは[プランニングプロセス仕様書](PLANNING_SPECIFICATION.md)の簡易版です。詳細な仕様については完全版を参照してください。
+> **Note**: 本ガイドは[プランニングプロセス仕様書](PLANNING_SPECIFICATION.md)の簡易版です。詳細な仕様については完全版を参照してください。実装方式については[実装詳細設計書](PLANNING_IMPLEMENTATION_DESIGN.md)を参照してください。
 
 ## 概要
 
@@ -17,36 +17,43 @@
 ### config.yamlへの追加
 
 ```yaml
-# プランニング機能の基本設定
+# プランニング機能の基本設定（全てデフォルト値）
 planning:
-  # 機能の有効化
+  # 機能の有効化（デフォルト: true）
   enabled: true
   
-  # プランニング戦略
+  # プランニング戦略（デフォルト: chain_of_thought）
   strategy: "chain_of_thought"
   
-  # 最大サブタスク数
-  max_subtasks: 10
+  # 最大サブタスク数（デフォルト: 100）
+  max_subtasks: 100
+  
+  # タスク分解の詳細度（デフォルト: moderate）
+  decomposition_level: "moderate"
   
   # リフレクション設定
   reflection:
-    enabled: true
-    trigger_on_error: true      # エラー時に自動リフレクション
-    trigger_interval: 3         # 3アクション毎にリフレクション
+    enabled: true                 # デフォルト: true
+    trigger_on_error: true        # エラー時に自動リフレクション
+    trigger_interval: 3           # 3アクション毎にリフレクション
   
   # 計画修正設定
   revision:
-    max_revisions: 3            # 最大3回まで修正
-    require_human_approval: false
+    max_revisions: 3              # 最大3回まで修正
+  
+  # 履歴管理（JSONLファイルベース）
+  history:
+    storage_type: "jsonl"
+    directory: "planning_history"
 ```
 
 ### 環境変数での設定
 
 ```bash
-# プランニング機能を有効化
+# プランニング機能を有効化（デフォルトでtrue）
 export PLANNING_ENABLED=true
 
-# リフレクション機能を有効化
+# リフレクション機能を有効化（デフォルトでtrue）
 export REFLECTION_ENABLED=true
 
 # 最大計画修正回数
