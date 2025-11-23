@@ -33,7 +33,8 @@ contexts/
 │   └── {uuid}/                 # タスクUUID単位のディレクトリ
 │       ├── metadata.json       # タスクメタデータ（静的）
 │       ├── messages.jsonl      # 全メッセージ履歴（保管用）
-│       ├── current.jsonl       # 現在のコンテキスト（LLM用）
+│       ├── current.jsonl       # 現在のコンテキスト（LLM用、OpenAI形式）
+│       ├── unsummarized.jsonl  # 未要約メッセージ（圧縮時に保持）
 │       ├── summaries.jsonl     # コンテキスト要約履歴
 │       ├── tools.jsonl         # ツール実行履歴
 │       └── request.json        # LLMリクエスト一時ファイル
@@ -147,19 +148,33 @@ CREATE INDEX idx_tasks_user ON tasks(user);
 
 ### 3.3 current.jsonl
 
-**現在のコンテキスト**をJSONLines形式で記録。LLMリクエストで使用。
+**現在のコンテキスト**をOpenAI API互換形式で記録。LLMリクエストで使用。
 
 #### 目的
 
 - LLM呼び出し時のコンテキストとして直接使用
 - 要約後は新しく作り直される
 - メモリに載せずにファイルとして処理
+- **OpenAI API形式で保存**（変換不要でリクエスト可能）
 
 #### 形式
 
-messages.jsonlと同じ形式。ただし内容は：
-- 最新の要約（あれば1件）
-- 要約以降の未要約メッセージ群
+**OpenAI API互換のJSONLines形式**（messages.jsonlとは異なる）:
+
+```jsonl
+{"role":"system","content":"You are an AI..."}
+{"role":"user","content":"Fix the bug..."}
+{"role":"assistant","content":"I'll help..."}
+{"role":"tool","tool_name":"github_get_file","content":"{...}"}
+```
+
+#### フィールド
+
+- `role`: メッセージの役割（system/user/assistant/tool）
+- `content`: メッセージ内容
+- `tool_name`: ツール名（role="tool"の場合のみ）
+
+**注**: seq、timestamp、tokensフィールドは含まない（OpenAI APIに送信不要なため）
 
 #### 更新タイミング
 
@@ -167,7 +182,33 @@ messages.jsonlと同じ形式。ただし内容は：
 - メッセージ追加時: 1行追記
 - 圧縮実行時: 新規作成（要約を最初の行として記録）
 
-### 3.4 summaries.jsonl
+### 3.4 unsummarized.jsonl
+
+**未要約メッセージ**をOpenAI API互換形式で記録。圧縮時に保持するメッセージ。
+
+#### 目的
+
+- 圧縮時に最新N件のメッセージを要約対象から除外
+- 除外したメッセージを一時保管
+- 圧縮後、要約と結合してcurrent.jsonlを再構築
+
+#### 形式
+
+current.jsonlと同じOpenAI API互換形式:
+
+```jsonl
+{"role":"user","content":"Fix the bug..."}
+{"role":"assistant","content":"I'll help..."}
+```
+
+#### 使用タイミング
+
+- 圧縮実行時に作成
+- current.jsonlの最新N件（config.yamlで指定）を抽出して保存
+- 圧縮後、要約とunsummarized.jsonlを結合してcurrent.jsonlを再作成
+- 再作成後、削除
+
+### 3.5 summaries.jsonl
 
 コンテキスト要約の履歴。
 
@@ -188,7 +229,7 @@ messages.jsonlと同じ形式。ただし内容は：
 - `ratio`: 圧縮率（summary_tokens/original_tokens）
 - `timestamp`: 要約作成日時
 
-### 3.5 tools.jsonl
+### 3.6 tools.jsonl
 
 ツール実行履歴。
 
@@ -209,30 +250,23 @@ messages.jsonlと同じ形式。ただし内容は：
 - `duration_ms`: 実行時間（ミリ秒）
 - `timestamp`: 実行日時
 
-### 3.6 request.json
+### 3.7 request.json
 
 LLM APIへのリクエストを一時的に保存するファイル。全LLMClientで使用。
 
 #### 内容
 
-```json
-{
-  "model": "gpt-4o",
-  "messages": [
-    {"role": "system", "content": "..."},
-    {"role": "user", "content": "..."}
-  ],
-  "functions": [...],
-  "function_call": "auto"
-}
-```
+LLMClientの種類によってフォーマットが異なる:
+
+- **OpenAI**: OpenAI API形式
+- **Ollama**: Ollama API形式  
+- **LMStudio**: LM Studio API形式
 
 #### 使用方法
 
-1. current.jsonlから読み込んでmessages配列を構築
-2. request.jsonに保存
-3. LLM APIに送信
-4. レスポンス受信後、削除
+1. current.jsonlファイルを読み込まず、ファイル結合でrequest.jsonを作成
+2. LLM APIに送信
+3. レスポンス受信後、削除
 
 ## 4. クラス設計
 
@@ -306,34 +340,37 @@ LLM APIへのリクエストを一時的に保存するファイル。全LLMClie
 - 新しいメッセージを追加
 - シーケンス番号を採番（現在の最大seq + 1）
 - トークン数を計算（len(content) // 4）
-- **messages.jsonlに1行追記**（全履歴保管）
-- **current.jsonlに1行追記**（現在コンテキスト）
+- **messages.jsonlに1行追記**（seq, timestamp, tokens等の完全情報）
+- **current.jsonlに1行追記**（OpenAI形式: role, content, tool_nameのみ）
 - 戻り値: メッセージのシーケンス番号
 
-**`get_current_context_file()`**
+**`get_current_context_file(unsummarized_file_path=None)`**
 - current.jsonlのファイルパスを返す
-- LLMClientがこのファイルを直接読み込んでリクエスト作成
+- unsummarized_file_pathが指定された場合、それを最後に結合したファイルパスを返す
+- ファイル結合処理で未要約メッセージを追加
 - **メモリに載せない**
-- 戻り値: Pathオブジェクト（current.jsonlのパス）
+- 引数: unsummarized_file_path（未要約メッセージファイル、オプション）
+- 戻り値: Pathオブジェクト（current.jsonlまたは結合ファイルのパス）
 
 **`get_current_token_count()`**
 - current.jsonlのトークン数を計算
+- messages.jsonlから対応するseqのtokensを読み取り
 - ファイルを1行ずつ読み捨ててカウント（メモリに載せない）
-- 各行のtokensフィールドを合計
 - 戻り値: トークン数の合計
 
 **`count_messages()`**
 - 総メッセージ数を返す（messages.jsonlの行数）
 - 戻り値: 行数
 
-**`recreate_current_context(summary_text, summary_tokens)`**
+**`recreate_current_context(summary_text, summary_tokens, unsummarized_file_path)`**
 - 要約後、current.jsonlを新規作成
 - 処理手順:
   1. current.jsonlを削除
-  2. 要約を最初の行として書き込み
-     `{"seq":0,"role":"summary","content":summary_text,"tokens":summary_tokens}`
-  3. 以降のメッセージ追加はadd_message()で追記
-- 引数: summary_text（要約テキスト）、summary_tokens（トークン数）
+  2. 要約を最初の行として書き込み（OpenAI形式）
+     `{"role":"assistant","content":summary_text}`
+  3. unsummarized_file_pathの内容を結合（ファイル結合、メモリ不使用）
+  4. messages.jsonlにも要約を追記（完全情報として）
+- 引数: summary_text（要約テキスト）、summary_tokens（トークン数）、unsummarized_file_path（未要約メッセージファイルパス）
 
 ### 4.3 SummaryStoreクラス
 
@@ -408,6 +445,7 @@ LLM APIへのリクエストを一時的に保存するファイル。全LLMClie
 - 各ストアとLLMクライアントを受け取り初期化
 - 設定から`context_length`と`compression_threshold`を取得
 - 設定から`summary_prompt`を取得（config.yamlから）
+- 設定から`keep_recent_messages`を取得（config.yamlから、デフォルト5）
 - `min_messages_to_summarize`を設定（デフォルト10）
 
 **`should_compress()`**
@@ -422,71 +460,83 @@ LLM APIへのリクエストを一時的に保存するファイル。全LLMClie
 - コンテキストを圧縮（要約）
 - **ファイル結合でメモリ消費なし**
 - 処理手順:
-  1. 要約プロンプトファイルを一時作成（`summary_prompt.txt`）
-     - config.yamlのsummary_promptを書き込み
-  2. current.jsonlの内容をメッセージ形式に変換して追記
-     - ファイル結合: `summary_prompt.txt` + formatted current.jsonl
-     - 結合ファイル: `summary_request.txt`
-  3. summary_request.txtをLLMに送信して要約取得
-  4. 要約結果を取得
-  5. summary_storeに保存
-  6. message_store.recreate_current_context()で current.jsonlを再作成
-  7. 一時ファイル削除
+  1. current.jsonlから最新N件（keep_recent_messages）を抽出
+     - ファイル末尾N行を読み取りunsummarized.jsonlに保存
+  2. current.jsonlから要約対象メッセージを抽出（最新N件を除く）
+     - to_summarize.jsonlに保存
+  3. 要約プロンプトとto_summarize.jsonlを結合してリクエスト作成
+  4. LLMに要約依頼
+  5. 要約結果を取得
+  6. summary_storeに保存
+  7. message_store.recreate_current_context()でcurrent.jsonlを再作成
+     - 引数としてunsummarized.jsonlファイルパスを渡す
+  8. 一時ファイル削除（unsummarized.jsonl, to_summarize.jsonl等）
 - 戻り値: 要約ID
 
-**`create_summary_request_file(summary_prompt_file, current_context_file, output_file)`**
+**`create_summary_request_file(summary_prompt_file, to_summarize_file, unsummarized_file, output_file)`**
 - 要約リクエストファイルを作成（ファイル結合）
 - 処理:
   1. summary_prompt_fileの内容を読み込み
-  2. current_context_fileを1行ずつ読んでメッセージ形式に変換
+  2. to_summarize_fileを1行ずつ読んでメッセージ形式に変換
      - `[ROLE]: content`形式に整形
   3. output_fileに書き出し
+  4. unsummarized_fileは結合しない（要約対象外）
+- 引数: unsummarized_fileは未要約メッセージファイルパス（参照のみ）
 - **メモリに載せない**（ストリーム処理）
 
-### 4.6 TaskQueueクラス（新規仕様追加）
+### 4.6 既存キュー処理の変更
 
-タスクキューを管理するクラス。**UUIDを付与する責務**。
+既存のタスクキュー投入処理（main.py内）にUUID生成機能を追加。
 
-#### 責務
+#### 変更箇所: main.py の fetch_and_enqueue_tasks()
 
-- タスクをキューに投入
-- UUID v4の生成と付与
-- タスクの取得
+既存のキュー投入処理を変更してUUIDを付与:
 
-#### 主要メソッド
+**現在の処理**:
+```
+for task in tasks:
+    task.prepare()
+    task_queue.put(task.get_task_key().to_dict())
+```
 
-**`enqueue(task_key, user)`**
-- タスクをキューに投入
-- 処理手順:
-  1. UUID v4を生成
-  2. タスクオブジェクトにUUIDを設定
-     - task.set_uuid(uuid)
-  3. task_keyとuserも設定
-  4. キューに投入（Redis等）
-- 引数: task_key（タスク識別情報）、user（ユーザー名）
-- 戻り値: 生成されたUUID
+**変更後の処理**:
+```
+import uuid
 
-**`dequeue()`**
-- キューからタスクを取得
-- 戻り値: Taskオブジェクト（UUID付き）
+for task in tasks:
+    task.prepare()
+    task_dict = task.get_task_key().to_dict()
+    task_dict['uuid'] = str(uuid.uuid4())  # UUID v4を生成して追加
+    task_dict['user'] = task.get_user()    # ユーザー情報も追加
+    task_queue.put(task_dict)
+```
 
-### 4.7 Taskクラス
+#### 処理内容
 
-タスク情報を保持するクラス。
+1. タスクの準備処理を実行（task.prepare()）
+2. TaskKeyをdictに変換（task.get_task_key().to_dict()）
+3. UUID v4を生成して辞書に追加
+4. ユーザー情報を追加
+5. キューに投入
 
-#### 追加メソッド
+これにより、キューから取得したタスク辞書には既にUUIDが含まれている。
 
-**`set_uuid(uuid)`**
-- UUIDを設定
-- TaskQueueでキュー投入時に呼び出される
+### 4.7 TaskFactoryクラス
 
-**`get_uuid()`**
-- UUIDを取得
-- TaskHandlerで使用
+タスクファクトリークラスの変更。
 
-**`get_task_key()`**
-- タスクキーを取得
-- 戻り値: task_keyのdict
+#### from_dict()メソッドの変更
+
+タスク辞書からTaskオブジェクトを生成する際、UUIDも設定:
+
+**処理内容**:
+1. タスク辞書から task_key情報を取得
+2. Taskオブジェクトを生成
+3. **UUIDをタスクに設定**: `task.uuid = task_dict.get('uuid')`
+4. ユーザー情報も設定: `task.user = task_dict.get('user')`
+5. Taskオブジェクトを返す
+
+これにより、TaskHandlerで`task.uuid`でUUIDを取得可能。
 
 ## 5. 既存クラスの変更
 
@@ -496,14 +546,14 @@ LLM APIへのリクエストを一時的に保存するファイル。全LLMClie
 - 既存通り
 
 **`handle(task)`メソッド**
-- タスクからUUIDを取得（task.get_uuid()）
+- タスクからUUIDを取得（task.uuid） ← キューで付与済み
 - 処理の最初に`TaskContextManager`を初期化（UUIDを渡す）
 - 処理の最後に`context_manager.complete()`または`context_manager.fail()`を呼び出す
 
 **タスク開始時**:
 ```
 1. task_keyを取得（task.get_task_key()）
-2. UUIDを取得（task.get_uuid()） ← キューで付与済み
+2. UUIDを取得（task.uuid） ← キューで付与済み
 3. TaskContextManager初期化
    context_manager = TaskContextManager(task_key, uuid, config)
 4. UUIDをログに記録
@@ -532,7 +582,7 @@ LLM APIへのリクエストを一時的に保存するファイル。全LLMClie
 ### 5.2 OpenAIClientクラス
 
 **メモリ最適化の方針**:
-- current.jsonlから直接request.jsonを作成
+- current.jsonl（OpenAI形式）からファイル結合でrequest.jsonを作成
 - ファイルベースHTTPリクエスト
 - メモリに載せない
 
@@ -544,50 +594,32 @@ LLM APIへのリクエストを一時的に保存するファイル。全LLMClie
 - `self.context_dir = context_dir`を設定
 
 **`send_system_prompt(prompt)`メソッド**
-- `self.message_store.add_message("system", prompt)`に変更
+- `self.message_store.add_message("system", prompt)`を呼び出す
+- messages.jsonlとcurrent.jsonlに書き込まれる
 
 **`send_user_message(message)`メソッド**
-- `self.message_store.add_message("user", message)`に変更
+- `self.message_store.add_message("user", message)`を呼び出す
+- messages.jsonlとcurrent.jsonlに書き込まれる
 
 **`send_function_result(name, result)`メソッド**
-- `self.message_store.add_message("tool", json.dumps(result), tool_name=name)`に変更
+- `self.message_store.add_message("tool", json.dumps(result), tool_name=name)`を呼び出す
+- messages.jsonlとcurrent.jsonlに書き込まれる
 
 **`get_response()`メソッド**
-- **完全ファイルベース処理**
+- **完全ファイルベース処理**（current.jsonlはOpenAI形式のため変換不要）
 - 処理手順:
   1. current_file = message_store.get_current_context_file()
-  2. current_fileを読んでrequest.jsonを作成（ファイル→ファイル変換）
-     - 1行ずつ読み、messages配列に変換してrequest.jsonに書き出し
+  2. request.json作成:
+     - JSONヘッダー部分を書き込み: `{"model":"gpt-4o","messages":[`
+     - current.jsonlファイルをストリームで結合（カンマ区切り）
+     - JSONフッター部分を書き込み: `],"functions":[...],"function_call":"auto"}`
+     - **ファイル結合でメモリ不使用**
   3. request.jsonをHTTP POSTで送信（requestsライブラリ）
   4. レスポンスをパース
   5. 応答をmessage_storeに追加
   6. request.json削除
 - 戻り値: (応答テキスト, 関数呼び出しリスト)
-
-**詳細な実装仕様**:
-```
-1. current.jsonlからrequest.json作成:
-   current_file = message_store.get_current_context_file()
-   messages = []
-   with open(current_file, 'r') as f:
-       for line in f:
-           msg = json.loads(line)
-           messages.append({"role": msg["role"], "content": msg["content"]})
-   
-   request_body = {
-       "model": self.model,
-       "messages": messages,
-       "functions": self.functions,
-       "function_call": "auto"
-   }
-   
-   request_path = self.context_dir / "request.json"
-   with open(request_path, 'w') as f:
-       json.dump(request_body, f)
-
-2. HTTPリクエスト送信:
-   import requests
-   with open(request_path, 'r') as f:
+- メモリ削減効果: 95-99%
        response = requests.post(
            f"{self.base_url}/v1/chat/completions",
            headers={
@@ -613,15 +645,16 @@ LLM APIへのリクエストを一時的に保存するファイル。全LLMClie
 - `self.context_dir = context_dir`を設定
 
 **`send_system_prompt(prompt)`メソッド**
-- `self.message_store.add_message("system", prompt)`に変更
+- `self.message_store.add_message("system", prompt)`を呼び出す
 
 **`send_user_message(message)`メソッド**
-- `self.message_store.add_message("user", message)`に変更
+- `self.message_store.add_message("user", message)`を呼び出す
 
 **`get_response()`メソッド**
-- current.jsonlからrequest.jsonを作成（OpenAIClientと同様）
-- Ollama SDKの代わりにHTTPリクエストを直接送信
-- 処理手順はOpenAIClientと同じ
+- current.jsonl（OpenAI形式）からファイル結合でrequest.json作成
+- Ollama API形式に変換（必要に応じて）
+- HTTP POSTで直接送信（Ollama SDKは使用しない）
+- ファイル結合処理でメモリ不使用
 - メモリ削減効果: 95-99%
 
 ### 5.4 LMStudioClientクラス
@@ -633,35 +666,46 @@ LLM APIへのリクエストを一時的に保存するファイル。全LLMClie
 - `self.context_dir = context_dir`を設定
 
 **`send_system_prompt(prompt)`メソッド**
-- `self.message_store.add_message("system", prompt)`を追加
+- `self.message_store.add_message("system", prompt)`を呼び出す
 
 **`send_user_message(message)`メソッド**
-- `self.message_store.add_message("user", message)`を追加
+- `self.message_store.add_message("user", message)`を呼び出す
 
 **`get_response()`メソッド**
-- current.jsonlからrequest.jsonを作成
-- HTTP APIで直接リクエスト（SDK使用を最小化）
-- 可能な限りファイルベースで処理
+- current.jsonl（OpenAI形式）からファイル結合でrequest.json作成
+- LM Studio API形式に変換
+- HTTP APIで直接リクエスト
+- ファイル結合処理でメモリ不使用
+- メモリ削減効果: 95-99%
 
 ## 6. 処理フロー
 
 ### 6.1 タスク開始フロー
 
+**キューへのタスク投入**（main.py の fetch_and_enqueue_tasks()）:
 ```
-1. キューへのタスク投入（新規処理）
-   task_queue = TaskQueue()
-   uuid = task_queue.enqueue(task_key, user)
-   ← UUID v4を生成してタスクに付与
+1. タスク取得: tasks = task_getter.get_task_list()
+2. 各タスクをループ:
+   a. task.prepare()
+   b. task_dict = task.get_task_key().to_dict()
+   c. task_dict['uuid'] = str(uuid.uuid4())  # UUID生成
+   d. task_dict['user'] = task.get_user()    # ユーザー取得
+   e. task_queue.put(task_dict)
+```
 
-2. キューからタスク取得
-   task = task_queue.dequeue()
-   uuid = task.get_uuid()  # キューで付与済み
+**キューからタスク取得**（main.py の process_task()）:
+```
+1. タスク辞書取得: task_dict = task_queue.get()
+2. Taskオブジェクト生成: task = TaskFactory.from_dict(task_dict)
+   - task.uuid = task_dict['uuid']  # UUID設定
+   - task.user = task_dict['user']  # ユーザー設定
+3. TaskHandler.handle(task)呼び出し
 
 3. TaskHandler.handle(task)呼び出し
    
 4. TaskHandler内:
    a. task_key = task.get_task_key()
-   b. uuid = task.get_uuid()
+   b. uuid = task.uuid  # タスクオブジェクトから取得
    c. context_manager = TaskContextManager(task_key, uuid, config)
       - 既存のUUIDを使用
       - running/{uuid}/ディレクトリ作成
@@ -683,15 +727,18 @@ LLM APIへのリクエストを一時的に保存するファイル。全LLMClie
 ```
 1. llm_client.send_system_prompt(system_prompt)
    → message_store.add_message("system", system_prompt)
-   → messages.jsonlとcurrent.jsonlに追記
+   → messages.jsonlに追記（seq, timestamp, tokens含む）
+   → current.jsonlに追記（OpenAI形式: role, content）
 
 2. llm_client.send_user_message(user_prompt)
    → message_store.add_message("user", user_prompt)
-   → messages.jsonlとcurrent.jsonlに追記
+   → messages.jsonlに追記（seq, timestamp, tokens含む）
+   → current.jsonlに追記（OpenAI形式: role, content）
 
 3. llm_client.get_response()
    a. current_file = message_store.get_current_context_file()
-   b. current.jsonl → request.json変換（ファイル→ファイル）
+   b. request.json作成（ファイル結合、メモリ不使用）
+      - JSONヘッダー + current.jsonl + JSONフッター
    c. request.jsonをHTTP POST送信
    d. レスポンスをパース
    e. message_store.add_message("assistant", response_content)
@@ -752,51 +799,52 @@ LLM APIへのリクエストを一時的に保存するファイル。全LLMClie
 以下の条件を満たす場合に圧縮を実行:
 
 1. current.jsonlのトークン数 > `context_length * compression_threshold`
-   - トークン数はファイル読み捨てでカウント（メモリに載せない）
+   - トークン数はmessages.jsonlから読み取り（current.jsonlにtokensフィールドがないため）
 
 ### 7.2 圧縮処理（ファイルベース）
 
 **処理手順**:
 
-1. 要約プロンプトファイル作成
-   ```
-   summary_prompt.txt:
-   あなたは会話履歴を要約するアシスタントです。
-   以下のメッセージ履歴を簡潔かつ包括的に要約してください。
-   ...
-   ```
+1. 未要約メッセージの抽出
+   - current.jsonlの末尾N件（keep_recent_messages）を読み取り
+   - unsummarized.jsonlに保存（OpenAI形式）
+   
+2. 要約対象メッセージの抽出
+   - current.jsonlの先頭から（全体 - N）件を読み取り
+   - to_summarize.jsonlに保存（OpenAI形式）
 
-2. current.jsonlをメッセージ形式に変換
-   ```
-   ファイル読み捨て処理:
-   for line in current.jsonl:
-       msg = parse(line)
-       append to summary_request.txt: "[{role}]: {content}\n"
-   ```
+3. 要約プロンプトファイル作成
+   - config.yamlのsummary_promptをsummary_prompt.txtに書き込み
 
-3. ファイル結合
-   ```
-   summary_request.txt = summary_prompt.txt + formatted_current_messages
-   ```
+4. to_summarize.jsonlをメッセージ形式に変換
+   - ファイル読み捨て処理:
+     ```
+     for line in to_summarize.jsonl:
+         msg = parse(line)
+         append to formatted_messages.txt: "[{role}]: {content}\n"
+     ```
 
-4. LLMに要約依頼
-   ```
-   summary = llm_client.get_summary(summary_request.txt)
-   ```
+5. ファイル結合
+   - summary_request.txt = summary_prompt.txt + formatted_messages.txt
 
-5. current.jsonl再作成
-   ```
-   message_store.recreate_current_context(summary, summary_tokens)
-   → current.jsonlを削除して新規作成
-   → 最初の行として要約を記録
-   ```
+6. LLMに要約依頼
+   - summary = llm_client.get_summary(summary_request.txt)
 
-6. 一時ファイル削除
-   ```
-   summary_prompt.txt, summary_request.txt削除
-   ```
+7. 要約結果の記録
+   - summary_store.add_summary(...)で要約履歴に記録
+   - messages.jsonlにも要約を追記（完全情報として）
 
-**メモリ削減効果**: コンテキスト全体をメモリに載せない
+8. current.jsonl再作成
+   - message_store.recreate_current_context(summary, summary_tokens, unsummarized.jsonl)
+   - current.jsonlを削除して新規作成
+   - 最初の行として要約を記録（OpenAI形式）
+   - unsummarized.jsonlの内容を結合（ファイル結合）
+
+9. 一時ファイル削除
+   - summary_prompt.txt, formatted_messages.txt, summary_request.txt削除
+   - unsummarized.jsonl, to_summarize.jsonl削除
+
+**メモリ削減効果**: コンテキスト全体をメモリに載せない（ファイル結合のみ）
 
 ### 7.3 要約プロンプトの設定
 
@@ -806,6 +854,7 @@ LLM APIへのリクエストを一時的に保存するファイル。全LLMClie
 
 ```yaml
 context_storage:
+  keep_recent_messages: 5  # 圧縮時に保持する最新メッセージ数
   summary_prompt: |
     あなたは会話履歴を要約するアシスタントです。
     以下のメッセージ履歴を簡潔かつ包括的に要約してください。
@@ -891,6 +940,7 @@ context_storage:
   enabled: true                    # コンテキストファイル化を有効化
   base_dir: "contexts"             # ベースディレクトリ
   compression_threshold: 0.7       # 圧縮開始閾値（70%）
+  keep_recent_messages: 5          # 圧縮時に保持する最新メッセージ数
   cleanup_days: 30                 # 完了タスクのクリーンアップ日数
   
   # 要約プロンプト（config.yamlに記述）
