@@ -143,7 +143,8 @@ def get_task_list(self):
 - **実装**: FastAPIまたはFlaskを使用
 - **エンドポイント**:
   - `POST /webhook/github`: GitHub Webhookイベント受信
-  - `POST /webhook/gitlab`: GitLab Webhookイベント受信
+  - `POST /webhook/gitlab`: GitLab プロジェクトWebhookイベント受信
+  - `POST /webhook/gitlab/system`: GitLab システムフックイベント受信（オプション）
   - `GET /health`: ヘルスチェック
 - **ポート**: 8000 (環境変数で設定可能)
 
@@ -386,7 +387,8 @@ webhook:
     actions:                       # 処理対象アクション
       - "labeled"
   gitlab:
-    token: "${GITLAB_WEBHOOK_TOKEN}"    # GitLab Webhook Token
+    token: "${GITLAB_WEBHOOK_TOKEN}"    # GitLab プロジェクトWebhook Token
+    system_hook_token: "${GITLAB_SYSTEM_HOOK_TOKEN}"  # GitLab システムフック Token (オプション)
     events:                        # 処理対象イベント
       - "Issue Hook"
       - "Merge Request Hook"
@@ -410,7 +412,8 @@ WEBHOOK_ENABLED=true                    # Webhook機能の有効/無効
 WEBHOOK_SERVER_HOST=0.0.0.0             # Webhookサーバーのホスト
 WEBHOOK_SERVER_PORT=8000                # Webhookサーバーのポート
 GITHUB_WEBHOOK_SECRET=your_secret_here  # GitHub Webhook Secret
-GITLAB_WEBHOOK_TOKEN=your_token_here    # GitLab Webhook Token
+GITLAB_WEBHOOK_TOKEN=your_token_here    # GitLab プロジェクトWebhook Token
+GITLAB_SYSTEM_HOOK_TOKEN=your_system_token_here  # GitLab システムフック Token (オプション)
 ```
 
 ### 4.3 新規ファイル構成
@@ -465,11 +468,17 @@ GITLAB_WEBHOOK_TOKEN=your_token_here    # GitLab Webhook Token
   9. Taskオブジェクトをタスクキューに追加
   10. 成功を示すレスポンス（200 OK）を返す
 
-- **GitLab Webhookイベント処理メソッド**:
+- **GitLab Webhookイベント処理メソッド（プロジェクトWebhook）**:
   - GitHub Webhookと同様の処理フローだが、GitLab固有の検証とペイロード構造に対応
-  - X-Gitlab-Tokenヘッダーでトークン検証を実施
+  - X-Gitlab-Tokenヘッダーでトークン検証を実施（設定の`gitlab.token`と照合）
   - X-Gitlab-Eventヘッダーでイベントタイプを判定
   - GitLab特有のペイロード構造（object_attributes等）を解析
+
+- **GitLab システムフックイベント処理メソッド（オプション）**:
+  - プロジェクトWebhookと同じ処理ロジックを使用
+  - X-Gitlab-Tokenヘッダーでトークン検証を実施（設定の`gitlab.system_hook_token`と照合）
+  - ペイロード形式はプロジェクトWebhookと互換性があるため、既存のパーサーを再利用
+  - エンドポイントを `/webhook/gitlab/system` として分離することで、トークンを別管理
 
 - **サーバー起動メソッド**:
   - 指定されたホストとポートでFastAPIサーバーを起動
@@ -612,7 +621,7 @@ GITLAB_WEBHOOK_TOKEN=your_token_here    # GitLab Webhook Token
 
 ### 4.7 GitLabでのWebhook設定手順
 
-#### 4.7.1 Webhook設定
+#### 4.7.1 プロジェクトWebhook設定
 
 1. GitLabプロジェクトの **Settings** → **Webhooks** → **Add new webhook**
 2. 以下を設定:
@@ -623,8 +632,49 @@ GITLAB_WEBHOOK_TOKEN=your_token_here    # GitLab Webhook Token
      - ☑ **Merge request events**
    - **Enable SSL verification**: ☑ (推奨)
 
-#### 4.7.2 必要な権限
-- Webhookを設定するには、プロジェクトの **Maintainer** 以上の権限が必要
+#### 4.7.2 システムフック設定（オプション）
+
+GitLabインスタンス全体で監視する場合、管理者権限でシステムフックを設定できます：
+
+1. GitLab管理エリア **Admin Area** → **System Hooks** → **Add new hook**
+2. 以下を設定:
+   - **URL**: `https://your-server.com/webhook/gitlab/system`
+   - **Secret token**: 環境変数 `GITLAB_SYSTEM_HOOK_TOKEN` と同じ値
+   - **Trigger**:
+     - ☑ **Issues events**
+     - ☑ **Merge request events**
+   - **Enable SSL verification**: ☑ (推奨)
+
+**システムフックとプロジェクトWebhookの違い**:
+- **スコープ**: システムフックはGitLabインスタンス全体、プロジェクトWebhookは個別プロジェクトのみ
+- **権限**: システムフックは管理者権限が必要、プロジェクトWebhookはMaintainer以上
+- **用途**: 複数プロジェクトを一括監視する場合はシステムフック、特定プロジェクトのみの場合はプロジェクトWebhook
+- **ペイロード形式**: 基本的に同じだが、システムフックには追加のメタデータが含まれる場合がある
+
+**現在の設計での対応状況**:
+- ✅ ペイロード処理: システムフックとプロジェクトWebhookのペイロード形式は互換性があるため、既存の処理ロジックで対応可能
+- ✅ トークン検証: 別途 `GITLAB_SYSTEM_HOOK_TOKEN` を設定することで、システムフック専用エンドポイント `/webhook/gitlab/system` を追加可能
+- ✅ イベントフィルタリング: 既存のラベルフィルタ（`coding agent`）により、システムフック経由でも適切なタスクのみを処理
+- ✅ プロジェクト識別: ペイロード内の `project_id` により、どのプロジェクトからのイベントかを識別可能
+
+#### 4.7.3 必要な権限
+- **プロジェクトWebhook**: プロジェクトの **Maintainer** 以上の権限が必要
+- **システムフック**: GitLabインスタンスの **管理者** 権限が必要
+
+#### 4.7.4 システムフック対応のまとめ
+
+**設計上の互換性**:
+現在の設計は、GitLabのシステムフックに対応可能です。以下の点で互換性が確保されています：
+
+1. **ペイロード互換性**: システムフックとプロジェクトWebhookは同じペイロード形式を使用するため、既存のパーサーで処理可能
+2. **エンドポイント分離**: `/webhook/gitlab/system` として別エンドポイントを設けることで、異なるトークンで認証可能
+3. **フィルタリング機構**: 既存のラベルフィルタ（`coding agent`）により、システムフック経由でも適切なイベントのみを処理
+4. **スケーラビリティ**: システムフックは複数プロジェクトからのイベントを一元管理できるため、監視対象の拡大に有利
+
+**実装の柔軟性**:
+- プロジェクトWebhookとシステムフックは併用可能
+- 段階的な移行（プロジェクトWebhook → システムフック）もサポート
+- 設定ファイルで `system_hook_token` を設定するだけで有効化
 
 ## 5. セキュリティ考慮事項
 
