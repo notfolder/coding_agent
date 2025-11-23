@@ -1,6 +1,7 @@
 node_modules/
 gitlab/
 .vscode/
+contexts/
 .env
 *.pyc
 *.log

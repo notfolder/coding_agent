@@ -69,20 +69,21 @@ class LMStudioClient(LLMClient):
             self.chat.add_user_message(message)
 
     def send_function_result(self, name: str, result: object) -> None:
-        """関数の実行結果を送信する(LM Studioでは未対応).
+        """関数の実行結果を送信する.
 
         Args:
             name: 関数名
             result: 実行結果
 
-        Raises:
-            NotImplementedError: LM Studioは関数呼び出しをサポートしていない
-
         """
-        msg = "LMStudio does not support function calls. Use OpenAI compatible call instead."
-        raise NotImplementedError(
-            msg,
-        )
+        if self.message_store:
+            # File-based mode: add result as user message
+            output_message = f"output: {result}"
+            self.message_store.add_message("user", output_message)
+        else:
+            # Legacy mode: LM Studio does not support function calls
+            msg = "LMStudio does not support function calls. Use OpenAI compatible call instead."
+            raise NotImplementedError(msg)
 
     def get_response(self) -> str:
         """LLMからの応答を取得する.
@@ -91,10 +92,16 @@ class LMStudioClient(LLMClient):
             LLMからの応答テキスト
 
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         if self.message_store:
             # File-based mode: need to manually create chat from messages
             chat = lms.Chat()
             messages = self._load_messages_from_file()
+            
+            logger.debug("メッセージ数: %d", len(messages))
+            
             for msg in messages:
                 role = msg.get("role")
                 content = msg.get("content", "")
@@ -106,6 +113,8 @@ class LMStudioClient(LLMClient):
                     chat.add_assistant_response(content)
             
             result = self.model.respond(chat)
+            logger.debug("LMStudio応答型: %s, 内容: %s", type(result), str(result)[:100])
+            
             self.message_store.add_message("assistant", str(result))
         else:
             # Legacy mode

@@ -576,15 +576,24 @@ class TaskHandler:
         # LLMからレスポンスを取得
         resp, functions = llm_client.get_response()
         self.logger.info("LLM応答: %s", resp)
+        
+        # 空レスポンスのチェック
+        if not resp or not resp.strip():
+            self.logger.error("LLMから空の応答が返されました")
+            if count >= MAX_JSON_PARSE_ERRORS:
+                task.comment("LLM応答エラーでスキップ")
+                return True
+            return False
 
         # レスポンスの前処理
         resp_clean = self._process_think_tags(task, resp)
+        self.logger.debug("think処理後のレスポンス: %s", resp_clean)
 
         # JSON応答の解析
         try:
             data = self._extract_json(resp_clean)
         except Exception:
-            self.logger.exception("LLM応答JSONパース失敗")
+            self.logger.exception("LLM応答JSONパース失敗 (応答内容: %s)", resp_clean[:200])
             if count >= MAX_JSON_PARSE_ERRORS:
                 task.comment("LLM応答エラーでスキップ")
                 return True
@@ -626,6 +635,67 @@ class TaskHandler:
         if "plan" in data:
             task.comment(str(data["plan"]))
             llm_client.send_user_message(str(data["plan"]))
+
+        # function_call形式の処理 (OpenAI/LMStudio互換)
+        if "function_call" in data:
+            func_call = data["function_call"]
+            tool_name = func_call["name"]
+            args_str = func_call.get("arguments", "{}")
+            
+            # argumentsが文字列の場合はパース
+            if isinstance(args_str, str):
+                args = json.loads(args_str) if args_str else {}
+            else:
+                args = args_str
+            
+            args = self.sanitize_arguments(args)
+            mcp_server, tool_func = tool_name.split("_", 1)
+            
+            start_time = time.time()
+            try:
+                output = self.mcp_clients[mcp_server].call_tool(tool_func, args)
+                duration_ms = (time.time() - start_time) * 1000
+                
+                # Record tool execution
+                tool_store.add_tool_call(
+                    tool_name=tool_name,
+                    args=args,
+                    result=output,
+                    status="success",
+                    duration_ms=duration_ms,
+                )
+                context_manager.update_statistics(tool_calls=1)
+                
+                # Send result to LLM
+                llm_client.send_function_result(tool_name, output)
+                
+                # Reset error count on success
+                if error_state.get("last_tool") == tool_name:
+                    error_state["tool_error_count"] = 0
+                
+            except Exception as e:
+                duration_ms = (time.time() - start_time) * 1000
+                error_msg = str(e)
+                
+                # Record tool error
+                tool_store.add_tool_call(
+                    tool_name=tool_name,
+                    args=args,
+                    result=None,
+                    status="error",
+                    duration_ms=duration_ms,
+                    error=error_msg,
+                )
+                context_manager.update_statistics(tool_calls=1)
+                
+                self.logger.exception("ツール呼び出しエラー: %s", error_msg)
+                llm_client.send_function_result(tool_name, {"error": error_msg})
+                
+                # Update error state
+                self._update_error_count(tool_name, error_state)
+                if error_state.get("tool_error_count", 0) >= MAX_CONSECUTIVE_TOOL_ERRORS:
+                    task.comment(f"同じツール({tool_name})で3回連続エラーが発生したため処理を中止します。")
+                    return True
 
         if "call_tool" in data:
             # ツール呼び出し処理
