@@ -5,6 +5,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
+import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
@@ -32,6 +33,7 @@ class WebhookServer:
             config: Application configuration
             mcp_clients: Dictionary of MCP clients
             task_queue: Task queue for adding tasks
+
         """
         self.config = config
         self.mcp_clients = mcp_clients
@@ -49,8 +51,8 @@ class WebhookServer:
         # Setup routes
         self._setup_routes()
 
-    def _setup_routes(self) -> None:
-        """Setup FastAPI routes."""
+    def _setup_routes(self) -> None:  # noqa: C901
+        """Set up FastAPI routes."""
 
         @self.app.get("/health")
         async def health_check() -> dict[str, str]:
@@ -72,6 +74,7 @@ class WebhookServer:
 
             Returns:
                 JSON response with status
+
             """
             # Read raw body for signature validation
             body = await request.body()
@@ -142,6 +145,7 @@ class WebhookServer:
 
             Returns:
                 JSON response with status
+
             """
             payload = await request.json()
 
@@ -172,6 +176,7 @@ class WebhookServer:
 
             Returns:
                 JSON response with status
+
             """
             payload = await request.json()
 
@@ -200,6 +205,7 @@ class WebhookServer:
 
         Returns:
             JSON response with status
+
         """
         # Filter by event type
         if event_type not in ["Issue Hook", "Merge Request Hook"]:
@@ -218,7 +224,7 @@ class WebhookServer:
         # Filter by label
         labels = payload.get("labels", [])
         bot_label = self.config.get("gitlab", {}).get("bot_label", "coding agent")
-        
+
         # Check if bot label is in the labels list
         has_bot_label = any(label.get("title") == bot_label for label in labels)
         if not has_bot_label:
@@ -247,14 +253,13 @@ class WebhookServer:
 
         return JSONResponse({"status": "success", "task": task_dict})
 
-    def run(self, host: str = "0.0.0.0", port: int = 8000) -> None:
+    def run(self, host: str = "0.0.0.0", port: int = 8000) -> None:  # noqa: S104
         """Run the webhook server.
 
         Args:
             host: Host to bind to
             port: Port to bind to
-        """
-        import uvicorn
 
+        """
         logger.info("Starting webhook server on %s:%d", host, port)
         uvicorn.run(self.app, host=host, port=port, log_level="info")

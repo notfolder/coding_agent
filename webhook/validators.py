@@ -14,6 +14,7 @@ class GitHubWebhookValidator:
 
         Args:
             config: Application configuration containing webhook secret
+
         """
         webhook_config = config.get("webhook", {}).get("github", {})
         self.secret = webhook_config.get("secret", "")
@@ -27,13 +28,13 @@ class GitHubWebhookValidator:
 
         Returns:
             True if signature is valid, False otherwise
+
         """
         if not signature:
             return False
 
         # Remove "sha256=" prefix
-        if signature.startswith("sha256="):
-            signature = signature[7:]
+        signature = signature.removeprefix("sha256=")
 
         # Calculate expected signature
         expected = hmac.new(
@@ -55,6 +56,7 @@ class GitLabWebhookValidator:
         Args:
             config: Application configuration containing webhook token
             is_system_hook: Whether this is for system hook validation
+
         """
         webhook_config = config.get("webhook", {}).get("gitlab", {})
         if is_system_hook:
@@ -70,6 +72,7 @@ class GitLabWebhookValidator:
 
         Returns:
             True if token is valid, False otherwise
+
         """
         if not token:
             return False

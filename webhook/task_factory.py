@@ -5,8 +5,6 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from clients.github_client import GithubClient
-    from clients.gitlab_client import GitlabClient
     from clients.mcp_tool_client import MCPToolClient
     from handlers.task import Task
 
@@ -27,6 +25,7 @@ class WebhookTaskFactory:
         Args:
             config: Application configuration
             mcp_clients: Dictionary of MCP clients
+
         """
         self.config = config
         self.mcp_clients = mcp_clients
@@ -44,8 +43,9 @@ class WebhookTaskFactory:
 
         Returns:
             Task instance or None if event type is not supported
+
         """
-        from handlers.task_getter_github import TaskGitHubIssue, TaskGitHubPullRequest
+        from handlers.task_getter_github import TaskGitHubIssue, TaskGitHubPullRequest  # noqa: PLC0415
 
         mcp_client = self.mcp_clients.get("github")
         if not mcp_client:
@@ -53,7 +53,7 @@ class WebhookTaskFactory:
             return None
 
         # Import GithubClient here to avoid circular import
-        from clients.github_client import GithubClient
+        from clients.github_client import GithubClient  # noqa: PLC0415
 
         github_client = GithubClient()
 
@@ -87,8 +87,9 @@ class WebhookTaskFactory:
 
         Returns:
             Task instance or None if event type is not supported
+
         """
-        from handlers.task_getter_gitlab import TaskGitLabIssue, TaskGitLabMergeRequest
+        from handlers.task_getter_gitlab import TaskGitLabIssue, TaskGitLabMergeRequest  # noqa: PLC0415
 
         mcp_client = self.mcp_clients.get("gitlab")
         if not mcp_client:
@@ -96,7 +97,7 @@ class WebhookTaskFactory:
             return None
 
         # Import GitlabClient here to avoid circular import
-        from clients.gitlab_client import GitlabClient
+        from clients.gitlab_client import GitlabClient  # noqa: PLC0415
 
         gitlab_client = GitlabClient()
 
