@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import openai
+import requests
 
 from .llm_base import LLMClient
 
@@ -33,9 +34,9 @@ class OpenAIClient(LLMClient):
             context_dir: コンテキストディレクトリパス(file-based mode用)
 
         """
-        api_key = config.get("api_key", "OPENAI_API_KEY")
-        base_url = config.get("base_url", "https://api.openai.com/")
-        self.openai = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=3600)
+        self.api_key = config.get("api_key", "OPENAI_API_KEY")
+        self.base_url = config.get("base_url", "https://api.openai.com/")
+        self.openai = openai.OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=3600)
         self.model = config["model"]
         self.max_token = config.get("max_token", 40960)
         self.functions = functions
@@ -112,64 +113,113 @@ class OpenAIClient(LLMClient):
 
         """
         if self.message_store:
-            # File-based mode: read messages from current.jsonl
-            messages = self._load_messages_from_file()
+            # File-based mode: use request.json file without loading into memory
+            return self._get_response_file_based()
         else:
             # Legacy mode: use in-memory messages
-            messages = self.messages
-        
-        resp = self.openai.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            functions=self.functions,
-            function_call="auto",
-        )
-        reply = ""
-        functions = []
-        for choice in resp.choices:
-            content = choice.message.content or ""
-            
-            if self.message_store:
-                self.message_store.add_message("assistant", content)
-            else:
+            resp = self.openai.chat.completions.create(
+                model=self.model,
+                messages=self.messages,
+                functions=self.functions,
+                function_call="auto",
+            )
+            reply = ""
+            functions = []
+            for choice in resp.choices:
+                content = choice.message.content or ""
                 self.messages.append({"role": choice.message.role, "content": content})
-            
-            reply += content
-            if choice.message.function_call is not None:
-                func_call = choice.message.function_call
-                reply += (
-                    f"Function call: {func_call.name} "
-                    f"with arguments {func_call.arguments}"
-                )
-                functions.append(choice.message.function_call)
-        return reply, functions
+                reply += content
+                if choice.message.function_call is not None:
+                    func_call = choice.message.function_call
+                    reply += (
+                        f"Function call: {func_call.name} "
+                        f"with arguments {func_call.arguments}"
+                    )
+                    functions.append(choice.message.function_call)
+            return reply, functions
 
-    def _load_messages_from_file(self) -> list[dict[str, Any]]:
-        """Load messages from current.jsonl file.
+    def _get_response_file_based(self) -> tuple[str, list[Any]]:
+        """Get response using file-based request without loading messages into memory.
 
         Returns:
-            List of messages in OpenAI format
+            tuple: (応答テキスト, 関数呼び出しリスト)
 
         """
+        # Create request.json by streaming current.jsonl
+        request_path = self.context_dir / "request.json"
         current_file = self.message_store.current_file
-        messages = []
         
-        if current_file.exists():
-            with current_file.open() as f:
-                for line in f:
-                    msg = json.loads(line.strip())
-                    # Convert to OpenAI API format
-                    if msg.get("tool_name"):
-                        messages.append({
-                            "role": msg["role"],
-                            "name": msg["tool_name"],
-                            "content": msg["content"],
-                        })
-                    else:
-                        messages.append({
-                            "role": msg["role"],
-                            "content": msg["content"],
-                        })
+        with request_path.open("w") as req_file:
+            # Write JSON header
+            req_file.write('{"model":"')
+            req_file.write(self.model)
+            req_file.write('","messages":[')
+            
+            # Stream current.jsonl content (already in OpenAI format)
+            if current_file.exists():
+                first = True
+                with current_file.open() as current_f:
+                    for line in current_f:
+                        if not first:
+                            req_file.write(',')
+                        req_file.write(line.strip())
+                        first = False
+            
+            # Write functions and footer
+            req_file.write(']')
+            if self.functions:
+                req_file.write(',"functions":')
+                req_file.write(json.dumps(self.functions))
+                req_file.write(',"function_call":"auto"')
+            req_file.write('}')
         
-        return messages
+        # Send request via HTTP POST
+        try:
+            with request_path.open('rb') as req_file:
+                response = requests.post(
+                    f"{self.base_url.rstrip('/')}/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    data=req_file,
+                    timeout=3600
+                )
+            
+            response.raise_for_status()
+            response_data = response.json()
+            
+            # Parse response
+            reply = ""
+            functions = []
+            for choice in response_data.get("choices", []):
+                message = choice.get("message", {})
+                content = message.get("content") or ""
+                
+                # Add assistant response to message store
+                self.message_store.add_message("assistant", content)
+                
+                reply += content
+                
+                # Handle function calls
+                if "function_call" in message:
+                    func_call = message["function_call"]
+                    reply += (
+                        f"Function call: {func_call.get('name', '')} "
+                        f"with arguments {func_call.get('arguments', '')}"
+                    )
+                    # Convert to function call object format
+                    from types import SimpleNamespace
+                    func_obj = SimpleNamespace(
+                        name=func_call.get("name", ""),
+                        arguments=func_call.get("arguments", "")
+                    )
+                    functions.append(func_obj)
+            
+            return reply, functions
+            
+        finally:
+            # Clean up request.json
+            if request_path.exists():
+                request_path.unlink()
 
