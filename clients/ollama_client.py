@@ -56,15 +56,13 @@ class OllamaClient(LLMClient):
         """関数の実行結果を送信する.
 
         Args:
-            name: 関数名
+            name: 実行された関数の名前
             result: 実行結果
 
-        Raises:
-            NotImplementedError: Ollamaは関数呼び出しをサポートしていない
-
         """
-        msg = "Ollama does not support function calls. Use OpenAI compatible call instead."
-        raise NotImplementedError(msg)
+        # For function_call mode, send as user message
+        output_message = f"output: {result}"
+        self.message_store.add_message("user", output_message)
 
     def get_response(self) -> str:
         """Ollama APIから応答を取得する.

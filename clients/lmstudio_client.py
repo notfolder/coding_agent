@@ -65,13 +65,9 @@ class LMStudioClient(LLMClient):
             result: 実行結果
 
         """
-        # LM Studio supports tool calls in OpenAI-compatible format
-        if isinstance(result, str):
-            result_str = result
-        else:
-            result_str = json.dumps(result)
-        
-        self.message_store.add_message("tool", result_str, tool_name=name)
+        # For function_call mode, send as user message
+        output_message = f"output: {result}"
+        self.message_store.add_message("user", output_message)
 
     def get_response(self) -> str:
         """LLMからの応答を取得する.
@@ -107,7 +103,7 @@ class LMStudioClient(LLMClient):
         try:
             with request_path.open('rb') as req_file:
                 response = requests.post(
-                    f"{self.base_url.rstrip('/')}/v1/chat/completions",
+                    f"{self.base_url.rstrip('/')}/chat/completions",
                     headers={"Content-Type": "application/json"},
                     data=req_file,
                     timeout=3600
@@ -121,11 +117,27 @@ class LMStudioClient(LLMClient):
             for choice in response_data.get("choices", []):
                 message = choice.get("message", {})
                 content = message.get("content") or ""
-                reply += content
-            
-            # Add assistant response to message store
-            if reply:
-                self.message_store.add_message("assistant", reply)
+                
+                # Handle function calls
+                if "function_call" in message:
+                    func_call = message["function_call"]
+                    
+                    # Add function call info to assistant message
+                    func_call_json = json.dumps({
+                        "role": "assistant",
+                        "content": None,
+                        "function_call": func_call,
+                    })
+                    self.message_store.add_message("assistant", func_call_json)
+                    
+                    reply += (
+                        f"Function call: {func_call.get('name', '')} "
+                        f"with arguments {func_call.get('arguments', '')}"
+                    )
+                elif content:
+                    # Only add assistant message if there's actual content
+                    self.message_store.add_message("assistant", content)
+                    reply += content
             
             return reply
             

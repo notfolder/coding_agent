@@ -68,19 +68,15 @@ class OpenAIClient(LLMClient):
             result: 関数の実行結果
 
         """
-        # Ensure result is a string
-        if isinstance(result, str):
-            result_str = result
-        else:
-            result_str = json.dumps(result)
-        
-        self.message_store.add_message("tool", result_str, tool_name=name)
+        # For function_call mode (not tool_calls), send as user message
+        output_message = f"output: {result}"
+        self.message_store.add_message("user", output_message)
 
-    def get_response(self) -> tuple[str, list[Any]]:
+    def get_response(self) -> str:
         """OpenAI APIから応答を取得する.
 
         Returns:
-            tuple: (応答テキスト, 関数呼び出しリスト)
+            LLMからの応答テキスト
 
         """
         # Create request.json by streaming current.jsonl
@@ -115,7 +111,7 @@ class OpenAIClient(LLMClient):
         try:
             with request_path.open('rb') as req_file:
                 response = requests.post(
-                    f"{self.base_url.rstrip('/')}/v1/chat/completions",
+                    f"{self.base_url.rstrip('/')}/chat/completions",
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
                         "Content-Type": "application/json"
@@ -134,14 +130,18 @@ class OpenAIClient(LLMClient):
                 message = choice.get("message", {})
                 content = message.get("content") or ""
                 
-                # Add assistant response to message store
-                self.message_store.add_message("assistant", content)
-                
-                reply += content
-                
                 # Handle function calls
                 if "function_call" in message:
                     func_call = message["function_call"]
+                    
+                    # Add function call info to assistant message
+                    func_call_json = json.dumps({
+                        "role": "assistant",
+                        "content": None,
+                        "function_call": func_call
+                    })
+                    self.message_store.add_message("assistant", func_call_json)
+                    
                     reply += (
                         f"Function call: {func_call.get('name', '')} "
                         f"with arguments {func_call.get('arguments', '')}"
@@ -153,8 +153,12 @@ class OpenAIClient(LLMClient):
                         arguments=func_call.get("arguments", "")
                     )
                     functions.append(func_obj)
+                elif content:
+                    # Only add assistant message if there's actual content
+                    self.message_store.add_message("assistant", content)
+                    reply += content
             
-            return reply, functions
+            return reply
             
         finally:
             # Clean up request.json

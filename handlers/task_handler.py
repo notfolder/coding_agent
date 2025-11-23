@@ -574,7 +574,7 @@ class TaskHandler:
         import time
         
         # LLMからレスポンスを取得
-        resp, functions = llm_client.get_response()
+        resp = llm_client.get_response()
         self.logger.info("LLM応答: %s", resp)
         
         # 空レスポンスのチェック
@@ -601,14 +601,13 @@ class TaskHandler:
 
         # レスポンスデータの処理（ツール実行含む）
         return self._process_response_data_with_context(
-            task, data, functions, error_state, llm_client, tool_store, context_manager
+            task, data, error_state, llm_client, tool_store, context_manager
         )
 
     def _process_response_data_with_context(
         self,
         task: Task,
         data: dict,
-        functions: list,
         error_state: dict,
         llm_client: Any,
         tool_store: Any,
