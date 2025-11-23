@@ -368,7 +368,9 @@ LLMClientの種類によってフォーマットが異なる:
   1. current.jsonlを削除
   2. 要約を最初の行として書き込み（OpenAI形式）
      `{"role":"assistant","content":summary_text}`
-  3. unsummarized_file_pathの内容を結合（ファイル結合、メモリ不使用）
+  3. unsummarized_file_pathの内容を結合
+     - unsummarized.jsonlは既にOpenAI形式なので変換不要
+     - ファイル結合のみ、メモリ不使用
   4. messages.jsonlにも要約を追記（完全情報として）
 - 引数: summary_text（要約テキスト）、summary_tokens（トークン数）、unsummarized_file_path（未要約メッセージファイルパス）
 
@@ -473,16 +475,15 @@ LLMClientの種類によってフォーマットが異なる:
   8. 一時ファイル削除（unsummarized.jsonl, to_summarize.jsonl等）
 - 戻り値: 要約ID
 
-**`create_summary_request_file(summary_prompt_file, to_summarize_file, unsummarized_file, output_file)`**
+**`create_summary_request_file(summary_prompt_file, to_summarize_file, output_file)`**
 - 要約リクエストファイルを作成（ファイル結合）
 - 処理:
-  1. summary_prompt_fileの内容を読み込み
-  2. to_summarize_fileを1行ずつ読んでメッセージ形式に変換
-     - `[ROLE]: content`形式に整形
-  3. output_fileに書き出し
-  4. unsummarized_fileは結合しない（要約対象外）
-- 引数: unsummarized_fileは未要約メッセージファイルパス（参照のみ）
-- **メモリに載せない**（ストリーム処理）
+  1. summary_prompt_fileの内容をoutput_fileに書き込み
+  2. to_summarize_fileの内容をoutput_fileに追記
+     - to_summarize.jsonlは既にOpenAI形式なので変換不要
+  3. ファイル結合のみでメモリに載せない
+- unsummarized_fileは引数から削除（要約対象外のため使用しない）
+- **メモリに載せない**（ファイル結合のみ）
 
 ### 4.6 既存キュー処理の変更
 
@@ -682,14 +683,23 @@ for task in tasks:
 
 ### 6.1 タスク開始フロー
 
-**キューへのタスク投入**（main.py の fetch_and_enqueue_tasks()）:
+**キューへのタスク投入**（handlers/task_getter_*.py の get_task_list()）:
 ```
-1. タスク取得: tasks = task_getter.get_task_list()
+1. タスク一覧を取得（Issue/PRなど）
+2. 各タスクオブジェクト生成時にUUID生成:
+   - task = TaskGitHubIssue(issue, mcp_client, github_client, config)
+   - task.uuid = str(uuid.uuid4())  # Taskオブジェクト生成時にUUID付与
+3. タスクリストを返す: return tasks
+```
+
+**キューへの投入**（main.py の fetch_and_enqueue_tasks()）:
+```
+1. タスク取得: tasks = task_getter.get_task_list()  # UUID既に付与済み
 2. 各タスクをループ:
    a. task.prepare()
    b. task_dict = task.get_task_key().to_dict()
-   c. task_dict['uuid'] = str(uuid.uuid4())  # UUID生成
-   d. task_dict['user'] = task.get_user()    # ユーザー取得
+   c. task_dict['uuid'] = task.uuid  # UUID取得（既に生成済み）
+   d. task_dict['user'] = task.get_user()
    e. task_queue.put(task_dict)
 ```
 
@@ -816,25 +826,20 @@ for task in tasks:
 3. 要約プロンプトファイル作成
    - config.yamlのsummary_promptをsummary_prompt.txtに書き込み
 
-4. to_summarize.jsonlをメッセージ形式に変換
-   - ファイル読み捨て処理:
-     ```
-     for line in to_summarize.jsonl:
-         msg = parse(line)
-         append to formatted_messages.txt: "[{role}]: {content}\n"
-     ```
+4. ファイル結合でリクエストファイル作成
+   - summary_prompt.txt + to_summarize.jsonl → summary_request.txt
+   - to_summarize.jsonlは既にOpenAI形式なので変換不要
+   - summary_prompt.txtに直接to_summarize.jsonlを追記
+   - メモリ不使用（ファイル結合）
 
-5. ファイル結合
-   - summary_request.txt = summary_prompt.txt + formatted_messages.txt
-
-6. LLMに要約依頼
+5. LLMに要約依頼
    - summary = llm_client.get_summary(summary_request.txt)
 
-7. 要約結果の記録
+6. 要約結果の記録
    - summary_store.add_summary(...)で要約履歴に記録
    - messages.jsonlにも要約を追記（完全情報として）
 
-8. current.jsonl再作成
+7. current.jsonl再作成
    - message_store.recreate_current_context(summary, summary_tokens, unsummarized.jsonl)
    - current.jsonlを削除して新規作成
    - 最初の行として要約を記録（OpenAI形式）
@@ -976,12 +981,7 @@ llm:
 
 ### 9.2 環境変数
 
-```bash
-# 既存の環境変数に加えて
-CONTEXT_STORAGE_ENABLED=true
-COMPRESSION_THRESHOLD=0.7
-CLEANUP_DAYS=30
-```
+環境変数による設定は不要。全てconfig.yamlで管理。
 
 ## 10. デバッグとモニタリング
 
@@ -1062,11 +1062,11 @@ except Exception as e:
 
 1. **1タスク=1プロセス**: ロック不要でシンプル
 2. **SQLiteで状態管理**: 全タスクを一元管理
-3. **UUID単位のディレクトリ**: 完全な分離（UUIDはキューで付与）
+3. **UUID単位のディレクトリ**: 完全な分離（UUIDはTaskオブジェクト生成時に付与）
 4. **JSONLines**: 人間が読める、追記型で高速
 5. **running/completed分離**: 状態による物理的分離
 6. **完全ファイルベース**: メモリキャッシュなし、ファイル結合で処理
-7. **current.jsonl**: LLM用現在コンテキストファイル
+7. **current.jsonl**: LLM用現在コンテキストファイル（OpenAI形式）
 8. **ファイルベースLLMリクエスト**: 全LLMClientでrequest.json使用
 9. **要約もファイルベース**: ファイル結合でメモリ消費なし
 10. **config.yaml設定**: 要約プロンプト、クリーンアップ日数
