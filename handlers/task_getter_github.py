@@ -21,6 +21,7 @@ class TaskGitHubIssue(Task):
         github_client: GithubClient,
         config: dict[str, Any],
     ) -> None:
+        super().__init__()
         self.issue = issue
         self.issue["repo"] = issue["repository_url"].split("/")[-1]
         self.issue["owner"] = issue["repository_url"].split("/")[-2]
@@ -112,6 +113,7 @@ class TaskGitHubPullRequest(Task):
         github_client: GithubClient,
         config: dict[str, Any],
     ) -> None:
+        super().__init__()
         self.pr = pr
         repository_url = pr.get("repository_url")
         if repository_url is None:

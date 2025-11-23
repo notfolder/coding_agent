@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
-import lmstudio as lms
-from ollama import chat
+import requests
 
 from .llm_base import LLMClient
 
@@ -12,53 +13,61 @@ class LMStudioClient(LLMClient):
     """LM Studioを使用するLLMクライアント.
 
     LM Studio APIを使用してローカルLLMモデルとの対話を実行するクライアント。
+    OpenAI互換APIを使用し、ファイルベースで動作します。
     """
 
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        message_store: Any = None,
+        context_dir: Path | None = None,
+    ) -> None:
         """LM Studioクライアントを初期化する.
 
         Args:
             config: 設定辞書(base_url, model等を含む)
+            message_store: MessageStoreインスタンス(必須)
+            context_dir: コンテキストディレクトリパス(必須)
 
         """
-        lms.configure_default_client(config.get("base_url", "localhost:1234"))
-        self.model = lms.llm(config.get("model"))
-        self.chat = lms.Chat()
-        self.last_response = None
+        base_url = config.get("base_url", "localhost:1234")
+        # Add http:// if not present
+        if not base_url.startswith(("http://", "https://")):
+            base_url = f"http://{base_url}"
+        self.base_url = base_url
+        self.model = config.get("model", "local-model")
+        self.message_store = message_store
+        self.context_dir = context_dir
 
     def send_system_prompt(self, prompt: str) -> None:
-        """システムプロンプトをチャットに追加する.
+        """システムプロンプトをメッセージ履歴に追加する.
 
         Args:
             prompt: システムプロンプトの内容
 
         """
-        self.chat.add_system_prompt(prompt)
+        self.message_store.add_message("system", prompt)
 
     def send_user_message(self, message: str) -> None:
-        """ユーザーメッセージをチャットに追加する.
+        """ユーザーメッセージをメッセージ履歴に追加する.
 
         Args:
             message: ユーザーメッセージの内容
 
         """
-        self.chat.add_user_message(message)
+        self.message_store.add_message("user", message)
 
     def send_function_result(self, name: str, result: object) -> None:
-        """関数の実行結果を送信する(LM Studioでは未対応).
+        """関数の実行結果を送信する.
 
         Args:
             name: 関数名
             result: 実行結果
 
-        Raises:
-            NotImplementedError: LM Studioは関数呼び出しをサポートしていない
-
         """
-        msg = "LMStudio does not support function calls. Use OpenAI compatible call instead."
-        raise NotImplementedError(
-            msg,
-        )
+        # For function_call mode, send as user message
+        output_message = f"output: {result}"
+        self.message_store.add_message("user", output_message)
 
     def get_response(self) -> str:
         """LLMからの応答を取得する.
@@ -67,62 +76,74 @@ class LMStudioClient(LLMClient):
             LLMからの応答テキスト
 
         """
-        result = self.model.respond(self.chat)
-        self.chat.add_assistant_response(result)
-        return str(result)
+        # Create request.json by streaming current.jsonl
+        request_path = self.context_dir / "request.json"
+        current_file = self.message_store.current_file
+        
+        with request_path.open("w") as req_file:
+            # Write JSON header - LM Studio uses OpenAI-compatible API
+            req_file.write('{"model":"')
+            req_file.write(self.model)
+            req_file.write('","messages":[')
+            
+            # Stream current.jsonl content (already in OpenAI format)
+            if current_file.exists():
+                first = True
+                with current_file.open() as current_f:
+                    for line in current_f:
+                        if not first:
+                            req_file.write(',')
+                        req_file.write(line.strip())
+                        first = False
+            
+            # Write footer
+            req_file.write(']}')
+        
+        # Send request via HTTP POST to OpenAI-compatible endpoint
+        try:
+            with request_path.open('rb') as req_file:
+                response = requests.post(
+                    f"{self.base_url.rstrip('/')}/chat/completions",
+                    headers={"Content-Type": "application/json"},
+                    data=req_file,
+                    timeout=3600
+                )
+            
+            response.raise_for_status()
+            response_data = response.json()
+            
+            # Parse response - OpenAI-compatible format
+            reply = ""
+            for choice in response_data.get("choices", []):
+                message = choice.get("message", {})
+                content = message.get("content") or ""
+                
+                # Handle function calls
+                if "function_call" in message:
+                    func_call = message["function_call"]
+                    
+                    # Add function call info to assistant message
+                    func_call_json = json.dumps({
+                        "role": "assistant",
+                        "content": None,
+                        "function_call": func_call,
+                    })
+                    self.message_store.add_message("assistant", func_call_json)
+                    
+                    reply += (
+                        f"Function call: {func_call.get('name', '')} "
+                        f"with arguments {func_call.get('arguments', '')}"
+                    )
+                elif content:
+                    # Only add assistant message if there's actual content
+                    self.message_store.add_message("assistant", content)
+                    reply += content
+            
+            return reply
+            
+        finally:
+            # Clean up request.json
+            if request_path.exists():
+                request_path.unlink()
 
 
-class OllamaClient(LLMClient):
-    """Ollamaを使用するLLMクライアント.
-
-    Ollama APIを使用してローカルLLMモデルとの対話を実行するクライアント。
-    """
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        """Ollamaクライアントを初期化する.
-
-        Args:
-            config: 設定辞書(model, max_token等を含む)
-
-        """
-        self.chat = chat
-        self.model = config["model"]
-        self.max_token = config.get("max_token", 32768)
-        self.messages = []
-
-    def send_system_prompt(self, prompt: str) -> None:
-        """システムプロンプトをメッセージ履歴に設定する.
-
-        Args:
-            prompt: システムプロンプトの内容
-
-        """
-        self.messages = [{"role": "system", "content": prompt}]
-
-    def send_user_message(self, message: str) -> None:
-        """ユーザーメッセージをメッセージ履歴に追加する.
-
-        メッセージ履歴が最大トークン数を超えた場合、古いメッセージを削除する。
-
-        Args:
-            message: ユーザーメッセージの内容
-
-        """
-        self.messages.append({"role": "user", "content": message})
-        # トークン数制限
-        total_chars = sum(len(m["content"]) for m in self.messages)
-        while total_chars // 4 > self.max_token:
-            self.messages.pop(1)  # 最初のuserから削る
-            total_chars = sum(len(m["content"]) for m in self.messages)
-
-    def get_response(self) -> str:
-        """Ollamaからの応答を取得する.
-
-        Returns:
-            Ollamaからの応答テキスト
-
-        """
-        resp = self.chat(model=self.model, messages=self.messages)
-        reply = resp["message"]["content"]
-        self.messages.append({"role": "assistant", "content": reply})
-        return reply
