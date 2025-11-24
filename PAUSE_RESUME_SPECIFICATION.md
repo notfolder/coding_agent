@@ -143,19 +143,12 @@ contexts/paused/{task_uuid}/
 
 #### 3.2.3 一時停止時のラベル管理
 
-**オプション1: 既存のprocessing_labelを維持**
-- 利点: 既存の仕組みと互換性が高い
-- 欠点: 一時停止状態と実行中状態の区別が困難
+一時停止時も既存の`processing_label`を維持します。
 
-**オプション2: 専用のpausedラベルを使用（推奨）**
-- `coding agent paused`ラベルを新規作成
-- 一時停止時に`coding agent processing` → `coding agent paused`に変更
-- 利点: 状態が明確に識別できる
-- 欠点: 新しいラベルが必要
-
-**採用案: オプション2**
-- 設定ファイルに`paused_label`を追加
-- 一時停止時にラベルを切り替える
+**ラベル管理方針:**
+- 一時停止時: `coding agent processing`ラベルを保持
+- 利点: 既存の仕組みと互換性が高く、新しいラベルが不要
+- 一時停止状態の判別: `contexts/paused/`ディレクトリの存在で識別
 
 ### 3.3 Producerモードでの一時停止タスク検出
 
@@ -191,33 +184,25 @@ contexts/paused/{task_uuid}/
 
 #### 3.3.3 Producer処理フロー改修
 
-```python
-def produce_tasks(config, mcp_clients, task_source, task_queue, logger):
-    # 通常タスクの取得と投入（既存処理）
-    task_getter = TaskGetter.factory(config, mcp_clients, task_source)
-    tasks = task_getter.get_task_list()
-    for task in tasks:
-        task.prepare()
-        task_dict = task.get_task_key().to_dict()
-        task_dict["uuid"] = str(uuid.uuid4())
-        task_dict["user"] = task.get_user()
-        task_dict["is_resumed"] = False
-        task_queue.put(task_dict)
-    
-    # 一時停止タスクの検出と再投入（新規処理）
-    paused_tasks = detect_paused_tasks(config)
-    for paused_task_info in paused_tasks:
-        # GitHub/GitLabでタスクが有効か確認
-        task = task_getter.from_task_key(paused_task_info["task_key"])
-        if task and task.check_exists():
-            task_dict = paused_task_info["task_key"]
-            task_dict["uuid"] = paused_task_info["uuid"]
-            task_dict["user"] = paused_task_info["user"]
-            task_dict["is_resumed"] = True
-            task_dict["paused_context_path"] = paused_task_info["context_path"]
-            task_queue.put(task_dict)
-            logger.info(f"一時停止タスクを再投入: {task_dict}")
-```
+**通常タスクの処理（既存処理）:**
+1. TaskGetterファクトリーメソッドでインスタンスを生成
+2. GitHub/GitLabからタスク一覧を取得
+3. 各タスクに対してprepare()を実行（ラベル付与等）
+4. タスク辞書を作成（TaskKey、UUID、ユーザー情報）
+5. is_resumedフラグをfalseに設定
+6. タスクキューに投入
+
+**一時停止タスクの検出と再投入（新規処理）:**
+1. contexts/paused/ディレクトリ内の一時停止タスクを検出
+2. 各一時停止タスクのtask_state.jsonを読み込み
+3. GitHub/GitLabでタスクが有効か確認（削除されていないか）
+4. タスクが有効な場合:
+   - task_keyからタスク辞書を作成
+   - UUIDとユーザー情報を設定
+   - is_resumedフラグをtrueに設定
+   - paused_context_pathを設定
+   - タスクキューに再投入
+5. ログに再投入情報を記録
 
 ### 3.4 Consumerモードでのタスク復元と継続実行
 
@@ -257,29 +242,19 @@ def produce_tasks(config, mcp_clients, task_source, task_queue, logger):
 
 #### 3.4.2 Context Storageの復元
 
-```python
-# TaskContextManagerの初期化時に既存ディレクトリをチェック
-def __init__(self, task_key, task_uuid, config, user, resume_from_paused=False):
-    self.task_uuid = task_uuid
-    self.config = config
-    
-    if resume_from_paused:
-        # 一時停止状態から復元
-        paused_dir = Path(f"contexts/paused/{task_uuid}")
-        running_dir = Path(f"contexts/running/{task_uuid}")
-        
-        # ディレクトリを移動
-        if paused_dir.exists():
-            shutil.move(str(paused_dir), str(running_dir))
-        
-        self.context_dir = running_dir
-        # 既存のストアを読み込み
-        self._load_existing_stores()
-    else:
-        # 新規タスク
-        self.context_dir = Path(f"contexts/running/{task_uuid}")
-        self.context_dir.mkdir(parents=True, exist_ok=True)
-```
+**TaskContextManagerの初期化プロセス:**
+
+1. タスクUUID、設定、ユーザー情報を受け取る
+2. resume_from_pausedフラグをチェック
+3. フラグがtrueの場合（一時停止状態から復元）:
+   - contexts/paused/{task_uuid}のパスを特定
+   - contexts/running/{task_uuid}への移動先パスを準備
+   - ディレクトリが存在する場合、pausedからrunningに移動
+   - context_dirをrunningディレクトリに設定
+   - 既存のストア（MessageStore、SummaryStore、ToolStore）を読み込み
+4. フラグがfalseの場合（新規タスク）:
+   - contexts/running/{task_uuid}に新規ディレクトリを作成
+   - 空の状態で各ストアを初期化
 
 #### 3.4.3 LLM会話の継続
 
@@ -291,300 +266,91 @@ def __init__(self, task_key, task_uuid, config, user, resume_from_paused=False):
 
 #### 3.4.4 停止チェック機構の実装
 
-```python
-def _check_pause_signal(self, context_manager):
-    """一時停止シグナルをチェック"""
-    pause_signal_path = Path("contexts/pause_signal")
-    if pause_signal_path.exists():
-        self.logger.info("一時停止シグナルを検出しました")
-        return True
-    return False
+**一時停止シグナルのチェック:**
+1. contexts/pause_signalファイルの存在を確認
+2. ファイルが存在する場合:
+   - ログに一時停止シグナル検出を記録
+   - trueを返して一時停止処理を開始
+3. ファイルが存在しない場合、falseを返して処理継続
 
-def _pause_task(self, task, context_manager):
-    """タスクを一時停止する"""
-    # 1. 現在の状態を保存
-    task_state = {
-        "task_key": task.get_task_key().to_dict(),
-        "uuid": task.uuid,
-        "user": task.user,
-        "paused_at": datetime.utcnow().isoformat(),
-        "status": "paused",
-        "resume_count": getattr(task, 'resume_count', 0),
-        "context_path": f"contexts/paused/{task.uuid}"
-    }
-    
-    # 2. contexts/running → contexts/paused に移動
-    running_dir = Path(f"contexts/running/{task.uuid}")
-    paused_dir = Path(f"contexts/paused/{task.uuid}")
-    paused_dir.parent.mkdir(parents=True, exist_ok=True)
-    
-    if running_dir.exists():
-        shutil.move(str(running_dir), str(paused_dir))
-    
-    # 3. task_state.jsonを保存
-    task_state_path = paused_dir / "task_state.json"
-    with task_state_path.open('w') as f:
-        json.dump(task_state, f, indent=2)
-    
-    # 4. タスクにコメント追加
-    task.comment("タスクを一時停止しました。後で再開されます。")
-    
-    # 5. ラベル更新（processing → paused）
-    task.update_label_to_paused()
-    
-    # 6. 停止シグナルファイルを削除
-    Path("contexts/pause_signal").unlink(missing_ok=True)
-```
+**タスクの一時停止処理:**
+1. 現在の状態をtask_state辞書に格納:
+   - task_key情報（タスク種別、オーナー、リポジトリ、番号等）
+   - UUID
+   - ユーザー情報
+   - 一時停止時刻（ISO形式）
+   - ステータス: "paused"
+   - 再開回数（resume_count）
+   - コンテキストパス
+2. contexts/running/{uuid}/からcontexts/paused/{uuid}/へディレクトリを移動:
+   - paused親ディレクトリが存在しない場合は作成
+   - runningディレクトリが存在する場合に移動を実行
+3. task_state.jsonをpausedディレクトリに保存
+4. タスクにコメントを追加: "タスクを一時停止しました。後で再開されます。"
+5. 停止シグナルファイル（contexts/pause_signal）を削除
 
 #### 3.4.5 Consumer処理ループの改修
 
-**Context Storageモード（Planning無効）:**
-```python
-def _handle_with_context_storage(self, task, task_config):
-    """Handle task with file-based context storage (一時停止対応版)"""
-    from context_storage import TaskContextManager
-    
-    # is_resumedフラグをチェック
-    is_resumed = getattr(task, 'is_resumed', False)
-    
-    # Context Managerを初期化
-    context_manager = TaskContextManager(
-        task_key=task.get_task_key(),
-        task_uuid=task.uuid,
-        config=task_config,
-        user=task.user,
-        resume_from_paused=is_resumed
-    )
-    
-    try:
-        # 既存の処理ストア取得とLLMクライアント初期化
-        message_store = context_manager.get_message_store()
-        # ...
-        
-        # 復元時のみ: タスクにコメント追加
-        if is_resumed:
-            task.comment("一時停止されたタスクを再開します。")
-            task.update_label_to_processing()  # paused → processing
-        
-        # 処理ループ
-        count = 0
-        max_count = task_config.get("max_llm_process_num", 1000)
-        error_state = {"last_tool": None, "tool_error_count": 0}
-        
-        while count < max_count:
-            # 一時停止チェック
-            if self._check_pause_signal(context_manager):
-                self._pause_task(task, context_manager)
-                return  # 処理を終了（例外は投げない）
-            
-            # コンテキスト圧縮チェック
-            if compressor.should_compress():
-                self.logger.info("Context compression triggered")
-                compressor.compress()
-                context_manager.update_statistics(compressions=1)
-            
-            # LLM対話処理
-            if self._process_llm_interaction_with_client(
-                task, count, error_state, task_llm_client, 
-                message_store, tool_store, context_manager
-            ):
-                break
-            
-            count += 1
-            context_manager.update_statistics(llm_calls=1)
-        
-        # タスク完了
-        task.finish()
-        context_manager.complete()
-        
-    except Exception as e:
-        self.logger.exception("Task processing failed")
-        context_manager.fail(str(e))
-        raise
-```
+**Context Storageモード（Planning無効）の処理フロー:**
 
-**Planningモード（Planning有効）:**
-```python
-def _handle_with_planning(self, task, task_config):
-    """Handle task with planning-based approach (一時停止対応版)"""
-    from context_storage import TaskContextManager
-    from handlers.planning_coordinator import PlanningCoordinator
-    
-    # is_resumedフラグをチェック
-    is_resumed = getattr(task, 'is_resumed', False)
-    
-    # Context Managerを初期化
-    context_manager = TaskContextManager(
-        task_key=task.get_task_key(),
-        task_uuid=task.uuid,
-        config=task_config,
-        user=task.user,
-        resume_from_paused=is_resumed
-    )
-    
-    try:
-        # Planning設定取得
-        planning_config = task_config.get("planning", {})
-        planning_config["main_config"] = self.config
-        
-        # PlanningCoordinatorを初期化
-        coordinator = PlanningCoordinator(
-            config=planning_config,
-            llm_client=self.llm_client,
-            mcp_clients=self.mcp_clients,
-            task=task,
-            context_manager=context_manager,
-        )
-        
-        # 一時停止状態から復元する場合、Planning状態を復元
-        if is_resumed:
-            task.comment("一時停止されたタスクを再開します（Planning実行中）。")
-            task.update_label_to_processing()  # paused → processing
-            
-            # task_state.jsonからPlanning状態を読み込み
-            planning_state = self._load_planning_state(task.uuid)
-            if planning_state:
-                coordinator.current_phase = planning_state.get("current_phase", "planning")
-                coordinator.action_counter = planning_state.get("action_counter", 0)
-                coordinator.revision_counter = planning_state.get("revision_counter", 0)
-                coordinator.checklist_comment_id = planning_state.get("checklist_comment_id")
-                # 既存のプランを履歴から読み込み
-                if coordinator.history_store.has_plan():
-                    plan_entry = coordinator.history_store.get_latest_plan()
-                    if plan_entry:
-                        coordinator.current_plan = plan_entry.get("plan") or plan_entry.get("updated_plan")
-        
-        # Planning実行（一時停止チェック組み込み版）
-        success = self._execute_planning_with_pause_check(coordinator, task, context_manager)
-        
-        if success:
-            task.finish()
-            context_manager.complete()
-            self.logger.info("Task completed successfully with planning")
-        else:
-            context_manager.fail("Planning execution failed")
-            self.logger.error("Task failed with planning")
-            
-    except Exception as e:
-        context_manager.fail(str(e))
-        self.logger.exception("Planning-based task processing failed")
-        raise
+1. is_resumedフラグをチェック
+2. TaskContextManagerを初期化（resume_from_pausedフラグを設定）
+3. 処理ストアを取得（MessageStore、SummaryStore、ToolStore）
+4. 関数とツールの定義を収集（MCP Clientsから）
+5. タスク固有のLLMクライアントを作成（MessageStoreとContext Dirを設定）
+6. ContextCompressorを作成
+7. 復元時のみ:
+   - タスクにコメント追加: "一時停止されたタスクを再開します。"
+8. 処理ループ開始（最大回数まで繰り返し）:
+   - 一時停止シグナルをチェック
+   - シグナル検出時: 一時停止処理を実行して終了
+   - コンテキスト圧縮が必要かチェック
+   - 必要な場合: 圧縮を実行し統計を更新
+   - LLM対話処理を実行
+   - 完了判定があれば処理ループを終了
+   - LLM呼び出し統計を更新
+9. タスク完了処理を実行
+10. ContextManagerのcomplete()を呼び出し（runningからcompletedへ移動）
+11. エラー発生時: fail()を呼び出してログ記録
 
-def _execute_planning_with_pause_check(self, coordinator, task, context_manager):
-    """Planning実行（一時停止チェック組み込み）"""
-    try:
-        # 既存のPlanning実行ループを拡張
-        # coordinator.execute_with_planning()の内部ロジックを
-        # 一時停止チェックを挟みながら実行
-        
-        # Planning phase
-        if coordinator.current_phase == "planning":
-            if self._check_pause_signal(context_manager):
-                self._pause_task_with_planning(task, context_manager, coordinator)
-                return False
-            
-            if not coordinator.history_store.has_plan():
-                coordinator.current_plan = coordinator._execute_planning_phase()
-                if coordinator.current_plan:
-                    coordinator.history_store.save_plan(coordinator.current_plan)
-                    coordinator._post_plan_as_checklist(coordinator.current_plan)
-                    coordinator.current_phase = "execution"
-                else:
-                    return False
-        
-        # Execution loop
-        max_iterations = coordinator.config.get("max_subtasks", 100)
-        iteration = 0
-        
-        while iteration < max_iterations and not coordinator._is_complete():
-            # 一時停止チェック
-            if self._check_pause_signal(context_manager):
-                self._pause_task_with_planning(task, context_manager, coordinator)
-                return False
-            
-            iteration += 1
-            
-            # Execute next action
-            result = coordinator._execute_action()
-            
-            if result is None:
-                break
-            
-            if result.get("status") == "error":
-                if not coordinator.config.get("continue_on_error", False):
-                    return False
-            
-            # Update progress
-            coordinator._update_checklist_progress(coordinator.action_counter - 1)
-            
-            # Reflection check
-            if coordinator._should_reflect(result):
-                reflection = coordinator._execute_reflection_phase(result)
-                if reflection and reflection.get("plan_revision_needed"):
-                    revised_plan = coordinator._revise_plan(reflection)
-                    if revised_plan:
-                        coordinator.current_plan = revised_plan
-            
-            if result.get("done"):
-                break
-        
-        coordinator._mark_checklist_complete()
-        return True
-        
-    except Exception as e:
-        self.logger.exception("Planning execution with pause check failed: %s", e)
-        return False
+**Planningモード（Planning有効）の処理フロー:**
 
-def _pause_task_with_planning(self, task, context_manager, coordinator):
-    """Planning状態を含めてタスクを一時停止する"""
-    # 通常の一時停止処理
-    self._pause_task(task, context_manager)
-    
-    # Planning状態を追加保存
-    paused_dir = Path(f"contexts/paused/{task.uuid}")
-    task_state_path = paused_dir / "task_state.json"
-    
-    if task_state_path.exists():
-        with task_state_path.open('r') as f:
-            task_state = json.load(f)
-        
-        # Planning状態を追加
-        task_state["planning_state"] = {
-            "enabled": True,
-            "current_phase": coordinator.current_phase,
-            "action_counter": coordinator.action_counter,
-            "revision_counter": coordinator.revision_counter,
-            "checklist_comment_id": coordinator.checklist_comment_id,
-        }
-        
-        with task_state_path.open('w') as f:
-            json.dump(task_state, f, indent=2)
+1. is_resumedフラグをチェック
+2. TaskContextManagerを初期化（resume_from_pausedフラグを設定）
+3. Planning設定を取得し、main_configを追加
+4. PlanningCoordinatorを初期化（LLM Client、MCP Clients、Task、ContextManagerを渡す）
+5. 一時停止状態から復元する場合:
+   - タスクにコメント追加: "一時停止されたタスクを再開します（Planning実行中）。"
+   - task_state.jsonからPlanning状態を読み込み:
+     - current_phase（現在のフェーズ）
+     - action_counter（実行済みアクション数）
+     - revision_counter（修正回数）
+     - checklist_comment_id（チェックリストコメントID）
+   - Coordinatorの状態を復元
+   - Planning履歴ストアから既存プランを読み込み
+6. Planning実行（一時停止チェック組み込み版）を開始:
+   - Planningフェーズ中に一時停止チェック
+   - 各アクション実行前に一時停止チェック
+   - リフレクション前に一時停止チェック
+   - プラン修正前に一時停止チェック
+   - 一時停止検出時: Planning状態を含めて一時停止処理
+7. 成功時: タスク完了処理とContextManager.complete()実行
+8. 失敗時: ContextManager.fail()を呼び出し
+9. エラー発生時: fail()を呼び出してログ記録
 
-def _load_planning_state(self, task_uuid):
-    """一時停止されたPlanning状態を読み込む"""
-    paused_dir = Path(f"contexts/paused/{task_uuid}")
-    task_state_path = paused_dir / "task_state.json"
-    
-    if task_state_path.exists():
-        with task_state_path.open('r') as f:
-            task_state = json.load(f)
-        return task_state.get("planning_state")
-    
-    return None
-```
+**Planning状態を含む一時停止処理:**
+1. 通常の一時停止処理を実行（ディレクトリ移動、task_state.json作成）
+2. task_state.jsonにPlanning状態を追加:
+   - enabled: true
+   - current_phase: 現在のフェーズ
+   - action_counter: 実行済みアクション数
+   - revision_counter: プラン修正回数
+   - checklist_comment_id: チェックリストコメントID
+3. ファイルを保存
 
 ### 3.5 エラーハンドリングと回復
 
-#### 3.5.1 一時停止失敗時の処理
-
-一時停止処理中にエラーが発生した場合:
-1. エラーログを記録
-2. 可能であればタスク状態を保存
-3. contexts/running/ の状態を維持（削除しない）
-4. タスクにエラーコメントを追加
-5. 次回のproducer実行時に再度一時停止処理を試行
-
-#### 3.5.2 復元失敗時の処理
+#### 3.5.1 復元失敗時の処理
 
 復元処理中にエラーが発生した場合:
 1. エラーログを記録
@@ -592,14 +358,6 @@ def _load_planning_state(self, task_uuid):
 3. contexts/paused/ の状態を維持（削除しない）
 4. タスクをキューに再投入しない（手動確認が必要）
 5. 管理者に通知（ログ、コメント等）
-
-#### 3.5.3 不完全な一時停止状態のクリーンアップ
-
-定期的に実行するクリーンアップ処理:
-1. contexts/paused/ 内の古いタスク（例: 30日以上）を検出
-2. 対応するGitHub/GitLabタスクが存在するか確認
-3. 存在しない場合、contexts/failed/ に移動
-4. 存在する場合、ユーザーに確認を求めるコメントを追加
 
 ### 3.6 設定ファイルへの追加項目
 
@@ -620,52 +378,11 @@ pause_resume:
   
   # 一時停止状態ディレクトリ
   paused_dir: "contexts/paused"
-
-github:
-  # 既存の設定...
-  paused_label: "coding agent paused"  # 新規追加
-
-gitlab:
-  # 既存の設定...
-  paused_label: "coding agent paused"  # 新規追加
 ```
 
-## 4. 実装の優先順位と段階的展開
+## 4. Planning モードにおける一時停止・リジュームの特別な考慮事項
 
-### 4.1 Phase 1: 基本的な一時停止機能
-1. 停止ファイル検出機構の実装
-2. タスク状態の永続化（contexts/paused/への保存）
-3. 一時停止時のラベル更新
-4. Consumer処理の正常終了
-
-### 4.2 Phase 2: 復元と継続実行機能
-1. Producerでの一時停止タスク検出
-2. タスク情報のキュー再投入
-3. Consumerでの状態復元（Context Storage移動）
-4. 会話履歴の継続とLLM処理の再開
-
-### 4.3 Phase 3: Planning モード対応
-1. Planning状態（current_phase, action_counter等）の永続化
-2. Planning実行ループへの一時停止チェック組み込み
-3. 一時停止時のチェックリストコメントID保存
-4. 復元時のPlanning状態復元とアクション継続
-5. プラン修正カウンター（revision_counter）の保持
-
-### 4.4 Phase 4: エラーハンドリングと運用改善
-1. 一時停止失敗時のリトライ機構
-2. 復元失敗時の通知とログ記録
-3. 古い一時停止タスクのクリーンアップ
-4. 管理コマンドの追加（一時停止タスク一覧表示等）
-
-### 4.5 Phase 5: 高度な機能（オプション）
-1. OSシグナルによる一時停止対応
-2. 複数タスク同時一時停止
-3. 一時停止理由の記録とレポート機能
-4. Web UIでの一時停止管理
-
-## 5. Planning モードにおける一時停止・リジュームの特別な考慮事項
-
-### 5.1 Planning特有の状態管理
+### 4.1 Planning特有の状態管理
 
 Planning機能が有効な場合、以下の追加状態を管理する必要があります:
 
@@ -682,7 +399,7 @@ Planning機能が有効な場合、以下の追加状態を管理する必要が
 2. **message_store**: `contexts/running/{task_uuid}/current.jsonl`に保存
    - LLMとの会話履歴
 
-### 5.2 Planning実行フローと一時停止タイミング
+### 4.2 Planning実行フローと一時停止タイミング
 
 ```
 [Planning Phase]
@@ -716,41 +433,37 @@ Planning機能が有効な場合、以下の追加状態を管理する必要が
 - リフレクション実行前
 - プラン修正実行前
 
-### 5.3 Planning状態の復元プロセス
+### 4.3 Planning状態の復元プロセス
 
-```python
-# 1. Planning履歴の読み込み
-history_store = context_manager.get_planning_store()
-if history_store.has_plan():
-    plan_entry = history_store.get_latest_plan()
-    coordinator.current_plan = plan_entry.get("plan") or plan_entry.get("updated_plan")
+**Planning状態の復元手順:**
 
-# 2. task_state.jsonからPlanning固有状態を復元
-planning_state = task_state.get("planning_state", {})
-coordinator.current_phase = planning_state.get("current_phase", "planning")
-coordinator.action_counter = planning_state.get("action_counter", 0)
-coordinator.revision_counter = planning_state.get("revision_counter", 0)
-coordinator.checklist_comment_id = planning_state.get("checklist_comment_id")
+1. Planning履歴の読み込み:
+   - ContextManagerからPlanningStoreを取得
+   - 既存プランの有無を確認
+   - 最新のプランエントリーを取得
+   - current_planに設定（planまたはupdated_planフィールド）
 
-# 3. チェックリストの再表示（または更新）
-if coordinator.checklist_comment_id:
-    # 既存のコメントを更新して現在の進捗を反映
-    coordinator._update_checklist_progress(coordinator.action_counter - 1)
-else:
-    # チェックリストコメントIDが失われている場合は新規投稿
-    coordinator._post_plan_as_checklist(coordinator.current_plan)
+2. task_state.jsonからPlanning固有状態を復元:
+   - planning_state辞書を取得
+   - current_phaseを復元（デフォルト: "planning"）
+   - action_counterを復元（実行済みアクション数）
+   - revision_counterを復元（プラン修正回数）
+   - checklist_comment_idを復元（チェックリストのコメントID）
 
-# 4. 実行フェーズに応じた処理の継続
-if coordinator.current_phase == "planning":
-    # Planningフェーズの続きから開始
-    coordinator._execute_planning_phase()
-elif coordinator.current_phase == "execution":
-    # アクションカウンターの位置から実行を継続
-    # action_counter番目のアクションから再開
-    pass
-```
+3. チェックリストの再表示（または更新）:
+   - checklist_comment_idが存在する場合:
+     - 既存のコメントを更新して現在の進捗を反映
+     - action_counter - 1番目までのアクションを完了としてマーク
+   - checklist_comment_idが存在しない場合:
+     - チェックリストコメントIDが失われているため新規投稿
+     - 現在のプランからチェックリストを生成
 
-### 5.4 チェックリスト管理の考慮事項
+4. 実行フェーズに応じた処理の継続:
+   - current_phase = "planning"の場合: Planningフェーズの続きから開始
+   - current_phase = "execution"の場合: action_counter番目のアクションから実行を継続
+   - current_phase = "reflection"または"revision"の場合: 該当フェーズから再開
+
+### 4.4 チェックリスト管理の考慮事項
 
 **一時停止時の処理:**
 1. 現在のチェックリストコメントIDを保存
@@ -765,7 +478,7 @@ elif coordinator.current_phase == "execution":
 - `task.update_comment(comment_id, content)`を使用
 - GitHubとGitLabで動作が異なる可能性があるため、互換性を確認
 
-### 5.5 Planningモードでのエラーハンドリング
+### 4.5 Planningモードでのエラーハンドリング
 
 **一時停止中のプラン修正:**
 - 一時停止中にプランが修正された場合、revision_counterが増加
@@ -780,7 +493,7 @@ elif coordinator.current_phase == "execution":
 - 修正フェーズ中の一時停止にも対応
 - 各フェーズの状態をcurrent_phaseに記録
 
-### 5.6 Planningモード固有のテストシナリオ
+### 4.6 Planningモード固有のテストシナリオ
 
 **シナリオP1: Planningフェーズ中の一時停止**
 1. タスク開始、Planningフェーズに入る
@@ -814,7 +527,7 @@ elif coordinator.current_phase == "execution":
 3. 再開時、チェックリストが正しく更新される
 4. 進捗表示が正確に反映される
 
-## 6. テストシナリオ
+## 5. テストシナリオ
 
 ### 5.1 基本的な一時停止とリジューム
 
@@ -835,7 +548,7 @@ elif coordinator.current_phase == "execution":
 5. 最終的に再開して完了
 6. resume_countが正しくカウントされていることを確認
 
-### 6.2 エラーケースのテスト
+### 5.2 エラーケースのテスト
 
 **シナリオ3: 一時停止中のタスク削除**
 1. タスクを一時停止
@@ -850,7 +563,7 @@ elif coordinator.current_phase == "execution":
 4. エラーログが記録されることを確認
 5. 破損したタスクが再投入されないことを確認
 
-### 6.3 同時実行とキュー管理
+### 5.3 同時実行とキュー管理
 
 **シナリオ5: 複数Consumer環境での一時停止**
 1. 複数のConsumerプロセスを起動
@@ -858,27 +571,23 @@ elif coordinator.current_phase == "execution":
 3. 他のConsumerは影響を受けずに動作することを確認
 4. 一時停止タスクの再開が正しく動作することを確認
 
-## 7. セキュリティとデータ整合性
+## 6. セキュリティとデータ整合性
 
-### 7.1 データ整合性の保証
+### 6.1 データ整合性の保証
 - ファイル移動操作はアトミックに実行（shutil.moveを使用）
 - task_state.jsonの書き込み前にバリデーションを実施
 - Context Storageディレクトリの整合性チェック
 
-### 7.2 アクセス制御
-- contexts/ディレクトリへのアクセス権限を適切に設定
-- 停止ファイルの作成権限を管理者に制限
-
-### 7.3 ログとトレーサビリティ
+### 6.2 ログとトレーサビリティ
 - 一時停止/復元のすべての操作をログに記録
 - タスクIDとタイムスタンプを必ず記録
 - エラー発生時の詳細な情報を保存
 
-## 8. 運用ガイドライン
+## 7. 運用ガイドライン
 
-### 8.1 一時停止の実行方法
+### 7.1 一時停止の実行方法
 
-**方法1: 停止ファイルの作成**
+**停止ファイルの作成:**
 ```bash
 # 一時停止を指示
 touch contexts/pause_signal
@@ -887,15 +596,7 @@ touch contexts/pause_signal
 # ログで確認: "タスクを一時停止しました"
 ```
 
-**方法2: 設定での一時停止（将来実装）**
-```bash
-# config.yamlで設定
-pause_resume:
-  enabled: true
-  auto_pause: true  # 次回のタスク開始前に自動停止
-```
-
-### 8.2 一時停止タスクの確認
+### 7.2 一時停止タスクの確認
 
 ```bash
 # 一時停止中のタスク一覧を表示
@@ -905,7 +606,7 @@ ls -la contexts/paused/
 cat contexts/paused/{task_uuid}/task_state.json
 ```
 
-### 8.3 手動でのタスク再開
+### 7.3 手動でのタスク再開
 
 ```bash
 # Producer実行で自動的に再投入される
@@ -915,7 +616,7 @@ python main.py --mode producer
 python main.py --mode consumer
 ```
 
-### 8.4 一時停止タスクの削除
+### 7.4 一時停止タスクの削除
 
 タスクを再開せずに破棄したい場合:
 ```bash
@@ -925,59 +626,25 @@ rm -rf contexts/paused/{task_uuid}/
 # GitHub/GitLabでタスクをクローズ
 ```
 
-## 9. パフォーマンスへの影響
-
-### 9.1 停止チェックのオーバーヘッド
-- ファイル存在チェックは軽量（数ミリ秒）
-- check_interval設定で頻度を調整可能
-- 推奨: 1（毎回チェック）～5（5回に1回チェック）
-
-### 9.2 状態保存のオーバーヘッド
-- Context Storageは既に会話履歴を保存しているため、追加のオーバーヘッドは最小限
-- ディレクトリ移動操作は高速（同一ファイルシステム内）
-- task_state.jsonの書き込みは小さなファイル（数KB）
-
-### 9.3 復元のオーバーヘッド
-- ディレクトリ移動操作は高速
-- MessageStoreからの読み込みは既存機能と同等
-- 復元操作による顕著な遅延は発生しない見込み
-
-## 10. 将来の拡張案
-
-### 10.1 高度な一時停止機能
-- 特定の条件（エラー率が高い、特定のツールで失敗等）での自動一時停止
-- 一時停止理由の分類（ユーザー指示、エラー、リソース不足等）
-- スケジュール設定による自動一時停止/再開
-
-### 10.2 管理ツール
-- 一時停止タスクのCLI管理ツール（一覧表示、再開、削除等）
-- Web UIでの一時停止状態の可視化
-- 一時停止タスクのメトリクス収集とレポート
-
-### 10.3 分散環境対応
-- 複数Consumerでのタスク一時停止の排他制御
-- 分散ロック機構の導入
-- タスク状態のデータベース管理（ファイルベースからDBベースへ）
-
-## 11. まとめ
+## 8. まとめ
 
 本仕様では、coding_agentのconsumerモードにおける一時停止とリジューム機能の詳細設計を行いました。
 
-### 11.1 主要な設計ポイント
+### 8.1 主要な設計ポイント
 1. **停止ファイルによる一時停止**: シンプルで確実な停止トリガー機構
 2. **Context Storageの活用**: 既存のディレクトリ構造を拡張（contexts/paused/）
 3. **Producerとの連携**: 一時停止タスクの自動検出とキュー再投入
 4. **状態の継続性**: MessageStoreを通じた会話履歴の完全な復元
-5. **ラベル管理**: 専用のpausedラベルによる明確な状態管理
+5. **ラベル管理**: 既存のprocessing_labelを維持して互換性を確保
 6. **Planningモード対応**: Planning特有の状態（フェーズ、アクションカウンター、チェックリストID等）を保存・復元
 
-### 11.2 期待される効果
+### 8.2 期待される効果
 - 長時間実行タスクの柔軟な管理
 - システムメンテナンス時の安全な停止
 - リソース調整や緊急対応時の迅速な一時停止
 - タスクの途中状態を失わずに運用継続
 
-### 11.3 実装時の注意点
+### 8.3 実装時の注意点
 - ファイル操作の原子性を確保
 - エラーハンドリングの徹底
 - ログとトレーサビリティの確保
@@ -985,7 +652,7 @@ rm -rf contexts/paused/{task_uuid}/
 - Planningモード有効時の追加状態管理を忘れずに実装
 - チェックリストコメントIDの適切な保存と復元
 
-### 11.4 Planning モード対応の重要性
+### 8.4 Planning モード対応の重要性
 Planning機能が有効な場合、単なる会話履歴の保存だけでなく、以下の追加要素の管理が必要です:
 - 実行フェーズ（Planning/Execution/Reflection/Revision）の保存
 - アクション実行進捗（action_counter）の保持
