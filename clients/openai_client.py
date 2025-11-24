@@ -76,11 +76,11 @@ class OpenAIClient(LLMClient):
         output_message = f"output: {result}"
         self.message_store.add_message("user", output_message)
 
-    def get_response(self) -> str:
+    def get_response(self) -> tuple[str, list]:
         """OpenAI APIから応答を取得する.
 
         Returns:
-            LLMからの応答テキスト
+            タプル: (LLMからの応答テキスト, function callsのリスト)
 
         """
         # Create request.json by streaming current.jsonl
@@ -182,7 +182,7 @@ class OpenAIClient(LLMClient):
                     self.message_store.add_message("assistant", content)
                     reply += content
             
-            return reply
+            return reply, functions
         
         except Exception as e:
             # Log error

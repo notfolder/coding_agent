@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from handlers.planning_history_store import PlanningHistoryStore
@@ -50,7 +52,6 @@ class PlanningCoordinator:
             self.history_store.issue_id = str(task.number)
         
         # Create planning-specific LLM client with message store and context dir
-        from pathlib import Path
         from clients.lm_client import get_llm_client
         from context_storage.message_store import MessageStore
         
@@ -63,16 +64,27 @@ class PlanningCoordinator:
         
         message_store = MessageStore(context_dir, main_config)
         
+        # Get functions and tools from MCP clients
+        functions = []
+        tools = []
+        if main_config.get("llm", {}).get("function_calling", True):
+            for mcp_client in mcp_clients.values():
+                functions.extend(mcp_client.get_function_calling_functions())
+                tools.extend(mcp_client.get_function_calling_tools())
+        
         self.llm_client = get_llm_client(
             main_config,
-            functions=None,
-            tools=None,
+            functions=functions if functions else None,
+            tools=tools if tools else None,
             message_store=message_store,
             context_dir=context_dir,
         )
         
         # Load and send planning-specific system prompt
         self._load_planning_system_prompt()
+        
+        # Send initial task information to LLM
+        self._send_initial_task_prompt()
         
         # Current state
         self.current_phase = "planning"
@@ -197,7 +209,7 @@ class PlanningCoordinator:
             
             # Request plan from LLM
             self.llm_client.send_user_message(planning_prompt)
-            response = self.llm_client.get_response()
+            response, _ = self.llm_client.get_response()  # Unpack tuple, ignore functions
             
             # Parse response
             plan = self._parse_planning_response(response)
@@ -232,13 +244,131 @@ class PlanningCoordinator:
             # Execute the action via LLM
             action_prompt = self._build_action_prompt(current_action)
             self.llm_client.send_user_message(action_prompt)
-            result = self.llm_client.get_response()
             
-            return {"status": "success", "result": result, "action": current_action}
+            # Get LLM response with function calls
+            resp, functions = self.llm_client.get_response()
+            self.logger.info("Action execution LLM response: %s", resp)
+            
+            # Initialize error state for tool execution
+            error_state = {"last_tool": None, "tool_error_count": 0}
+            
+            # Process function calls if any
+            if functions:
+                if not isinstance(functions, list):
+                    functions = [functions]
+                
+                # Execute all function calls
+                for function in functions:
+                    if self._execute_function_call(function, error_state):
+                        # Critical error occurred
+                        return {
+                            "status": "error",
+                            "error": "Too many consecutive tool errors",
+                            "action": current_action,
+                        }
+            
+            # Try to parse JSON response
+            try:
+                data = json.loads(resp) if isinstance(resp, str) else resp
+                
+                # Check if done
+                if data.get("done"):
+                    return {"done": True, "status": "completed", "result": data}
+                
+                return {"status": "success", "result": data, "action": current_action}
+            except (json.JSONDecodeError, ValueError):
+                # If not JSON, treat as text response
+                return {"status": "success", "result": resp, "action": current_action}
             
         except Exception as e:
-            self.logger.exception(f"Action execution failed: {e}")
+            self.logger.exception("Action execution failed: %s", e)
             return {"status": "error", "error": str(e)}
+
+    def _execute_function_call(self, function: dict[str, Any], error_state: dict[str, Any]) -> bool:
+        """Execute a single function call.
+        
+        Args:
+            function: Function call information (dict or object with name/arguments)
+            error_state: Error state tracking dictionary
+            
+        Returns:
+            True if critical error occurred (should abort), False otherwise
+        """
+        # Maximum consecutive tool errors before aborting
+        MAX_CONSECUTIVE_TOOL_ERRORS = 3
+        
+        try:
+            # Get function name
+            name = function["name"] if isinstance(function, dict) else function.name
+            
+            # Parse MCP server and tool name
+            if "_" not in name:
+                self.logger.error("Invalid function name format: %s", name)
+                return False
+            
+            mcp_server, tool_name = name.split("_", 1)
+            
+            # Get arguments
+            args = function["arguments"] if isinstance(function, dict) else function.arguments
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    self.logger.error("Failed to parse arguments JSON: %s", args)
+                    return False
+            
+            self.logger.info("Executing function: %s with args: %s", name, args)
+            
+            # Execute the tool
+            try:
+                result = self.mcp_clients[mcp_server].call_tool(tool_name, args)
+                
+                # Reset error count on success
+                if error_state["last_tool"] == tool_name:
+                    error_state["tool_error_count"] = 0
+                
+                # Send result back to LLM
+                self.llm_client.send_function_result(name, str(result))
+                
+                return False
+                
+            except Exception as e:
+                # Handle tool execution error
+                error_msg = str(e)
+                if hasattr(e, "exceptions") and e.exceptions:
+                    # Handle ExceptionGroup structure
+                    if hasattr(e.exceptions[0], "exceptions"):
+                        error_msg = str(e.exceptions[0].exceptions[0])
+                    else:
+                        error_msg = str(e.exceptions[0])
+                
+                self.logger.exception("Tool execution failed: %s", error_msg)
+                
+                # Post error to task
+                self.task.comment(f"ツール実行エラー ({name}): {error_msg}")
+                
+                # Update error count
+                if error_state["last_tool"] == tool_name:
+                    error_state["tool_error_count"] += 1
+                else:
+                    error_state["tool_error_count"] = 1
+                    error_state["last_tool"] = tool_name
+                
+                # Send error result to LLM
+                self.llm_client.send_function_result(name, f"error: {error_msg}")
+                
+                # Check if we should abort
+                if error_state["tool_error_count"] >= MAX_CONSECUTIVE_TOOL_ERRORS:
+                    self.task.comment(
+                        f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。"
+                    )
+                    return True
+                
+                return False
+                
+        except Exception as e:
+            self.logger.exception("Function call execution failed: %s", e)
+            return False
 
     def _should_reflect(self, result: dict[str, Any]) -> bool:
         """Determine if reflection is needed.
@@ -280,7 +410,7 @@ class PlanningCoordinator:
             
             # Get reflection from LLM
             self.llm_client.send_user_message(reflection_prompt)
-            response = self.llm_client.get_response()
+            response, _ = self.llm_client.get_response()  # Unpack tuple, ignore functions
             
             # Parse reflection
             reflection = self._parse_reflection_response(response)
@@ -320,7 +450,7 @@ class PlanningCoordinator:
             
             # Get revised plan from LLM
             self.llm_client.send_user_message(revision_prompt)
-            response = self.llm_client.get_response()
+            response, _ = self.llm_client.get_response()  # Unpack tuple, ignore functions
             
             # Parse revised plan
             revised_plan = self._parse_planning_response(response)
@@ -394,7 +524,23 @@ class PlanningCoordinator:
         Returns:
             Action prompt string
         """
-        return f"Execute the following action:\n{json.dumps(action, indent=2)}"
+        # Extract tool information from action
+        tool_name = action.get("tool", "unknown")
+        parameters = action.get("parameters", {})
+        purpose = action.get("purpose", "")
+        
+        prompt_parts = [
+            f"Execute the following action using the `{tool_name}` tool:",
+            "",
+            f"**Purpose**: {purpose}",
+            "",
+            "**Tool Parameters**:",
+            json.dumps(parameters, indent=2, ensure_ascii=False),
+            "",
+            "Please use function calling to execute this tool with the exact parameters provided above.",
+        ]
+        
+        return "\n".join(prompt_parts)
 
     def _build_reflection_prompt(self, result: dict[str, Any]) -> str:
         """Build prompt for reflection.
@@ -606,8 +752,6 @@ class PlanningCoordinator:
     def _load_planning_system_prompt(self) -> None:
         """Load and send the planning-specific system prompt to LLM client."""
         try:
-            from pathlib import Path
-            
             # Read system_prompt_planning.txt
             prompt_path = Path("system_prompt_planning.txt")
             
@@ -627,6 +771,22 @@ class PlanningCoordinator:
                 
         except Exception as e:
             self.logger.error("Failed to load planning system prompt: %s", str(e))
+
+    def _send_initial_task_prompt(self) -> None:
+        """Send initial task information (issue/MR details) to LLM client."""
+        try:
+            # Get task prompt with issue/MR information
+            task_prompt = self.task.get_prompt()
+            
+            # Send task information to LLM
+            if hasattr(self.llm_client, "send_user_message"):
+                self.llm_client.send_user_message(task_prompt)
+                self.logger.info("Sent initial task information to LLM")
+            else:
+                self.logger.warning("LLM client does not support send_user_message")
+                
+        except Exception as e:
+            self.logger.error("Failed to send initial task prompt: %s", str(e))
 
     def _post_phase_comment(self, phase: str, status: str, details: str = "") -> None:
         """Post a comment about the current phase status to Issue/MR.
@@ -670,7 +830,6 @@ class PlanningCoordinator:
                 comment_lines.append("")
             
             # Add timestamp
-            from datetime import datetime
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             comment_lines.append(f"*{timestamp}*")
             

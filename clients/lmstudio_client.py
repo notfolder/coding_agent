@@ -73,11 +73,11 @@ class LMStudioClient(LLMClient):
         output_message = f"output: {result}"
         self.message_store.add_message("user", output_message)
 
-    def get_response(self) -> str:
+    def get_response(self) -> tuple[str, list]:
         """LLMからの応答を取得する.
 
         Returns:
-            LLMからの応答テキスト
+            タプル: (LLMからの応答テキスト, function callsのリスト)
 
         """
         # Create request.json by streaming current.jsonl
@@ -136,6 +136,7 @@ class LMStudioClient(LLMClient):
             
             # Parse response - OpenAI-compatible format
             reply = ""
+            functions = []
             for choice in response_data.get("choices", []):
                 message = choice.get("message", {})
                 content = message.get("content") or ""
@@ -156,12 +157,19 @@ class LMStudioClient(LLMClient):
                         f"Function call: {func_call.get('name', '')} "
                         f"with arguments {func_call.get('arguments', '')}"
                     )
+                    # Convert to function call object format
+                    from types import SimpleNamespace
+                    func_obj = SimpleNamespace(
+                        name=func_call.get("name", ""),
+                        arguments=func_call.get("arguments", "")
+                    )
+                    functions.append(func_obj)
                 elif content:
                     # Only add assistant message if there's actual content
                     self.message_store.add_message("assistant", content)
                     reply += content
             
-            return reply
+            return reply, functions
         
         except Exception as e:
             # Log error

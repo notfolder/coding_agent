@@ -68,11 +68,11 @@ class OllamaClient(LLMClient):
         output_message = f"output: {result}"
         self.message_store.add_message("user", output_message)
 
-    def get_response(self) -> str:
+    def get_response(self) -> tuple[str, list]:
         """Ollama APIから応答を取得する.
 
         Returns:
-            応答テキスト
+            タプル: (応答テキスト, function callsのリスト)
 
         """
         # Create request.json by streaming current.jsonl
@@ -146,7 +146,7 @@ class OllamaClient(LLMClient):
             raise
 
         else:
-            return reply
+            return reply, []
 
         finally:
             # Clean up request.json
