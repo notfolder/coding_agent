@@ -71,6 +71,9 @@ class PlanningCoordinator:
             context_dir=context_dir,
         )
         
+        # Load and send planning-specific system prompt
+        self._load_planning_system_prompt()
+        
         # Current state
         self.current_phase = "planning"
         self.current_plan = None
@@ -89,6 +92,9 @@ class PlanningCoordinator:
             True if task completed successfully, False otherwise
         """
         try:
+            # Post start comment
+            self._post_phase_comment("planning", "started", "Beginning task analysis and planning...")
+            
             # Step 1: Check for existing plan
             if self.history_store.has_plan():
                 self.logger.info("Found existing plan, loading...")
@@ -96,6 +102,7 @@ class PlanningCoordinator:
                 if plan_entry:
                     self.current_plan = plan_entry.get("plan") or plan_entry.get("updated_plan")
                     self.current_phase = "execution"
+                    self._post_phase_comment("planning", "completed", "Loaded existing plan from history.")
             else:
                 # Step 2: Execute planning phase
                 self.logger.info("No existing plan, executing planning phase...")
@@ -105,9 +112,14 @@ class PlanningCoordinator:
                     # Post plan to Issue/MR as markdown checklist
                     self._post_plan_as_checklist(self.current_plan)
                     self.current_phase = "execution"
+                    self._post_phase_comment("planning", "completed", "Created execution plan with action items.")
                 else:
                     self.logger.error("Planning phase failed")
+                    self._post_phase_comment("planning", "failed", "Could not generate a valid execution plan.")
                     return False
+
+            # Post execution start
+            self._post_phase_comment("execution", "started", "Beginning execution of planned actions...")
 
             # Step 3: Execution loop
             max_iterations = self.config.get("max_subtasks", 100)
@@ -123,18 +135,33 @@ class PlanningCoordinator:
                     self.logger.warning("No more actions to execute")
                     break
                 
+                # Check for action failure
+                if result.get("status") == "error":
+                    error_msg = result.get("error", "Unknown error occurred")
+                    self._post_phase_comment("execution", "failed", f"Action failed: {error_msg}")
+                    # Continue or stop based on configuration
+                    if not self.config.get("continue_on_error", False):
+                        return False
+                
                 # Update progress checklist
                 self._update_checklist_progress(self.action_counter - 1)
                 
                 # Check if reflection is needed
                 if self._should_reflect(result):
+                    self._post_phase_comment("reflection", "started", f"Analyzing results after {self.action_counter} actions...")
                     reflection = self._execute_reflection_phase(result)
                     
                     if reflection and reflection.get("plan_revision_needed"):
                         # Revise plan if needed
+                        self._post_phase_comment("revision", "started", "Plan revision needed based on reflection.")
                         revised_plan = self._revise_plan(reflection)
                         if revised_plan:
                             self.current_plan = revised_plan
+                            self._post_phase_comment("revision", "completed", "Plan has been revised and updated.")
+                        else:
+                            self._post_phase_comment("revision", "failed", "Could not revise plan.")
+                    else:
+                        self._post_phase_comment("reflection", "completed", "Reflection complete, continuing with current plan.")
                 
                 # Check for completion
                 if result.get("done"):
@@ -143,11 +170,13 @@ class PlanningCoordinator:
             
             # Mark all tasks complete
             self._mark_checklist_complete()
+            self._post_phase_comment("execution", "completed", "All planned actions have been executed successfully.")
             
             return True
             
         except Exception as e:
-            self.logger.exception(f"Planning execution failed: {e}")
+            self.logger.exception("Planning execution failed: %s", e)
+            self._post_phase_comment("execution", "failed", f"Error during execution: {str(e)}")
             return False
 
     def _execute_planning_phase(self) -> dict[str, Any] | None:
@@ -495,11 +524,11 @@ class PlanningCoordinator:
             checklist_content = "\n".join(checklist_lines)
             
             # Post to Issue/MR using task's comment method
-            if hasattr(self.task, "add_comment"):
-                self.task.add_comment(checklist_content)
+            if hasattr(self.task, "comment"):
+                self.task.comment(checklist_content)
                 self.logger.info("Posted execution plan checklist to Issue/MR")
             else:
-                self.logger.warning("Task does not support add_comment, cannot post checklist")
+                self.logger.warning("Task does not support comment, cannot post checklist")
                 
         except Exception as e:
             self.logger.error("Failed to post plan as checklist: %s", str(e))
@@ -537,12 +566,10 @@ class PlanningCoordinator:
             
             checklist_content = "\n".join(checklist_lines)
             
-            # Update the comment if task supports it
-            if hasattr(self.task, "update_comment") and self.plan_comment_id:
-                self.task.update_comment(self.plan_comment_id, checklist_content)
-            elif hasattr(self.task, "add_comment"):
-                # If we can't update, add a new comment
-                self.task.add_comment(checklist_content)
+            # Update the comment if task supports it (not implemented yet)
+            # For now, just add a new comment with progress update
+            if hasattr(self.task, "comment"):
+                self.task.comment(checklist_content)
             
         except Exception as e:
             self.logger.error("Failed to update checklist progress: %s", str(e))
@@ -569,11 +596,92 @@ class PlanningCoordinator:
             
             checklist_content = "\n".join(checklist_lines)
             
-            # Update or add comment
-            if hasattr(self.task, "update_comment") and self.plan_comment_id:
-                self.task.update_comment(self.plan_comment_id, checklist_content)
-            elif hasattr(self.task, "add_comment"):
-                self.task.add_comment(checklist_content)
+            # Update or add comment using Task.comment method
+            if hasattr(self.task, "comment"):
+                self.task.comment(checklist_content)
             
         except Exception as e:
             self.logger.error("Failed to mark checklist complete: %s", str(e))
+
+    def _load_planning_system_prompt(self) -> None:
+        """Load and send the planning-specific system prompt to LLM client."""
+        try:
+            from pathlib import Path
+            
+            # Read system_prompt_planning.txt
+            prompt_path = Path("system_prompt_planning.txt")
+            
+            if not prompt_path.exists():
+                self.logger.warning("system_prompt_planning.txt not found, using default behavior")
+                return
+            
+            with prompt_path.open("r", encoding="utf-8") as f:
+                planning_prompt = f.read()
+            
+            # Send system prompt to LLM client
+            if hasattr(self.llm_client, "send_system_prompt"):
+                self.llm_client.send_system_prompt(planning_prompt)
+                self.logger.info("Loaded planning system prompt")
+            else:
+                self.logger.warning("LLM client does not support send_system_prompt")
+                
+        except Exception as e:
+            self.logger.error("Failed to load planning system prompt: %s", str(e))
+
+    def _post_phase_comment(self, phase: str, status: str, details: str = "") -> None:
+        """Post a comment about the current phase status to Issue/MR.
+        
+        Args:
+            phase: The phase name (e.g., "planning", "execution", "reflection")
+            status: The status (e.g., "started", "completed", "failed")
+            details: Additional details to include in the comment
+        """
+        try:
+            # Build comment based on phase and status
+            emoji_map = {
+                "planning": "🎯",
+                "execution": "⚙️",
+                "reflection": "🔍",
+                "revision": "📝",
+            }
+            
+            status_emoji_map = {
+                "started": "▶️",
+                "completed": "✅",
+                "failed": "❌",
+                "in_progress": "🔄",
+            }
+            
+            phase_emoji = emoji_map.get(phase, "📌")
+            status_emoji = status_emoji_map.get(status, "ℹ️")
+            
+            # Build comment title
+            phase_title = phase.replace("_", " ").title()
+            status_title = status.replace("_", " ").title()
+            
+            comment_lines = [
+                f"## {phase_emoji} {phase_title} Phase - {status_emoji} {status_title}",
+                "",
+            ]
+            
+            # Add details if provided
+            if details:
+                comment_lines.append(details)
+                comment_lines.append("")
+            
+            # Add timestamp
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            comment_lines.append(f"*{timestamp}*")
+            
+            comment_content = "\n".join(comment_lines)
+            
+            # Post comment to Issue/MR using Task.comment method
+            if hasattr(self.task, "comment"):
+                self.task.comment(comment_content)
+                self.logger.info(f"Posted {phase} phase {status} comment to Issue/MR")
+            else:
+                self.logger.warning("Task does not support comment, cannot post phase comment")
+                
+        except Exception as e:
+            self.logger.error("Failed to post phase comment: %s", str(e))
