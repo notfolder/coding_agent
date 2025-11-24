@@ -99,6 +99,24 @@ class Task(ABC):
         """
 
     @abstractmethod
+    def add_label(self, label: str) -> None:
+        """タスクにラベルを追加する.
+
+        Args:
+            label: 追加するラベル名
+
+        """
+
+    @abstractmethod
+    def remove_label(self, label: str) -> None:
+        """タスクからラベルを削除する.
+
+        Args:
+            label: 削除するラベル名
+
+        """
+
+    @abstractmethod
     def get_user(self) -> str | None:
         """タスクの作成者のユーザー名を取得する.
 

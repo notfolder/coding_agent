@@ -109,6 +109,32 @@ class TaskGitHubIssue(Task):
     def check(self) -> bool:
         return self.config["github"]["processing_label"] in self.labels
 
+    def add_label(self, label: str) -> None:
+        """Issueにラベルを追加する."""
+        if label not in self.labels:
+            self.labels.append(label)
+            self.issue["labels"] = self.labels
+            args = {
+                "owner": self.config["github"]["owner"],
+                "repo": self.issue["repo"],
+                "issue_number": self.issue["number"],
+                "labels": self.labels,
+            }
+            self.mcp_client.call_tool("update_issue", args)
+
+    def remove_label(self, label: str) -> None:
+        """Issueからラベルを削除する."""
+        if label in self.labels:
+            self.labels.remove(label)
+            self.issue["labels"] = self.labels
+            args = {
+                "owner": self.config["github"]["owner"],
+                "repo": self.issue["repo"],
+                "issue_number": self.issue["number"],
+                "labels": self.labels,
+            }
+            self.mcp_client.call_tool("update_issue", args)
+
     def get_user(self) -> str | None:
         """Issueの作成者のユーザー名を取得する."""
         return self.issue.get("user", {}).get("login")
@@ -210,6 +236,32 @@ class TaskGitHubPullRequest(Task):
 
     def check(self) -> bool:
         return self.config["github"]["processing_label"] in self.labels
+
+    def add_label(self, label: str) -> None:
+        """PRにラベルを追加する."""
+        if label not in self.labels:
+            self.labels.append(label)
+            self.pr["labels"] = self.labels
+            args = {
+                "owner": self.config["github"]["owner"],
+                "repo": self.pr["repo"],
+                "issue_number": self.pr["number"],
+                "labels": self.labels,
+            }
+            self.mcp_client.call_tool("update_issue", args)
+
+    def remove_label(self, label: str) -> None:
+        """PRからラベルを削除する."""
+        if label in self.labels:
+            self.labels.remove(label)
+            self.pr["labels"] = self.labels
+            args = {
+                "owner": self.config["github"]["owner"],
+                "repo": self.pr["repo"],
+                "issue_number": self.pr["number"],
+                "labels": self.labels,
+            }
+            self.mcp_client.call_tool("update_issue", args)
 
     def get_user(self) -> str | None:
         """Pull Requestの作成者のユーザー名を取得する."""
