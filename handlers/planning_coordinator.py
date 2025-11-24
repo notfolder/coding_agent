@@ -270,6 +270,11 @@ class PlanningCoordinator:
             try:
                 data = json.loads(resp) if isinstance(resp, str) else resp
                 
+                # Post comment to Issue/MR if provided
+                if isinstance(data, dict) and data.get("comment"):
+                    self.task.comment(data["comment"])
+                    self.logger.info("Posted comment to Issue/MR from action response")
+                
                 # Check if done
                 if data.get("done"):
                     return {"done": True, "status": "completed", "result": data}
