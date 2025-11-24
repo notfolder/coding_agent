@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +46,7 @@ class PlanningHistoryStore:
         """
         entry = {
             "type": "plan",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "plan": plan,
         }
         self._append_to_file(entry)
@@ -61,7 +61,7 @@ class PlanningHistoryStore:
         """
         entry = {
             "type": "revision",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "reason": reflection.get("reason", "Plan revision needed"),
             "changes": reflection.get("changes", []),
             "updated_plan": revised_plan,
@@ -77,7 +77,7 @@ class PlanningHistoryStore:
         """
         entry = {
             "type": "reflection",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "evaluation": reflection,
         }
         self._append_to_file(entry)
