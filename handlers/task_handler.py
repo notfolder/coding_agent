@@ -97,15 +97,23 @@ class TaskHandler:
         # タスク固有の設定を取得
         task_config = self._get_task_config(task)
         
-        # Check if context storage is enabled
-        context_storage_enabled = task_config.get("context_storage", {}).get("enabled", False)
+        # Check if planning is enabled
+        planning_config = task_config.get("planning", {})
+        planning_enabled = planning_config.get("enabled", True)
         
-        if context_storage_enabled and task.uuid:
-            # Use file-based context storage
-            self._handle_with_context_storage(task, task_config)
+        if planning_enabled and task.uuid:
+            # Use planning-based task handling
+            self._handle_with_planning(task, task_config)
         else:
-            # Use legacy in-memory handling
-            self._handle_legacy(task, task_config)
+            # Check if context storage is enabled
+            context_storage_enabled = task_config.get("context_storage", {}).get("enabled", False)
+            
+            if context_storage_enabled and task.uuid:
+                # Use file-based context storage
+                self._handle_with_context_storage(task, task_config)
+            else:
+                # Use legacy in-memory handling
+                self._handle_legacy(task, task_config)
 
     def _handle_with_context_storage(self, task: Task, task_config: dict[str, Any]) -> None:
         """Handle task with file-based context storage.
@@ -188,6 +196,41 @@ class TaskHandler:
         except Exception as e:
             self.logger.exception("Task processing failed")
             context_manager.fail(str(e))
+            raise
+
+    def _handle_with_planning(self, task: Task, task_config: dict[str, Any]) -> None:
+        """Handle task with planning-based approach.
+
+        Args:
+            task: Task object
+            task_config: Task configuration
+
+        """
+        from handlers.planning_coordinator import PlanningCoordinator
+        
+        try:
+            # Get planning configuration
+            planning_config = task_config.get("planning", {})
+            
+            # Create planning coordinator
+            coordinator = PlanningCoordinator(
+                config=planning_config,
+                llm_client=self.llm_client,
+                mcp_clients=self.mcp_clients,
+                task=task,
+            )
+            
+            # Execute with planning
+            success = coordinator.execute_with_planning()
+            
+            if success:
+                task.finish()
+                self.logger.info("Task completed successfully with planning")
+            else:
+                self.logger.error("Task failed with planning")
+                
+        except Exception as e:
+            self.logger.exception("Planning-based task processing failed")
             raise
 
     def _handle_legacy(self, task: Task, task_config: dict[str, Any]) -> None:
