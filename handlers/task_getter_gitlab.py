@@ -58,7 +58,7 @@ class TaskGitLabIssue(Task):
             f"COMMENTS: {comments}"
         )
 
-    def comment(self, text: str, *, mention: bool = False) -> None:
+    def comment(self, text: str, *, mention: bool = False) -> dict[str, Any] | None:
         if mention:
             owner = self.issue.get("author", {}).get("username")
             if owner:
@@ -69,7 +69,16 @@ class TaskGitLabIssue(Task):
             "noteable_iid": self.issue_iid,
             "body": text,
         }
-        self.mcp_client.call_tool("create_note", args)
+        return self.mcp_client.call_tool("create_note", args)
+
+    def update_comment(self, comment_id: int | str, text: str) -> None:
+        """Update an existing issue comment."""
+        self.gitlab_client.update_issue_note(
+            self.project_id,
+            self.issue_iid,
+            comment_id,
+            text,
+        )
 
     def finish(self) -> None:
         # ラベル付け変更: processing_label → done_label
@@ -149,14 +158,23 @@ class TaskGitLabMergeRequest(Task):
             f"COMMENTS: {comments}"
         )
 
-    def comment(self, text: str, *, mention: bool = False) -> None:
+    def comment(self, text: str, *, mention: bool = False) -> dict[str, Any] | None:
         if mention:
             owner = self.mr.get("author", {}).get("username")
             if owner:
                 text = f"@{owner} {text}"
         # GitLabのAPIを使ってMRの記録を追加
-        self.gitlab_client.add_merge_request_note(
+        return self.gitlab_client.add_merge_request_note(
             project_id=self.project_id, merge_request_iid=self.merge_request_iid, body=text,
+        )
+
+    def update_comment(self, comment_id: int | str, text: str) -> None:
+        """Update an existing merge request comment."""
+        self.gitlab_client.update_merge_request_note(
+            self.project_id,
+            self.merge_request_iid,
+            comment_id,
+            text,
         )
 
     def finish(self) -> None:

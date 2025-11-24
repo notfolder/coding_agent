@@ -67,7 +67,7 @@ class TaskGitHubIssue(Task):
             f"COMMENTS: {comments}"
         )
 
-    def comment(self, text: str, *, mention: bool = False) -> None:
+    def comment(self, text: str, *, mention: bool = False) -> dict[str, Any] | None:
         if mention:
             owner = self.issue.get("owner")
             if owner:
@@ -78,7 +78,16 @@ class TaskGitHubIssue(Task):
             "issue_number": self.issue["number"],
             "body": text,
         }
-        self.mcp_client.call_tool("add_issue_comment", args)
+        return self.mcp_client.call_tool("add_issue_comment", args)
+
+    def update_comment(self, comment_id: int | str, text: str) -> None:
+        """Update an existing issue comment."""
+        self.github_client.update_issue_comment(
+            self.config["github"]["owner"],
+            self.issue["repo"],
+            int(comment_id),
+            text,
+        )
 
     def finish(self) -> None:
         # ラベル付け変更
@@ -168,13 +177,22 @@ class TaskGitHubPullRequest(Task):
         }
         return f"PULL_REQUEST: {json.dumps(pr_info, ensure_ascii=False)}\n"
 
-    def comment(self, text: str, *, mention: bool = False) -> None:
+    def comment(self, text: str, *, mention: bool = False) -> dict[str, Any] | None:
         if mention:
             owner = self.pr.get("owner")
             if owner:
                 text = f"@{owner} {text}"
-        self.github_client.add_comment_to_pull_request(
+        return self.github_client.add_comment_to_pull_request(
             owner=self.pr["owner"], repo=self.pr["repo"], pull_number=self.pr["number"], body=text,
+        )
+
+    def update_comment(self, comment_id: int | str, text: str) -> None:
+        """Update an existing pull request comment."""
+        self.github_client.update_issue_comment(
+            self.pr["owner"],
+            self.pr["repo"],
+            int(comment_id),
+            text,
         )
 
     def finish(self) -> None:

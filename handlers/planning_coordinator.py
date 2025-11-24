@@ -51,6 +51,9 @@ class PlanningCoordinator:
         if hasattr(task, "number"):
             self.history_store.issue_id = str(task.number)
         
+        # Track checklist comment ID for updates
+        self.checklist_comment_id: int | str | None = None
+        
         # Create planning-specific LLM client with message store and context dir
         from clients.lm_client import get_llm_client
         from context_storage.message_store import MessageStore
@@ -669,10 +672,14 @@ class PlanningCoordinator:
             
             checklist_content = "\n".join(checklist_lines)
             
-            # Post to Issue/MR using task's comment method
+            # Post to Issue/MR using task's comment method and save comment ID
             if hasattr(self.task, "comment"):
-                self.task.comment(checklist_content)
-                self.logger.info("Posted execution plan checklist to Issue/MR")
+                result = self.task.comment(checklist_content)
+                # Extract comment ID from result if available
+                if isinstance(result, dict):
+                    # GitLab: {"id": ...}, GitHub: {"id": ...}
+                    self.checklist_comment_id = result.get("id")
+                self.logger.info("Posted execution plan checklist to Issue/MR (comment_id=%s)", self.checklist_comment_id)
             else:
                 self.logger.warning("Task does not support comment, cannot post checklist")
                 
@@ -712,10 +719,16 @@ class PlanningCoordinator:
             
             checklist_content = "\n".join(checklist_lines)
             
-            # Update the comment if task supports it (not implemented yet)
-            # For now, just add a new comment with progress update
-            if hasattr(self.task, "comment"):
-                self.task.comment(checklist_content)
+            # Update the existing comment instead of posting a new one
+            if self.checklist_comment_id and hasattr(self.task, "update_comment"):
+                self.task.update_comment(self.checklist_comment_id, checklist_content)
+                self.logger.info("Updated checklist progress (comment_id=%s)", self.checklist_comment_id)
+            elif hasattr(self.task, "comment"):
+                # Fallback: post new comment if update not supported
+                result = self.task.comment(checklist_content)
+                if isinstance(result, dict):
+                    self.checklist_comment_id = result.get("id")
+                self.logger.info("Posted new checklist progress comment")
             
         except Exception as e:
             self.logger.error("Failed to update checklist progress: %s", str(e))
@@ -742,9 +755,16 @@ class PlanningCoordinator:
             
             checklist_content = "\n".join(checklist_lines)
             
-            # Update or add comment using Task.comment method
-            if hasattr(self.task, "comment"):
-                self.task.comment(checklist_content)
+            # Update the existing comment instead of posting a new one
+            if self.checklist_comment_id and hasattr(self.task, "update_comment"):
+                self.task.update_comment(self.checklist_comment_id, checklist_content)
+                self.logger.info("Marked checklist complete (comment_id=%s)", self.checklist_comment_id)
+            elif hasattr(self.task, "comment"):
+                # Fallback: post new comment if update not supported
+                result = self.task.comment(checklist_content)
+                if isinstance(result, dict):
+                    self.checklist_comment_id = result.get("id")
+                self.logger.info("Posted new completion checklist comment")
             
         except Exception as e:
             self.logger.error("Failed to mark checklist complete: %s", str(e))

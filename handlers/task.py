@@ -5,7 +5,7 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from handlers.task_key import TaskKey
@@ -44,12 +44,25 @@ class Task(ABC):
         """
 
     @abstractmethod
-    def comment(self, text: str, *, mention: bool = False) -> None:
+    def comment(self, text: str, *, mention: bool = False) -> dict[str, Any] | None:
         """タスクにコメントを追加する.
 
         Args:
             text: 追加するコメントのテキスト
             mention: Trueの場合、タスクの作成者にメンションを送信
+
+        Returns:
+            作成されたコメントの情報 (IDを含む辞書)、失敗時はNone
+
+        """
+
+    @abstractmethod
+    def update_comment(self, comment_id: int | str, text: str) -> None:
+        """既存のコメントを更新する.
+
+        Args:
+            comment_id: 更新するコメントのID
+            text: 更新後のコメントのテキスト
 
         """
 
