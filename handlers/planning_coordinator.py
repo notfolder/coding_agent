@@ -62,6 +62,9 @@ class PlanningCoordinator:
         # Use provided LLM client or create new one if not provided
         if llm_client is not None:
             self.llm_client = llm_client
+            # Update message_store and context_dir to use planning's context
+            self.llm_client.message_store = message_store
+            self.llm_client.context_dir = context_manager.context_dir
         else:
             # Create planning-specific LLM client
             from clients.lm_client import get_llm_client
@@ -87,9 +90,6 @@ class PlanningCoordinator:
         
         # Load and send planning-specific system prompt
         self._load_planning_system_prompt()
-        
-        # Send initial task information to LLM
-        self._send_initial_task_prompt()
         
         # Current state
         self.current_phase = "planning"
@@ -499,11 +499,13 @@ class PlanningCoordinator:
         Returns:
             Planning prompt string
         """
+        # Get task information including comments/discussions
+        task_info = self.task.get_prompt()
+        
         prompt_parts = [
             "Create a comprehensive plan for the following task:",
             "",
-            f"Task: {self.task.title}",
-            f"Description: {self.task.body}",
+            task_info,  # This includes issue/MR details and all comments
         ]
         
         if past_history:
@@ -806,22 +808,6 @@ class PlanningCoordinator:
                 
         except Exception as e:
             self.logger.error("Failed to load planning system prompt: %s", str(e))
-
-    def _send_initial_task_prompt(self) -> None:
-        """Send initial task information (issue/MR details) to LLM client."""
-        try:
-            # Get task prompt with issue/MR information
-            task_prompt = self.task.get_prompt()
-            
-            # Send task information to LLM
-            if hasattr(self.llm_client, "send_user_message"):
-                self.llm_client.send_user_message(task_prompt)
-                self.logger.info("Sent initial task information to LLM")
-            else:
-                self.logger.warning("LLM client does not support send_user_message")
-                
-        except Exception as e:
-            self.logger.error("Failed to send initial task prompt: %s", str(e))
 
     def _post_phase_comment(self, phase: str, status: str, details: str = "") -> None:
         """Post a comment about the current phase status to Issue/MR.
