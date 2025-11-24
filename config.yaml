@@ -55,6 +55,7 @@ planning:
   enabled: true
   
   # プランニング戦略（デフォルト: chain_of_thought）
+  # 注: 現在は "chain_of_thought" のみサポート。将来の拡張用オプション
   # 選択肢: "chain_of_thought", "hierarchical", "simple"
   strategy: "chain_of_thought"
   
@@ -62,6 +63,7 @@ planning:
   max_subtasks: 100
   
   # タスク分解の詳細度（デフォルト: moderate）
+  # 注: 将来の拡張用オプション。現在は内部で使用されていません
   # 選択肢: "detailed", "moderate", "minimal"
   decomposition_level: "moderate"
   
@@ -78,6 +80,7 @@ planning:
     trigger_interval: 3
     
     # リフレクションの深さ
+    # 注: 将来の拡張用オプション。現在は内部で使用されていません
     # 選択肢: "deep", "moderate", "shallow"
     depth: "moderate"
   

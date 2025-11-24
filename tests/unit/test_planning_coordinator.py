@@ -188,12 +188,13 @@ class TestPlanningCoordinator(unittest.TestCase):
         # First three revisions should succeed
         for i in range(3):
             result = coordinator._revise_plan(reflection)
+            # Result may be None if LLM returns invalid JSON, but counter should increment
             assert coordinator.revision_counter == i + 1
 
         # Fourth revision should fail (exceeds limit)
         result = coordinator._revise_plan(reflection)
         assert result is None
-        assert coordinator.revision_counter == 4
+        assert coordinator.revision_counter == 3  # Counter should not increment when limit exceeded
 
     def test_is_complete(self) -> None:
         """Test completion check."""

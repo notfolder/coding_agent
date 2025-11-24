@@ -45,6 +45,10 @@ class PlanningCoordinator:
         # Initialize history store
         self.history_store = PlanningHistoryStore(task.uuid, config)
         
+        # Set issue_id for cross-task history tracking
+        if hasattr(task, 'number'):
+            self.history_store.issue_id = str(task.number)
+        
         # Current state
         self.current_phase = "planning"
         self.current_plan = None
@@ -191,7 +195,8 @@ class PlanningCoordinator:
             return False
         
         interval = reflection_config.get("trigger_interval", 3)
-        if interval > 0 and self.action_counter % interval == 0:
+        # Only reflect at intervals after at least one action has been executed
+        if interval > 0 and self.action_counter > 0 and self.action_counter % interval == 0:
             return True
         
         return False
@@ -237,11 +242,13 @@ class PlanningCoordinator:
         try:
             # Check revision limit
             max_revisions = self.config.get("revision", {}).get("max_revisions", 3)
-            self.revision_counter += 1
             
-            if self.revision_counter > max_revisions:
+            if self.revision_counter >= max_revisions:
                 self.logger.error("Maximum plan revisions exceeded")
                 return None
+            
+            # Increment counter after check
+            self.revision_counter += 1
             
             # Build revision prompt
             revision_prompt = self._build_revision_prompt(reflection)

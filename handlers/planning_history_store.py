@@ -37,6 +37,10 @@ class PlanningHistoryStore:
         
         # Set file path
         self.filepath = self.directory / f"{task_uuid}.jsonl"
+        
+        # Store metadata for cross-referencing
+        self.issue_id = None
+        self.task_metadata = {}
 
     def save_plan(self, plan: dict[str, Any]) -> None:
         """Save initial plan to JSONL file.
@@ -48,6 +52,8 @@ class PlanningHistoryStore:
             "type": "plan",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "plan": plan,
+            "issue_id": self.issue_id,
+            "task_uuid": self.task_uuid,
         }
         self._append_to_file(entry)
         self.logger.info(f"Saved plan for task {self.task_uuid}")
@@ -65,6 +71,8 @@ class PlanningHistoryStore:
             "reason": reflection.get("reason", "Plan revision needed"),
             "changes": reflection.get("changes", []),
             "updated_plan": revised_plan,
+            "issue_id": self.issue_id,
+            "task_uuid": self.task_uuid,
         }
         self._append_to_file(entry)
         self.logger.info(f"Saved revision for task {self.task_uuid}")
@@ -79,6 +87,8 @@ class PlanningHistoryStore:
             "type": "reflection",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "evaluation": reflection,
+            "issue_id": self.issue_id,
+            "task_uuid": self.task_uuid,
         }
         self._append_to_file(entry)
         self.logger.debug(f"Saved reflection for task {self.task_uuid}")
