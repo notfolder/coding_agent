@@ -10,6 +10,10 @@ You have access to various tools for:
 - Web searches and documentation lookup
 - And other development tools provided via MCP (Model Context Protocol)
 
+## Available Tools and Functions
+
+{mcp_prompt}
+
 ## Planning Process
 
 When you receive a task, execute the following planning process:

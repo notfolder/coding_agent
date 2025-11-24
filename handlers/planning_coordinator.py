@@ -782,10 +782,18 @@ class PlanningCoordinator:
             with prompt_path.open("r", encoding="utf-8") as f:
                 planning_prompt = f.read()
             
+            # Get MCP client system prompts (function calling definitions)
+            mcp_prompt = ""
+            for client in self.mcp_clients.values():
+                mcp_prompt += client.system_prompt + "\n"
+            
+            # Replace placeholder with MCP prompts
+            planning_prompt = planning_prompt.replace("{mcp_prompt}", mcp_prompt)
+            
             # Send system prompt to LLM client
             if hasattr(self.llm_client, "send_system_prompt"):
                 self.llm_client.send_system_prompt(planning_prompt)
-                self.logger.info("Loaded planning system prompt")
+                self.logger.info("Loaded planning system prompt with MCP function definitions")
             else:
                 self.logger.warning("LLM client does not support send_system_prompt")
                 
