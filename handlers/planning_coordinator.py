@@ -930,8 +930,12 @@ class PlanningCoordinator:
         self.current_phase = planning_state.get("current_phase", "planning")
         self.action_counter = planning_state.get("action_counter", 0)
         self.revision_counter = planning_state.get("revision_counter", 0)
-        self.checklist_comment_id = planning_state.get("checklist_comment_id")
-        self.plan_comment_id = self.checklist_comment_id
+        
+        # Restore checklist comment ID if available
+        saved_checklist_id = planning_state.get("checklist_comment_id")
+        if saved_checklist_id is not None:
+            self.checklist_comment_id = saved_checklist_id
+            self.plan_comment_id = saved_checklist_id
         
         self.logger.info(
             "Planning状態を復元しました: phase=%s, action_counter=%d, revision_counter=%d, checklist_id=%s",

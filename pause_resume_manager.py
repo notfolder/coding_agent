@@ -103,14 +103,13 @@ class PauseResumeManager:
         paused_context_dir = self.paused_dir / task_uuid
         
         if running_context_dir.exists():
-            # Create parent directory if needed
-            self.paused_dir.mkdir(parents=True, exist_ok=True)
-            
             # Move the directory atomically
             shutil.move(str(running_context_dir), str(paused_context_dir))
             self.logger.info("コンテキストディレクトリを移動しました: %s → %s", running_context_dir, paused_context_dir)
         else:
             self.logger.warning("実行中のコンテキストディレクトリが見つかりません: %s", running_context_dir)
+            # Ensure paused directory exists for task_state.json
+            paused_context_dir.mkdir(parents=True, exist_ok=True)
         
         # Save task state to paused directory
         task_state_path = paused_context_dir / "task_state.json"
@@ -144,9 +143,9 @@ class PauseResumeManager:
         """
         # Get label configuration based on task type
         task_type = task.get_task_key().to_dict().get("type", "")
-        if "github" in task_type:
+        if task_type.startswith("github"):
             label_config = self.config.get("github", {})
-        elif "gitlab" in task_type:
+        elif task_type.startswith("gitlab"):
             label_config = self.config.get("gitlab", {})
         else:
             self.logger.warning("不明なタスクタイプ: %s", task_type)
@@ -178,9 +177,9 @@ class PauseResumeManager:
         """
         # Get label configuration based on task type
         task_type = task.get_task_key().to_dict().get("type", "")
-        if "github" in task_type:
+        if task_type.startswith("github"):
             label_config = self.config.get("github", {})
-        elif "gitlab" in task_type:
+        elif task_type.startswith("gitlab"):
             label_config = self.config.get("gitlab", {})
         else:
             self.logger.warning("不明なタスクタイプ: %s", task_type)
