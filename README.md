@@ -430,3 +430,34 @@ grep "LLM" logs/agent.log
 ## サポート
 
 問題や質問がある場合は、[GitHub Issues](https://github.com/notfolder/coding_agent/issues) で報告してください。
+
+## 移行ノート
+
+### Planning と Context Storage の統合（v1.1.0）
+
+Planning 履歴の保存場所が統合されました：
+
+**変更前:**
+```
+planning_history/{task_uuid}.jsonl  # 独立したディレクトリ
+contexts/running/{task_uuid}/       # 会話履歴のみ
+```
+
+**変更後:**
+```
+contexts/running/{task_uuid}/
+├── current.jsonl           # 会話履歴
+├── planning/
+│   └── {task_uuid}.jsonl  # Planning履歴
+└── metadata.json          # タスクメタデータ
+```
+
+**移行手順:**
+1. 古い `planning_history/` ディレクトリは削除可能です
+2. `config.yaml` から `planning.history.directory` 設定が削除されました
+3. 既存のタスク実行では自動的に新しい構造が使用されます
+
+**メリット:**
+- タスクに関連する全データが1箇所に集約
+- `contexts/completed/` への移動時にすべてのデータが一緒に移動
+- ディレクトリ構造の一貫性向上

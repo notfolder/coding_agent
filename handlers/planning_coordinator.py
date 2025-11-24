@@ -11,9 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from handlers.planning_history_store import PlanningHistoryStore
-
 if TYPE_CHECKING:
+    from context_storage.task_context_manager import TaskContextManager
     from handlers.task import Task
 
 
@@ -30,6 +29,7 @@ class PlanningCoordinator:
         llm_client: object,
         mcp_clients: dict[str, object],
         task: Task,
+        context_manager: TaskContextManager,
     ) -> None:
         """Initialize the planning coordinator.
         
@@ -38,14 +38,17 @@ class PlanningCoordinator:
             llm_client: LLM client instance (used as template for creating planning client)
             mcp_clients: Dictionary of MCP tool clients
             task: Task object to process
+            context_manager: TaskContextManager instance for unified context management
         """
         self.config = config
         self.mcp_clients = mcp_clients
         self.task = task
+        self.context_manager = context_manager
         self.logger = logging.getLogger(__name__)
         
-        # Initialize history store
-        self.history_store = PlanningHistoryStore(task.uuid, config)
+        # Get stores from context manager
+        self.history_store = context_manager.get_planning_store()
+        message_store = context_manager.get_message_store()
         
         # Set issue_id for cross-task history tracking
         if hasattr(task, "number"):
@@ -54,18 +57,11 @@ class PlanningCoordinator:
         # Track checklist comment ID for updates
         self.checklist_comment_id: int | str | None = None
         
-        # Create planning-specific LLM client with message store and context dir
+        # Create planning-specific LLM client
         from clients.lm_client import get_llm_client
-        from context_storage.message_store import MessageStore
-        
-        # Use task context directory for planning
-        context_dir = Path("contexts") / "running" / task.uuid
-        context_dir.mkdir(parents=True, exist_ok=True)
         
         # Get the main config for LLM client initialization
         main_config = config.get("main_config", {})
-        
-        message_store = MessageStore(context_dir, main_config)
         
         # Get functions and tools from MCP clients
         functions = []
@@ -80,7 +76,7 @@ class PlanningCoordinator:
             functions=functions if functions else None,
             tools=tools if tools else None,
             message_store=message_store,
-            context_dir=context_dir,
+            context_dir=context_manager.context_dir,
         )
         
         # Load and send planning-specific system prompt

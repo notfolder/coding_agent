@@ -17,20 +17,18 @@ class PlanningHistoryStore:
     Stores planning history in JSONL format, with one file per task UUID.
     """
 
-    def __init__(self, task_uuid: str, config: dict[str, Any]) -> None:
+    def __init__(self, task_uuid: str, planning_dir: Path) -> None:
         """Initialize the planning history store.
         
         Args:
             task_uuid: Unique identifier for the task
-            config: Planning configuration dictionary
+            planning_dir: Planning directory path for this task
         """
         self.task_uuid = task_uuid
-        self.config = config
         self.logger = logging.getLogger(__name__)
         
-        # Get history directory from config
-        history_config = config.get("history", {})
-        self.directory = Path(history_config.get("directory", "planning_history"))
+        # Use provided planning directory
+        self.directory = planning_dir
         
         # Create directory if it doesn't exist
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -143,7 +141,7 @@ class PlanningHistoryStore:
     def get_past_executions_for_issue(self, issue_id: str) -> list[dict[str, Any]]:
         """Get past execution history for the same issue/MR.
         
-        Searches all JSONL files in the planning_history directory for entries
+        Searches all task planning directories (running and completed) for entries
         matching the given issue_id.
         
         Args:
@@ -154,20 +152,35 @@ class PlanningHistoryStore:
         """
         all_entries = []
         
-        # Search all JSONL files in the directory
-        for jsonl_file in self.directory.glob("*.jsonl"):
-            try:
-                with jsonl_file.open("r", encoding="utf-8") as f:
-                    for line in f:
-                        if line.strip():
-                            entry = json.loads(line)
-                            # Check if entry matches the issue_id
-                            # (This assumes entries contain issue_id in their metadata)
-                            if entry.get("issue_id") == issue_id:
-                                all_entries.append(entry)
-            except (json.JSONDecodeError, IOError) as e:
-                self.logger.warning(f"Error reading {jsonl_file}: {e}")
+        # Search in both running and completed contexts
+        # Go up from current planning dir: contexts/running/{uuid}/planning -> contexts/running
+        parent = self.directory.parent.parent
+        
+        # Search both running and completed directories
+        for status_dir in [parent / "running", parent / "completed"]:
+            if not status_dir.exists():
                 continue
+                
+            for task_dir in status_dir.iterdir():
+                if not task_dir.is_dir():
+                    continue
+                    
+                planning_dir = task_dir / "planning"
+                if not planning_dir.exists():
+                    continue
+                
+                # Search all JSONL files in this planning directory
+                for jsonl_file in planning_dir.glob("*.jsonl"):
+                    try:
+                        with jsonl_file.open("r", encoding="utf-8") as f:
+                            for line in f:
+                                if line.strip():
+                                    entry = json.loads(line)
+                                    if entry.get("issue_id") == issue_id:
+                                        all_entries.append(entry)
+                    except (json.JSONDecodeError, IOError) as e:
+                        self.logger.warning(f"Error reading {jsonl_file}: {e}")
+                        continue
         
         # Sort by timestamp
         all_entries.sort(key=lambda x: x.get("timestamp", ""))

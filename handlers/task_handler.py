@@ -206,7 +206,16 @@ class TaskHandler:
             task_config: Task configuration
 
         """
+        from context_storage import TaskContextManager
         from handlers.planning_coordinator import PlanningCoordinator
+        
+        # Initialize context manager for planning
+        context_manager = TaskContextManager(
+            task_key=task.get_task_key(),
+            task_uuid=task.uuid,
+            config=task_config,
+            user=task.user,
+        )
         
         try:
             # Get planning configuration
@@ -214,12 +223,13 @@ class TaskHandler:
             # Add main config for LLM client initialization
             planning_config["main_config"] = self.config
             
-            # Create planning coordinator
+            # Create planning coordinator with context_manager
             coordinator = PlanningCoordinator(
                 config=planning_config,
                 llm_client=self.llm_client,
                 mcp_clients=self.mcp_clients,
                 task=task,
+                context_manager=context_manager,
             )
             
             # Execute with planning
@@ -227,11 +237,14 @@ class TaskHandler:
             
             if success:
                 task.finish()
+                context_manager.complete()
                 self.logger.info("Task completed successfully with planning")
             else:
+                context_manager.fail("Planning execution failed")
                 self.logger.error("Task failed with planning")
                 
         except Exception as e:
+            context_manager.fail(str(e))
             self.logger.exception("Planning-based task processing failed")
             raise
 

@@ -88,16 +88,9 @@ planning:
   revision:
     # 最大計画修正回数
     max_revisions: 3
-  
-  # 履歴管理
-  history:
-    # ストレージタイプ（JSONLファイルベース）
-    storage_type: "jsonl"
-    
-    # 履歴ディレクトリ
-    directory: "planning_history"
 
 # コンテキストストレージ設定
+# 注: Planning履歴も統合され、contexts/{running|completed}/{task_uuid}/planning/ に保存されます
 context_storage:
   enabled: true
   base_dir: "contexts"
