@@ -92,6 +92,16 @@ class TaskGitLabIssue(Task):
         """Issueの作成者のユーザー名を取得する."""
         return self.issue.get("author", {}).get("username")
 
+    @property
+    def title(self) -> str:
+        """Issueのタイトルを取得する."""
+        return self.issue.get("title", "")
+
+    @property
+    def body(self) -> str:
+        """Issueの本文を取得する."""
+        return self.issue.get("description", "")
+
 
 class TaskGitLabMergeRequest(Task):
     def __init__(
@@ -172,6 +182,16 @@ class TaskGitLabMergeRequest(Task):
     def get_user(self) -> str | None:
         """Merge Requestの作成者のユーザー名を取得する."""
         return self.mr.get("author", {}).get("username")
+
+    @property
+    def title(self) -> str:
+        """Merge Requestのタイトルを取得する."""
+        return self.mr.get("title", "")
+
+    @property
+    def body(self) -> str:
+        """Merge Requestの本文を取得する."""
+        return self.mr.get("description", "")
 
 
 class TaskGetterFromGitLab(TaskGetter):

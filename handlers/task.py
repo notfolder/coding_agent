@@ -93,3 +93,23 @@ class Task(ABC):
             ユーザー名、取得できない場合はNone
 
         """
+
+    @property
+    @abstractmethod
+    def title(self) -> str:
+        """タスクのタイトルを取得する.
+
+        Returns:
+            タスクのタイトル
+
+        """
+
+    @property
+    @abstractmethod
+    def body(self) -> str:
+        """タスクの本文を取得する.
+
+        Returns:
+            タスクの本文
+
+        """

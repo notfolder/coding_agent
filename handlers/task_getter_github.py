@@ -104,6 +104,16 @@ class TaskGitHubIssue(Task):
         """Issueの作成者のユーザー名を取得する."""
         return self.issue.get("user", {}).get("login")
 
+    @property
+    def title(self) -> str:
+        """Issueのタイトルを取得する."""
+        return self.issue.get("title", "")
+
+    @property
+    def body(self) -> str:
+        """Issueの本文を取得する."""
+        return self.issue.get("body", "")
+
 
 class TaskGitHubPullRequest(Task):
     def __init__(
@@ -186,6 +196,16 @@ class TaskGitHubPullRequest(Task):
     def get_user(self) -> str | None:
         """Pull Requestの作成者のユーザー名を取得する."""
         return self.pr.get("user", {}).get("login")
+
+    @property
+    def title(self) -> str:
+        """Pull Requestのタイトルを取得する."""
+        return self.pr.get("title", "")
+
+    @property
+    def body(self) -> str:
+        """Pull Requestの本文を取得する."""
+        return self.pr.get("body", "")
 
 
 class TaskGetterFromGitHub(TaskGetter):

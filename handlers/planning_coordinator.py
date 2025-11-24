@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
 from handlers.planning_history_store import PlanningHistoryStore
@@ -32,12 +33,11 @@ class PlanningCoordinator:
         
         Args:
             config: Planning configuration
-            llm_client: LLM client instance
+            llm_client: LLM client instance (used as template for creating planning client)
             mcp_clients: Dictionary of MCP tool clients
             task: Task object to process
         """
         self.config = config
-        self.llm_client = llm_client
         self.mcp_clients = mcp_clients
         self.task = task
         self.logger = logging.getLogger(__name__)
@@ -46,14 +46,39 @@ class PlanningCoordinator:
         self.history_store = PlanningHistoryStore(task.uuid, config)
         
         # Set issue_id for cross-task history tracking
-        if hasattr(task, 'number'):
+        if hasattr(task, "number"):
             self.history_store.issue_id = str(task.number)
+        
+        # Create planning-specific LLM client with message store and context dir
+        from pathlib import Path
+        from clients.lm_client import get_llm_client
+        from context_storage.message_store import MessageStore
+        
+        # Use task context directory for planning
+        context_dir = Path("contexts") / "running" / task.uuid
+        context_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Get the main config for LLM client initialization
+        main_config = config.get("main_config", {})
+        
+        message_store = MessageStore(context_dir, main_config)
+        
+        self.llm_client = get_llm_client(
+            main_config,
+            functions=None,
+            tools=None,
+            message_store=message_store,
+            context_dir=context_dir,
+        )
         
         # Current state
         self.current_phase = "planning"
         self.current_plan = None
         self.action_counter = 0
         self.revision_counter = 0
+        
+        # Checkbox tracking for progress updates
+        self.plan_comment_id = None  # ID of the comment containing the checklist
 
     def execute_with_planning(self) -> bool:
         """Execute task with planning capabilities.
@@ -77,6 +102,8 @@ class PlanningCoordinator:
                 self.current_plan = self._execute_planning_phase()
                 if self.current_plan:
                     self.history_store.save_plan(self.current_plan)
+                    # Post plan to Issue/MR as markdown checklist
+                    self._post_plan_as_checklist(self.current_plan)
                     self.current_phase = "execution"
                 else:
                     self.logger.error("Planning phase failed")
@@ -96,6 +123,9 @@ class PlanningCoordinator:
                     self.logger.warning("No more actions to execute")
                     break
                 
+                # Update progress checklist
+                self._update_checklist_progress(self.action_counter - 1)
+                
                 # Check if reflection is needed
                 if self._should_reflect(result):
                     reflection = self._execute_reflection_phase(result)
@@ -110,6 +140,9 @@ class PlanningCoordinator:
                 if result.get("done"):
                     self.logger.info("Task completed successfully")
                     break
+            
+            # Mark all tasks complete
+            self._mark_checklist_complete()
             
             return True
             
@@ -134,15 +167,16 @@ class PlanningCoordinator:
             planning_prompt = self._build_planning_prompt(past_history)
             
             # Request plan from LLM
-            response = self.llm_client.process(planning_prompt)
+            self.llm_client.send_user_message(planning_prompt)
+            response = self.llm_client.get_response()
             
             # Parse response
             plan = self._parse_planning_response(response)
             
             return plan
             
-        except Exception as e:
-            self.logger.exception(f"Planning phase execution failed: {e}")
+        except Exception:
+            self.logger.exception("Planning phase execution failed")
             return None
 
     def _execute_action(self) -> dict[str, Any] | None:
@@ -168,7 +202,8 @@ class PlanningCoordinator:
             
             # Execute the action via LLM
             action_prompt = self._build_action_prompt(current_action)
-            result = self.llm_client.process(action_prompt)
+            self.llm_client.send_user_message(action_prompt)
+            result = self.llm_client.get_response()
             
             return {"status": "success", "result": result, "action": current_action}
             
@@ -215,7 +250,8 @@ class PlanningCoordinator:
             reflection_prompt = self._build_reflection_prompt(result)
             
             # Get reflection from LLM
-            response = self.llm_client.process(reflection_prompt)
+            self.llm_client.send_user_message(reflection_prompt)
+            response = self.llm_client.get_response()
             
             # Parse reflection
             reflection = self._parse_reflection_response(response)
@@ -254,7 +290,8 @@ class PlanningCoordinator:
             revision_prompt = self._build_revision_prompt(reflection)
             
             # Get revised plan from LLM
-            response = self.llm_client.process(revision_prompt)
+            self.llm_client.send_user_message(revision_prompt)
+            response = self.llm_client.get_response()
             
             # Parse revised plan
             revised_plan = self._parse_planning_response(response)
@@ -366,10 +403,31 @@ class PlanningCoordinator:
             if isinstance(response, dict):
                 return response
             
+            # Remove <think></think> tags if present
+            response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
+            response = response.strip()
+            
+            # Log the response for debugging
+            self.logger.debug("Planning response: %s", response[:500])
+            
             # Try to parse as JSON
-            return json.loads(response)
-        except json.JSONDecodeError:
-            self.logger.warning("Failed to parse planning response as JSON")
+            try:
+                return json.loads(response)
+            except json.JSONDecodeError:
+                # Try to extract JSON from markdown code blocks
+                json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)
+                if json_match:
+                    return json.loads(json_match.group(1))
+                
+                # Try to find JSON object in text
+                json_match = re.search(r"\{.*\}", response, re.DOTALL)
+                if json_match:
+                    return json.loads(json_match.group(0))
+                
+                raise
+                
+        except (json.JSONDecodeError, AttributeError):
+            self.logger.warning("Failed to parse planning response as JSON. Response: %s", response[:200])
             return None
 
     def _parse_reflection_response(self, response: str) -> dict[str, Any] | None:
@@ -385,7 +443,137 @@ class PlanningCoordinator:
             if isinstance(response, dict):
                 return response
             
-            return json.loads(response)
-        except json.JSONDecodeError:
-            self.logger.warning("Failed to parse reflection response as JSON")
+            # Remove <think></think> tags if present
+            response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
+            response = response.strip()
+            
+            # Try to parse as JSON
+            try:
+                return json.loads(response)
+            except json.JSONDecodeError:
+                # Try to extract JSON from markdown code blocks or text
+                json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)
+                if json_match:
+                    return json.loads(json_match.group(1))
+                
+                json_match = re.search(r"\{.*\}", response, re.DOTALL)
+                if json_match:
+                    return json.loads(json_match.group(0))
+                
+                raise
+                
+        except (json.JSONDecodeError, AttributeError):
+            self.logger.warning("Failed to parse reflection response as JSON. Response: %s", response[:200])
             return None
+
+    def _post_plan_as_checklist(self, plan: dict[str, Any]) -> None:
+        """Post the plan as a markdown checklist to Issue/MR.
+        
+        Args:
+            plan: The plan to post
+        """
+        try:
+            # Extract actions from the plan
+            action_plan = plan.get("action_plan", {})
+            actions = action_plan.get("actions", [])
+            
+            if not actions:
+                self.logger.warning("No actions found in plan, skipping checklist posting")
+                return
+            
+            # Build markdown checklist
+            checklist_lines = ["## 📋 Execution Plan", ""]
+            
+            for i, action in enumerate(actions, 1):
+                task_id = action.get("task_id", f"task_{i}")
+                purpose = action.get("purpose", "Execute action")
+                checklist_lines.append(f"- [ ] **{task_id}**: {purpose}")
+            
+            checklist_lines.append("")
+            checklist_lines.append("*Progress will be updated as tasks complete.*")
+            
+            checklist_content = "\n".join(checklist_lines)
+            
+            # Post to Issue/MR using task's comment method
+            if hasattr(self.task, "add_comment"):
+                self.task.add_comment(checklist_content)
+                self.logger.info("Posted execution plan checklist to Issue/MR")
+            else:
+                self.logger.warning("Task does not support add_comment, cannot post checklist")
+                
+        except Exception as e:
+            self.logger.error("Failed to post plan as checklist: %s", str(e))
+
+    def _update_checklist_progress(self, completed_action_index: int) -> None:
+        """Update the checklist to mark a task as complete.
+        
+        Args:
+            completed_action_index: Index of the completed action (0-based)
+        """
+        try:
+            if not self.current_plan:
+                return
+            
+            action_plan = self.current_plan.get("action_plan", {})
+            actions = action_plan.get("actions", [])
+            
+            if completed_action_index >= len(actions):
+                return
+            
+            # Build updated checklist
+            checklist_lines = ["## 📋 Execution Plan", ""]
+            
+            for i, action in enumerate(actions, 1):
+                task_id = action.get("task_id", f"task_{i}")
+                purpose = action.get("purpose", "Execute action")
+                
+                # Mark completed actions with [x]
+                checkbox = "[x]" if i <= completed_action_index + 1 else "[ ]"
+                checklist_lines.append(f"- {checkbox} **{task_id}**: {purpose}")
+            
+            checklist_lines.append("")
+            progress_pct = int((completed_action_index + 1) / len(actions) * 100)
+            checklist_lines.append(f"*Progress: {completed_action_index + 1}/{len(actions)} ({progress_pct}%) complete*")
+            
+            checklist_content = "\n".join(checklist_lines)
+            
+            # Update the comment if task supports it
+            if hasattr(self.task, "update_comment") and self.plan_comment_id:
+                self.task.update_comment(self.plan_comment_id, checklist_content)
+            elif hasattr(self.task, "add_comment"):
+                # If we can't update, add a new comment
+                self.task.add_comment(checklist_content)
+            
+        except Exception as e:
+            self.logger.error("Failed to update checklist progress: %s", str(e))
+
+    def _mark_checklist_complete(self) -> None:
+        """Mark all checklist items as complete."""
+        try:
+            if not self.current_plan:
+                return
+            
+            action_plan = self.current_plan.get("action_plan", {})
+            actions = action_plan.get("actions", [])
+            
+            # Build completed checklist
+            checklist_lines = ["## 📋 Execution Plan", ""]
+            
+            for i, action in enumerate(actions, 1):
+                task_id = action.get("task_id", f"task_{i}")
+                purpose = action.get("purpose", "Execute action")
+                checklist_lines.append(f"- [x] **{task_id}**: {purpose}")
+            
+            checklist_lines.append("")
+            checklist_lines.append(f"*✅ All {len(actions)} tasks completed successfully!*")
+            
+            checklist_content = "\n".join(checklist_lines)
+            
+            # Update or add comment
+            if hasattr(self.task, "update_comment") and self.plan_comment_id:
+                self.task.update_comment(self.plan_comment_id, checklist_content)
+            elif hasattr(self.task, "add_comment"):
+                self.task.add_comment(checklist_content)
+            
+        except Exception as e:
+            self.logger.error("Failed to mark checklist complete: %s", str(e))

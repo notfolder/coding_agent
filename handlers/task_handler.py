@@ -211,6 +211,8 @@ class TaskHandler:
         try:
             # Get planning configuration
             planning_config = task_config.get("planning", {})
+            # Add main config for LLM client initialization
+            planning_config["main_config"] = self.config
             
             # Create planning coordinator
             coordinator = PlanningCoordinator(
