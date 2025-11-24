@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 from mcp import McpError
 
 if TYPE_CHECKING:
+    from clients.llm_base import LLMClient
+    from clients.mcp_tool_client import MCPToolClient
     from handlers.task import Task
 
 # 定数定義
@@ -30,8 +32,8 @@ class TaskHandler:
 
     def __init__(
         self,
-        llm_client: object,  # LLMClientの具象クラス
-        mcp_clients: dict[str, object],  # MCPToolClientの辞書
+        llm_client: LLMClient,
+        mcp_clients: dict[str, MCPToolClient],
         config: dict[str, Any],
     ) -> None:
         """タスクハンドラーを初期化する.
