@@ -24,6 +24,7 @@
 - タスクはGitHub IssueまたはGitLab Issue/MRとして提供される
 - LLMはJSON形式での応答が可能
 - システムプロンプトによる動作制御が可能
+- **システムプロンプトは必ず英語で記述する**（LLMへの指示は英語で行う）
 
 ## 2. プランニングプロセスの5つのフェーズ
 
@@ -35,11 +36,13 @@
 - Issue/PR/MRの内容
 - ユーザーコメント
 - リポジトリコンテキスト
+- **同じIssue/MRで過去に実行した計画と実行履歴**（JSONLファイルから取得）
 
 **処理：**
 - 要求の意図を分析
 - 成功基準の特定
 - 制約条件の識別
+- 過去の計画・実行内容を参照し、継続性を保つ
 
 **出力：**
 ```json
@@ -376,27 +379,34 @@ stateDiagram-v2
 1. 既存計画の確認
    - history_store.has_plan() をチェック
    - あれば history_store.get_latest_plan() で読み込み
+   - 同じIssue/MRの過去の計画・実行履歴も取得
    - なければプランニングフェーズへ
 
 2. プランニングフェーズ（初回のみ）
    - _execute_planning_phase() を実行
+   - 過去の履歴をLLMに渡して計画を生成
    - 計画をhistory_storeに保存
+   - Issue/MRにmarkdownチェックボックスで進捗を投稿
 
 3. 実行ループ
    while not self._is_complete():
        - _execute_action() でアクション実行
+       - Issue/MRのチェックボックスを更新
        - _should_reflect() でリフレクション判定
        - 必要なら _execute_reflection_phase()
        - 計画修正が必要なら _revise_plan()
 
 4. 完了
    - done=true を返す
+   - Issue/MRのチェックボックスを全て完了に更新
 ```
 
 **`_execute_planning_phase() -> dict`**
 - プランニングフェーズを実行
-- システムプロンプトにプランニング指示を追加
+- システムプロンプトを使用（プランニング指示を含む）
+- 同じIssue/MRの過去の計画・実行履歴をLLMに渡す
 - LLMに計画を生成させる
+- 生成された計画をIssue/MRにmarkdownチェックボックス形式で投稿
 - JSON応答をパースして返す
 
 **`_execute_action() -> dict`**
@@ -438,6 +448,7 @@ stateDiagram-v2
 - 計画と修正履歴のJSONL形式での永続化
 - 履歴の読み込みと検索
 - タスクUUID毎のファイル管理
+- **同じIssue/MRの過去の計画・実行履歴の取得**
 
 **主要属性：**
 ```
@@ -490,6 +501,12 @@ stateDiagram-v2
 - 全てのリフレクション履歴を取得
 - type="reflection" のエントリをリストで返す
 
+**`get_past_executions_for_issue(issue_id: str) -> list[dict]`** 🆕
+- 同じIssue/MRの過去の実行履歴を取得
+- planning_historyディレクトリ内の全JSONLファイルを検索
+- issue_idが一致するエントリを時系列順に返す
+- 計画、実行、リフレクション、修正の全履歴を含む
+
 **`_append_to_file(entry: dict) -> None`**
 - JSONLファイルにエントリを追記
 - エントリにタイムスタンプを自動付与
@@ -503,30 +520,34 @@ stateDiagram-v2
 **ファイル**: `system_prompt_planning.txt` (新規作成)
 
 **内容：**
-プランニング機能有効時に使用する専用システムプロンプト。既存のシステムプロンプトに追加される形で使用。
+プランニング機能有効時に使用する専用システムプロンプト。**既存のシステムプロンプトを置き換える形で使用**。
+
+**重要:** システムプロンプトは**必ず英語で記述**する。以下は仕様上の参考として日本語で記載しているが、実装時には英語に翻訳すること。
 
 ```
-## プランニングプロセス
+## Planning Process
 
-あなたはタスクを以下のフェーズで処理します：
+You will process tasks in the following phases:
 
-### フェーズ1: プランニング (初回のみ)
+### Phase 1: Planning (Initial response only)
 
-最初の応答では、以下の形式で完全な計画を提示してください：
+Review any past planning and execution history from the same Issue/MR to maintain continuity.
+
+In your first response, present a complete plan in the following format:
 
 {
   "phase": "planning",
   "goal_understanding": {
-    "main_objective": "タスクの主要な目的",
-    "success_criteria": ["成功条件1", "成功条件2"],
-    "constraints": ["制約条件1"]
+    "main_objective": "Clear description of the main goal",
+    "success_criteria": ["Success criterion 1", "Success criterion 2"],
+    "constraints": ["Constraint 1"]
   },
   "task_decomposition": {
-    "reasoning": "Chain-of-Thoughtによる段階的な思考プロセス。なぜこのように分解するのか、各ステップの理由を説明。",
+    "reasoning": "Step-by-step thought process using Chain-of-Thought. Explain why you decompose the task this way and the rationale for each step.",
     "subtasks": [
       {
         "id": "task_1",
-        "description": "サブタスクの説明",
+        "description": "Description of the subtask",
         "dependencies": [],
         "estimated_complexity": "low",
         "required_tools": ["tool_name"]
@@ -540,50 +561,53 @@ stateDiagram-v2
         "task_id": "task_1",
         "action_type": "tool_call",
         "tool": "github_get_file_contents",
-        "purpose": "このアクションの目的",
-        "expected_outcome": "期待される結果"
+        "purpose": "Purpose of this action",
+        "expected_outcome": "Expected result"
       }
     ]
   },
-  "comment": "計画が完成しました。実行を開始します。"
+  "comment": "Plan completed. Starting execution."
 }
 
-### フェーズ2: 実行
+After creating the plan, post it to the Issue/MR as a markdown checklist for progress tracking.
 
-計画に従って、function_callで各アクションを実行してください。
-通常のfunction_call形式で応答します。
+### Phase 2: Execution
 
-### フェーズ3: リフレクション
+Execute each action according to the plan using function_call.
+Respond in the normal function_call format.
+Update the markdown checklist in the Issue/MR as tasks are completed.
 
-エラー発生時、または指定された間隔（{{reflection_interval}}回のアクション毎）で、以下の形式で評価してください：
+### Phase 3: Reflection
+
+When an error occurs, or at specified intervals (every {{reflection_interval}} actions), evaluate using the following format:
 
 {
   "phase": "reflection",
   "reflection": {
-    "action_evaluated": "評価対象のアクション",
+    "action_evaluated": "Action being evaluated",
     "status": "success|failure|partial",
-    "evaluation": "結果の評価と分析",
-    "issues_identified": ["問題点1", "問題点2"],
+    "evaluation": "Analysis and evaluation of the result",
+    "issues_identified": ["Issue 1", "Issue 2"],
     "plan_revision_needed": true|false
   },
   "plan_revision": {
-    "reason": "計画修正が必要な理由",
+    "reason": "Reason for plan revision",
     "changes": [
       {
         "type": "add_action|remove_action|modify_action",
-        "details": "変更の詳細"
+        "details": "Details of the change"
       }
     ],
     "updated_action_plan": {
-      // 修正後の行動計画
+      // Revised action plan
     }
   },
-  "comment": "計画を修正しました"
+  "comment": "Plan has been revised"
 }
 
-### 完了
+### Completion
 
-すべてのタスクが完了したら：
+When all tasks are complete:
 
 {
   "done": true,
@@ -591,10 +615,12 @@ stateDiagram-v2
   "summary": {
     "goal_achieved": true,
     "tasks_completed": 5,
-    "key_outcomes": ["成果1", "成果2"]
+    "key_outcomes": ["Outcome 1", "Outcome 2"]
   },
-  "comment": "すべてのタスクが完了しました"
+  "comment": "All tasks completed"
 }
+
+Update all checkboxes in the Issue/MR to completed.
 ```
 
 ### 7.5 TaskHandlerへの統合
@@ -651,13 +677,10 @@ def handle(self, task: Task) -> None:
 def _load_system_prompt(self, use_planning=False):
     """システムプロンプトを読み込む"""
     if use_planning:
-        # プランニング用プロンプトを読み込み
+        # プランニング用プロンプトを読み込み（置き換え）
+        # 注意: プロンプトは英語で記述されている必要がある
         with open("system_prompt_planning.txt") as f:
-            planning_prompt = f.read()
-        
-        # 既存プロンプトに追加
-        base_prompt = self._load_base_system_prompt()
-        return base_prompt + "\n\n" + planning_prompt
+            return f.read()
     else:
         return self._load_base_system_prompt()
 ```
@@ -778,70 +801,75 @@ graph TD
     D --> G
 ```
 
-## 8. システムプロンプト拡張仕様
+## 8. システムプロンプト仕様
 
 ### 8.1 プランニング対応システムプロンプト
 
-プランニング機能を有効にする場合、既存のシステムプロンプトに以下の指示を追加します。
+プランニング機能を有効にする場合、**既存のシステムプロンプトを置き換える**専用のシステムプロンプトを使用します。
+
+**重要:** システムプロンプトは**必ず英語で記述**すること。以下は仕様上の参考として日本語で記載しているが、実装時には英語で記述する。
 
 ### 8.2 プランニングプロセスの指示
 
 ```
-## プランニングプロセス
+## Planning Process
 
-タスクを受け取ったら、まず以下のプランニングプロセスを実行してください：
+When you receive a task, execute the following planning process:
 
-### 1. 目標の理解
-- タスクの主要な目的を特定
-- 成功基準を明確化
-- 制約条件を識別
-- 必要なコンテキスト情報を収集
+### 1. Goal Understanding
+- Identify the main objectives of the task
+- Clarify success criteria
+- Identify constraints
+- Gather necessary context information
+- Review past planning and execution history from the same Issue/MR
 
-### 2. タスクの分解（Chain-of-Thought）
-- 思考プロセスを段階的に展開
-- 複雑なタスクを実行可能な単位に分割
-- サブタスク間の依存関係を分析
-- 各サブタスクの複雑度を評価
+### 2. Task Decomposition (Chain-of-Thought)
+- Develop thought process step by step
+- Break down complex tasks into executable units
+- Analyze dependencies between subtasks
+- Evaluate complexity of each subtask
 
-### 3. 行動計画の生成
-- 実行順序を決定
-- 各ステップで使用するツールを選択
-- 期待される結果を定義
-- エラー時の代替手段を準備
+### 3. Action Plan Generation
+- Determine execution order
+- Select tools to use for each step
+- Define expected results
+- Prepare fallback strategies for errors
 
-### 4. 計画の提示
-最初の応答では、完全な計画をJSON形式で提示してください。
+### 4. Present the Plan
+Present a complete plan in JSON format in your first response.
+Post the plan to the Issue/MR as a markdown checklist for progress tracking.
 ```
 
 ### 8.3 実行ルール
 
 ```
-## 実行ルール
+## Execution Rules
 
-計画に基づいて実行する際は：
+When executing based on the plan:
 
-1. 計画に従って順序通りに実行
-2. 各アクション後に結果を評価
-3. 期待と異なる結果の場合は報告
-4. 必要に応じて計画を修正
+1. Execute in order according to the plan
+2. Evaluate results after each action
+3. Report if results differ from expectations
+4. Revise the plan as needed
+5. Update markdown checklist in Issue/MR as tasks are completed
 ```
 
 ### 8.4 リフレクションルール
 
 ```
-## リフレクションルール
+## Reflection Rules
 
-各アクション実行後：
+After executing each action:
 
-1. 結果を期待値と比較
-2. 問題や予期しない動作を特定
-3. 計画との整合性を確認
-4. 必要に応じて計画修正を提案
+1. Compare results with expected values
+2. Identify problems or unexpected behavior
+3. Verify alignment with the plan
+4. Propose plan revisions as needed
 
-以下の場合は必ずリフレクションを実行：
-- ツール実行がエラーになった場合
-- 期待と異なる結果が得られた場合
-- 設定された間隔（例: 3回のアクション毎）
+Always perform reflection in the following cases:
+- When tool execution results in an error
+- When results differ from expectations
+- At configured intervals (e.g., every 3 actions)
 ```
 
 ## 9. 設定仕様
