@@ -28,7 +28,7 @@ class LLMClient(ABC):
         pass
 
     @abstractmethod
-    def get_response(self) -> str:
+    def get_response(self) -> tuple[str, list]:
         pass
 
 

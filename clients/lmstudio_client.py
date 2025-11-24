@@ -7,6 +7,7 @@ from typing import Any
 import requests
 
 from .llm_base import LLMClient
+from .llm_logger import get_llm_raw_logger
 
 
 class LMStudioClient(LLMClient):
@@ -38,6 +39,9 @@ class LMStudioClient(LLMClient):
         self.model = config.get("model", "local-model")
         self.message_store = message_store
         self.context_dir = context_dir
+        
+        # Initialize LLM raw logger
+        self.llm_logger = get_llm_raw_logger()
 
     def send_system_prompt(self, prompt: str) -> None:
         """システムプロンプトをメッセージ履歴に追加する.
@@ -69,11 +73,11 @@ class LMStudioClient(LLMClient):
         output_message = f"output: {result}"
         self.message_store.add_message("user", output_message)
 
-    def get_response(self) -> str:
+    def get_response(self) -> tuple[str, list]:
         """LLMからの応答を取得する.
 
         Returns:
-            LLMからの応答テキスト
+            タプル: (LLMからの応答テキスト, function callsのリスト)
 
         """
         # Create request.json by streaming current.jsonl
@@ -101,7 +105,18 @@ class LMStudioClient(LLMClient):
         
         # Send request via HTTP POST to OpenAI-compatible endpoint
         try:
-            with request_path.open('rb') as req_file:
+            # Read request for logging
+            with request_path.open("r") as req_file:
+                request_data = json.load(req_file)
+            
+            # Log request
+            self.llm_logger.log_request(
+                provider="lmstudio",
+                model=self.model,
+                messages=request_data.get("messages", []),
+            )
+            
+            with request_path.open("rb") as req_file:
                 response = requests.post(
                     f"{self.base_url.rstrip('/')}/chat/completions",
                     headers={"Content-Type": "application/json"},
@@ -112,8 +127,16 @@ class LMStudioClient(LLMClient):
             response.raise_for_status()
             response_data = response.json()
             
+            # Log response
+            self.llm_logger.log_response(
+                provider="lmstudio",
+                response=response_data,
+                status_code=response.status_code,
+            )
+            
             # Parse response - OpenAI-compatible format
             reply = ""
+            functions = []
             for choice in response_data.get("choices", []):
                 message = choice.get("message", {})
                 content = message.get("content") or ""
@@ -134,16 +157,33 @@ class LMStudioClient(LLMClient):
                         f"Function call: {func_call.get('name', '')} "
                         f"with arguments {func_call.get('arguments', '')}"
                     )
+                    # Convert to function call object format
+                    from types import SimpleNamespace
+                    func_obj = SimpleNamespace(
+                        name=func_call.get("name", ""),
+                        arguments=func_call.get("arguments", "")
+                    )
+                    functions.append(func_obj)
                 elif content:
                     # Only add assistant message if there's actual content
                     self.message_store.add_message("assistant", content)
                     reply += content
             
-            return reply
+            return reply, functions
+        
+        except Exception as e:
+            # Log error
+            self.llm_logger.log_error(
+                provider="lmstudio",
+                error=e,
+                context={"model": self.model, "base_url": self.base_url},
+            )
+            raise
             
         finally:
             # Clean up request.json
             if request_path.exists():
                 request_path.unlink()
+
 
 

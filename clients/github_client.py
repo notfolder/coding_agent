@@ -139,6 +139,55 @@ class GithubClient:
 
         return response.json()
 
+    def update_issue_comment(
+        self, owner: str, repo: str, comment_id: int, body: str,
+    ) -> dict[str, Any]:
+        """既存のIssue/Pull Requestコメントを更新する.
+
+        Args:
+            owner: リポジトリのオーナー名
+            repo: リポジトリ名
+            comment_id: コメントID
+            body: 更新後のコメント本文
+
+        Returns:
+            更新されたコメントの情報
+
+        Raises:
+            requests.HTTPError: APIリクエストが失敗した場合
+
+        """
+        # コメント更新のAPIエンドポイント
+        url = f"{self.api_url}/repos/{owner}/{repo}/issues/comments/{comment_id}"
+        data = {"body": body}
+
+        # コメントを更新
+        response = requests.patch(url, headers=self.headers, json=data, timeout=30)
+        response.raise_for_status()
+
+        return response.json()
+
+    def add_comment_to_issue(
+        self, owner: str, repo: str, issue_number: int, body: str,
+    ) -> dict[str, Any]:
+        """Issueにコメントを追加する.
+
+        Args:
+            owner: リポジトリのオーナー名
+            repo: リポジトリ名
+            issue_number: Issue番号
+            body: コメント本文
+
+        Returns:
+            作成されたコメントの情報
+
+        Raises:
+            requests.HTTPError: APIリクエストが失敗した場合
+
+        """
+        # IssueとPull Requestは同じエンドポイントを使用
+        return self.add_comment_to_pull_request(owner, repo, issue_number, body)
+
     def update_pull_request_labels(
         self, owner: str, repo: str, pull_number: int, labels: list[str],
     ) -> dict[str, Any]:

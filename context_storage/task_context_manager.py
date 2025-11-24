@@ -20,6 +20,7 @@ from .tool_store import ToolStore
 
 if TYPE_CHECKING:
     from handlers.task_key import TaskKey
+    from handlers.planning_history_store import PlanningHistoryStore
 
 
 class TaskContextManager:
@@ -57,6 +58,10 @@ class TaskContextManager:
         self.completed_dir.mkdir(parents=True, exist_ok=True)
         self.context_dir.mkdir(parents=True, exist_ok=True)
         
+        # Create planning subdirectory
+        self.planning_dir = self.context_dir / "planning"
+        self.planning_dir.mkdir(parents=True, exist_ok=True)
+        
         # Initialize database
         self.db_path = base_dir / "tasks.db"
         self._init_database()
@@ -68,6 +73,10 @@ class TaskContextManager:
         self.message_store = MessageStore(self.context_dir, config)
         self.summary_store = SummaryStore(self.context_dir)
         self.tool_store = ToolStore(self.context_dir)
+        
+        # Initialize planning store (lazy import to avoid circular dependency)
+        from handlers.planning_history_store import PlanningHistoryStore
+        self.planning_store = PlanningHistoryStore(task_uuid, self.planning_dir)
         
         # Register task in database
         self._register_task()
@@ -98,6 +107,15 @@ class TaskContextManager:
 
         """
         return self.tool_store
+
+    def get_planning_store(self) -> PlanningHistoryStore:
+        """Get PlanningHistoryStore instance.
+
+        Returns:
+            PlanningHistoryStore instance
+
+        """
+        return self.planning_store
 
     def update_status(self, status: str, error_message: str | None = None) -> None:
         """Update task status in database.

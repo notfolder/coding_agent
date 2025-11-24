@@ -2,6 +2,7 @@ node_modules/
 gitlab/
 .vscode/
 contexts/
+planning_history/*.jsonl
 .env
 *.pyc
 *.log

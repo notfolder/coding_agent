@@ -51,6 +51,26 @@ class GitlabClient:
         resp.raise_for_status()
         return resp.json()
 
+    def update_issue_note(
+        self, project_id: int | str, issue_iid: int | str, note_id: int | str, body: str,
+    ) -> dict[str, Any]:
+        """Update an existing issue note.
+        
+        Args:
+            project_id: Project ID
+            issue_iid: Issue internal ID
+            note_id: Note ID to update
+            body: Updated note content
+            
+        Returns:
+            Updated note information
+        """
+        url = f"{self.api_url}/projects/{project_id}/issues/{issue_iid}/notes/{note_id}"
+        data = {"body": body}
+        resp = requests.put(url, headers=self.headers, json=data, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+
     def update_issue_labels(
         self, project_id: int | str, issue_iid: int | str, labels: list[str],
     ) -> dict[str, Any]:
@@ -93,6 +113,26 @@ class GitlabClient:
         url = f"{self.api_url}/projects/{project_id}/merge_requests/{merge_request_iid}/notes"
         data = {"body": body}
         resp = requests.post(url, headers=self.headers, json=data, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+
+    def update_merge_request_note(
+        self, project_id: int | str, merge_request_iid: int | str, note_id: int | str, body: str,
+    ) -> dict[str, Any]:
+        """Update an existing merge request note.
+        
+        Args:
+            project_id: Project ID
+            merge_request_iid: Merge request internal ID
+            note_id: Note ID to update
+            body: Updated note content
+            
+        Returns:
+            Updated note information
+        """
+        url = f"{self.api_url}/projects/{project_id}/merge_requests/{merge_request_iid}/notes/{note_id}"
+        data = {"body": body}
+        resp = requests.put(url, headers=self.headers, json=data, timeout=30)
         resp.raise_for_status()
         return resp.json()
 

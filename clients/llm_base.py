@@ -33,10 +33,10 @@ class LLMClient(ABC):
         """
 
     @abstractmethod
-    def get_response(self) -> str:
+    def get_response(self) -> tuple[str, list]:
         """LLMからのレスポンスを取得する.
 
         Returns:
-            LLMが生成したレスポンス文字列
+            タプル: (LLMが生成したレスポンス文字列, function callsのリスト)
 
         """
