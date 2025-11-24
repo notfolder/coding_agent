@@ -72,9 +72,6 @@ contexts/pause_signal
 - ツール実行完了後、LLMへの結果送信前
 - 処理ループの各イテレーション開始時
 
-#### 3.1.2 シグナルによる一時停止（拡張案）
-将来の拡張として、OSシグナル（SIGUSR1等）による一時停止も検討可能です。
-
 ### 3.2 一時停止処理の詳細
 
 #### 3.2.1 一時停止時の処理フロー
@@ -143,12 +140,13 @@ contexts/paused/{task_uuid}/
 
 #### 3.2.3 一時停止時のラベル管理
 
-一時停止時も既存の`processing_label`を維持します。
+一時停止時は専用の`paused_label`を新規作成し、ラベルの状態を変更します。
 
 **ラベル管理方針:**
-- 一時停止時: `coding agent processing`ラベルを保持
-- 利点: 既存の仕組みと互換性が高く、新しいラベルが不要
-- 一時停止状態の判別: `contexts/paused/`ディレクトリの存在で識別
+- 一時停止時: `coding agent processing` → `coding agent paused`に変更
+- 新規ラベル: `coding agent paused`を作成
+- 利点: 一時停止状態と実行中状態を明確に区別できる
+- 再開時: `coding agent paused` → `coding agent processing`に戻す
 
 ### 3.3 Producerモードでの一時停止タスク検出
 
@@ -378,6 +376,14 @@ pause_resume:
   
   # 一時停止状態ディレクトリ
   paused_dir: "contexts/paused"
+
+github:
+  # 既存の設定...
+  paused_label: "coding agent paused"  # 新規追加
+
+gitlab:
+  # 既存の設定...
+  paused_label: "coding agent paused"  # 新規追加
 ```
 
 ## 4. Planning モードにおける一時停止・リジュームの特別な考慮事項
@@ -635,7 +641,7 @@ rm -rf contexts/paused/{task_uuid}/
 2. **Context Storageの活用**: 既存のディレクトリ構造を拡張（contexts/paused/）
 3. **Producerとの連携**: 一時停止タスクの自動検出とキュー再投入
 4. **状態の継続性**: MessageStoreを通じた会話履歴の完全な復元
-5. **ラベル管理**: 既存のprocessing_labelを維持して互換性を確保
+5. **ラベル管理**: 専用のpausedラベルによる明確な状態管理
 6. **Planningモード対応**: Planning特有の状態（フェーズ、アクションカウンター、チェックリストID等）を保存・復元
 
 ### 8.2 期待される効果
