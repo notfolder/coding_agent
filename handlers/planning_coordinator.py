@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from clients.llm_base import LLMClient
+    from clients.mcp_tool_client import MCPToolClient
     from context_storage.task_context_manager import TaskContextManager
     from handlers.task import Task
 
@@ -26,8 +28,8 @@ class PlanningCoordinator:
     def __init__(
         self,
         config: dict[str, Any],
-        llm_client: object | None,
-        mcp_clients: dict[str, object],
+        llm_client: LLMClient | None,
+        mcp_clients: dict[str, MCPToolClient],
         task: Task,
         context_manager: TaskContextManager,
     ) -> None:
