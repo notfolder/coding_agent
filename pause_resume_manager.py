@@ -142,8 +142,8 @@ class PauseResumeManager:
             task: Task object
 
         """
-        # Get label configuration
-        task_type = task.get_task_key().task_type
+        # Get label configuration based on task type
+        task_type = task.get_task_key().to_dict().get("type", "")
         if "github" in task_type:
             label_config = self.config.get("github", {})
         elif "gitlab" in task_type:
@@ -176,8 +176,8 @@ class PauseResumeManager:
             task: Task object
 
         """
-        # Get label configuration
-        task_type = task.get_task_key().task_type
+        # Get label configuration based on task type
+        task_type = task.get_task_key().to_dict().get("type", "")
         if "github" in task_type:
             label_config = self.config.get("github", {})
         elif "gitlab" in task_type:
