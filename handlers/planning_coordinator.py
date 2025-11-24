@@ -26,7 +26,7 @@ class PlanningCoordinator:
     def __init__(
         self,
         config: dict[str, Any],
-        llm_client: object,
+        llm_client: object | None,
         mcp_clients: dict[str, object],
         task: Task,
         context_manager: TaskContextManager,
@@ -35,7 +35,7 @@ class PlanningCoordinator:
         
         Args:
             config: Planning configuration
-            llm_client: LLM client instance (used as template for creating planning client)
+            llm_client: LLM client instance to use. If None, a new client will be created.
             mcp_clients: Dictionary of MCP tool clients
             task: Task object to process
             context_manager: TaskContextManager instance for unified context management
@@ -57,27 +57,31 @@ class PlanningCoordinator:
         # Track checklist comment ID for updates
         self.checklist_comment_id: int | str | None = None
         
-        # Create planning-specific LLM client
-        from clients.lm_client import get_llm_client
-        
-        # Get the main config for LLM client initialization
-        main_config = config.get("main_config", {})
-        
-        # Get functions and tools from MCP clients
-        functions = []
-        tools = []
-        if main_config.get("llm", {}).get("function_calling", True):
-            for mcp_client in mcp_clients.values():
-                functions.extend(mcp_client.get_function_calling_functions())
-                tools.extend(mcp_client.get_function_calling_tools())
-        
-        self.llm_client = get_llm_client(
-            main_config,
-            functions=functions if functions else None,
-            tools=tools if tools else None,
-            message_store=message_store,
-            context_dir=context_manager.context_dir,
-        )
+        # Use provided LLM client or create new one if not provided
+        if llm_client is not None:
+            self.llm_client = llm_client
+        else:
+            # Create planning-specific LLM client
+            from clients.lm_client import get_llm_client
+            
+            # Get the main config for LLM client initialization
+            main_config = config.get("main_config", {})
+            
+            # Get functions and tools from MCP clients
+            functions = []
+            tools = []
+            if main_config.get("llm", {}).get("function_calling", True):
+                for mcp_client in mcp_clients.values():
+                    functions.extend(mcp_client.get_function_calling_functions())
+                    tools.extend(mcp_client.get_function_calling_tools())
+            
+            self.llm_client = get_llm_client(
+                main_config,
+                functions=functions if functions else None,
+                tools=tools if tools else None,
+                message_store=message_store,
+                context_dir=context_manager.context_dir,
+            )
         
         # Load and send planning-specific system prompt
         self._load_planning_system_prompt()

@@ -19,15 +19,11 @@ class TestPlanningHistoryStore(unittest.TestCase):
     def setUp(self) -> None:
         """Set up test environment."""
         # Create temporary directory for test files
-        self.temp_dir = tempfile.mkdtemp()
-        self.config = {
-            "history": {
-                "storage_type": "jsonl",
-                "directory": self.temp_dir,
-            }
-        }
+        self.temp_dir = Path(tempfile.mkdtemp())
+        self.planning_dir = self.temp_dir / "planning"
+        self.planning_dir.mkdir(parents=True, exist_ok=True)
         self.task_uuid = "test-uuid-12345"
-        self.store = PlanningHistoryStore(self.task_uuid, self.config)
+        self.store = PlanningHistoryStore(self.task_uuid, self.planning_dir)
 
     def tearDown(self) -> None:
         """Clean up test environment."""
@@ -38,8 +34,8 @@ class TestPlanningHistoryStore(unittest.TestCase):
     def test_store_creation(self) -> None:
         """Test PlanningHistoryStore object creation."""
         assert self.store.task_uuid == self.task_uuid
-        assert self.store.directory == Path(self.temp_dir)
-        assert self.store.filepath == Path(self.temp_dir) / f"{self.task_uuid}.jsonl"
+        assert self.store.directory == self.planning_dir
+        assert self.store.filepath == self.planning_dir / f"{self.task_uuid}.jsonl"
 
     def test_save_and_load_plan(self) -> None:
         """Test saving and loading a plan."""
