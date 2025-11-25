@@ -557,6 +557,15 @@ class PlanningCoordinator:
             "Create a comprehensive plan for the following task:",
             "",
             task_info,  # This includes issue/MR details and all comments
+            "",
+            "IMPORTANT - Task Complexity Assessment:",
+            "Before creating your plan, evaluate the task complexity:",
+            "- Simple (1-2 tool calls): Single file creation/modification, basic operations → Use 1-3 subtasks",
+            "- Medium (3-6 tool calls): Multiple related changes, small features → Use 3-6 subtasks",
+            "- Complex (7+ tool calls): Major features, large refactoring → Use 6-10 subtasks maximum",
+            "",
+            "Default to SIMPLER plans. Most tasks are simpler than they appear.",
+            "Combine related operations. Don't over-decompose simple tasks.",
         ]
         
         if past_history:
