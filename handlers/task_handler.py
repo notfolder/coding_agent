@@ -246,6 +246,7 @@ class TaskHandler:
             task_uuid=task.uuid,
             config=task_config,
             user=task.user,
+            is_resumed=is_resumed,
         )
         
         try:

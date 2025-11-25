@@ -129,10 +129,9 @@ class PauseResumeManager:
         except Exception as e:
             self.logger.exception("コメント追加中にエラー: %s", e)
         
-        # Remove pause signal file
-        if self.signal_file.exists():
-            self.signal_file.unlink()
-            self.logger.info("一時停止シグナルファイルを削除しました: %s", self.signal_file)
+        # Note: pause_signal file is intentionally NOT removed here
+        # It should be manually removed when ready to resume processing
+        self.logger.info("一時停止完了。pause_signalファイルは手動で削除してください: %s", self.signal_file)
 
     def _update_label_to_paused(self, task: Task) -> None:
         """Update task label from processing to paused.

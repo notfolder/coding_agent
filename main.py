@@ -422,10 +422,13 @@ def consume_tasks(
         # Check if this is a resumed task
         task.is_resumed = task_key_dict.get("is_resumed", False)
 
-        # タスクの状態確認
-        if not hasattr(task, "check") or not task.check():
-            logger.info("スキップ: processing_labelが付与されていないタスク %s", task_key_dict)
-            continue
+        # タスクの状態確認（再開タスクの場合はスキップ）
+        if not task.is_resumed:
+            if not hasattr(task, "check") or not task.check():
+                logger.info("スキップ: processing_labelが付与されていないタスク %s", task_key_dict)
+                continue
+        else:
+            logger.info("再開タスクを処理します: %s", task_key_dict.get("uuid"))
 
         # タスクの処理実行
         try:
