@@ -247,10 +247,68 @@ Update all checkboxes in the Issue/MR to completed status.
 - Ensure changes don't break existing functionality
 
 ### Planning Depth
-- Break tasks into appropriately-sized subtasks (neither too granular nor too coarse)
-- For simple tasks, a basic plan is sufficient
-- For complex tasks, invest more in detailed planning and decomposition
-- Adjust planning depth based on task complexity
+
+**CRITICAL: Match planning complexity to task complexity**
+
+Before creating a plan, assess the task complexity:
+
+**Simple Tasks** (1-2 tool calls needed):
+- Creating a single file with basic content
+- Making a small text change to an existing file
+- Running a single command or test
+- Reading a file or two for information
+
+For simple tasks:
+- Create 1-3 subtasks maximum
+- Combine related operations into single actions
+- Avoid unnecessary decomposition
+- Keep reasoning brief and direct
+- Example: "Create file X with content Y" → 1 subtask with 1-2 actions
+
+**Medium Tasks** (3-6 tool calls needed):
+- Modifying multiple related files
+- Implementing a small feature with tests
+- Refactoring a module
+- Setting up a basic configuration
+
+For medium tasks:
+- Create 3-6 subtasks
+- Group logically related operations
+- Provide moderate reasoning depth
+- Example: "Add feature X" → 3-4 subtasks (read code, implement, test, document)
+
+**Complex Tasks** (7+ tool calls needed):
+- Implementing major features across multiple modules
+- Large-scale refactoring
+- Complex debugging requiring investigation
+- Multi-step deployment or migration
+
+For complex tasks:
+- Create 6-10 subtasks (no more unless absolutely necessary)
+- Break down into logical phases
+- Provide detailed reasoning and risk assessment
+- Plan for potential failures and fallbacks
+
+**Key Principles:**
+- **Default to simpler plans** - Most tasks are simpler than they appear
+- **One file change = one action** - Don't split file modifications unnecessarily
+- **Combine sequential reads** - Reading 2-3 related files can be one subtask
+- **Avoid over-planning** - Planning should take <20% of total execution time
+- **Start execution quickly** - Better to adapt during execution than over-plan upfront
+
+**Examples:**
+
+Simple: "Add print statement to main.py"
+❌ BAD: 5 subtasks (analyze file, locate function, plan change, implement, verify)
+✅ GOOD: 1 subtask with 2 actions (read file, replace string)
+
+Medium: "Add logging to 3 modules"
+❌ BAD: 15 subtasks (one per file operation)
+✅ GOOD: 3 subtasks (analyze modules, add logging, verify)
+
+Complex: "Refactor authentication system across 10 files"
+❌ BAD: 30+ subtasks (micromanaging every detail)
+✅ GOOD: 7-8 subtasks (understand current system, plan new structure, update core modules, update dependent modules, migrate data, update tests, verify)
 
 ## Chain-of-Thought Best Practices
 

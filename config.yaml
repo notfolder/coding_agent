@@ -119,6 +119,7 @@ github:
   bot_label: "coding agent"
   processing_label: "coding agent processing"
   done_label: "coding agent done"
+  paused_label: "coding agent paused"
   query: 'state:open archived:false sort:updated-desc sort:updated-desc'
 
 gitlab:
@@ -126,11 +127,29 @@ gitlab:
   bot_label: "coding agent"
   processing_label: "coding agent processing"
   done_label: "coding agent done"
+  paused_label: "coding agent paused"
   project_id: "coding-agent-project"
   query: ''
 
 scheduling:
   interval: 300  # 秒
+
+# 一時停止・リジューム機能の設定
+pause_resume:
+  # 一時停止機能の有効化
+  enabled: true
+  
+  # 停止シグナルファイルのパス
+  signal_file: "contexts/pause_signal"
+  
+  # 停止チェック間隔（LLMループのN回ごとにチェック）
+  check_interval: 1
+  
+  # 一時停止タスクの有効期限（日数）
+  paused_task_expiry_days: 30
+  
+  # 一時停止状態ディレクトリ
+  paused_dir: "contexts/paused"
 
 # RabbitMQを使う場合はtrue、使わない場合はfalse
 use_rabbitmq: true

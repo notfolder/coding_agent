@@ -97,6 +97,24 @@ class TaskGitLabIssue(Task):
     def check(self) -> bool:
         return self.config["gitlab"]["processing_label"] in self.issue.get("labels", [])
 
+    def add_label(self, label: str) -> None:
+        """Issueにラベルを追加する."""
+        labels = self.issue.get("labels", [])
+        if label not in labels:
+            labels.append(label)
+            args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid, "labels": labels}
+            self.issue["labels"] = labels
+            self.mcp_client.call_tool("update_issue", args)
+
+    def remove_label(self, label: str) -> None:
+        """Issueからラベルを削除する."""
+        labels = self.issue.get("labels", [])
+        if label in labels:
+            labels.remove(label)
+            args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid, "labels": labels}
+            self.issue["labels"] = labels
+            self.mcp_client.call_tool("update_issue", args)
+
     def get_user(self) -> str | None:
         """Issueの作成者のユーザー名を取得する."""
         return self.issue.get("author", {}).get("username")
@@ -196,6 +214,28 @@ class TaskGitLabMergeRequest(Task):
 
     def check(self) -> bool:
         return self.config["gitlab"]["processing_label"] in self.labels
+
+    def add_label(self, label: str) -> None:
+        """MRにラベルを追加する."""
+        if label not in self.labels:
+            self.labels.append(label)
+            self.gitlab_client.update_merge_request_labels(
+                project_id=self.project_id,
+                merge_request_iid=self.merge_request_iid,
+                labels=self.labels,
+            )
+            self.mr["labels"] = self.labels
+
+    def remove_label(self, label: str) -> None:
+        """MRからラベルを削除する."""
+        if label in self.labels:
+            self.labels.remove(label)
+            self.gitlab_client.update_merge_request_labels(
+                project_id=self.project_id,
+                merge_request_iid=self.merge_request_iid,
+                labels=self.labels,
+            )
+            self.mr["labels"] = self.labels
 
     def get_user(self) -> str | None:
         """Merge Requestの作成者のユーザー名を取得する."""

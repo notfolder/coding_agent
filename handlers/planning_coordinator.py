@@ -97,6 +97,9 @@ class PlanningCoordinator:
         self.action_counter = 0
         self.revision_counter = 0
         
+        # Pause/resume support
+        self.pause_manager = None  # Will be set by TaskHandler
+        
         # Checkbox tracking for progress updates
         self.plan_comment_id = None  # ID of the comment containing the checklist
 
@@ -109,6 +112,12 @@ class PlanningCoordinator:
             True if task completed successfully, False otherwise
         """
         try:
+            # Check for pause signal before starting
+            if self._check_pause_signal():
+                self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                self._handle_pause()
+                return True  # Return success to avoid marking as failed
+            
             # Post start comment
             self._post_phase_comment("planning", "started", "Beginning task analysis and planning...")
             
@@ -135,6 +144,12 @@ class PlanningCoordinator:
                     self._post_phase_comment("planning", "failed", "Could not generate a valid execution plan.")
                     return False
 
+            # Check for pause signal after planning
+            if self._check_pause_signal():
+                self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                self._handle_pause()
+                return True
+
             # Post execution start
             self._post_phase_comment("execution", "started", "Beginning execution of planned actions...")
 
@@ -144,6 +159,12 @@ class PlanningCoordinator:
             
             while iteration < max_iterations and not self._is_complete():
                 iteration += 1
+                
+                # Check for pause signal before each action
+                if self._check_pause_signal():
+                    self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                    self._handle_pause()
+                    return True
                 
                 # Execute next action
                 result = self._execute_action()
@@ -165,12 +186,26 @@ class PlanningCoordinator:
                 
                 # Check if reflection is needed
                 if self._should_reflect(result):
+                    # Check for pause signal before reflection
+                    if self._check_pause_signal():
+                        self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                        self._handle_pause()
+                        return True
+                    
                     self._post_phase_comment("reflection", "started", f"Analyzing results after {self.action_counter} actions...")
+                    self.current_phase = "reflection"
                     reflection = self._execute_reflection_phase(result)
                     
                     if reflection and reflection.get("plan_revision_needed"):
+                        # Check for pause signal before revision
+                        if self._check_pause_signal():
+                            self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                            self._handle_pause()
+                            return True
+                        
                         # Revise plan if needed
                         self._post_phase_comment("revision", "started", "Plan revision needed based on reflection.")
+                        self.current_phase = "revision"
                         revised_plan = self._revise_plan(reflection)
                         if revised_plan:
                             self.current_plan = revised_plan
@@ -179,6 +214,9 @@ class PlanningCoordinator:
                             self._post_phase_comment("revision", "failed", "Could not revise plan.")
                     else:
                         self._post_phase_comment("reflection", "completed", "Reflection complete, continuing with current plan.")
+                    
+                    # Reset to execution phase
+                    self.current_phase = "execution"
                 
                 # Check for completion
                 if result.get("done"):
@@ -195,6 +233,19 @@ class PlanningCoordinator:
             self.logger.exception("Planning execution failed: %s", e)
             self._post_phase_comment("execution", "failed", f"Error during execution: {str(e)}")
             return False
+
+    def _handle_pause(self) -> None:
+        """Handle pause operation for planning mode."""
+        if self.pause_manager is None:
+            self.logger.warning("Pause manager not set, cannot pause")
+            return
+        
+        # Get current planning state
+        planning_state = self.get_planning_state()
+        
+        # Pause the task with planning state
+        self.pause_manager.pause_task(self.task, self.task.uuid, planning_state=planning_state)
+
 
     def _execute_planning_phase(self) -> dict[str, Any] | None:
         """Execute the planning phase.
@@ -506,6 +557,15 @@ class PlanningCoordinator:
             "Create a comprehensive plan for the following task:",
             "",
             task_info,  # This includes issue/MR details and all comments
+            "",
+            "IMPORTANT - Task Complexity Assessment:",
+            "Before creating your plan, evaluate the task complexity:",
+            "- Simple (1-2 tool calls): Single file creation/modification, basic operations → Use 1-3 subtasks",
+            "- Medium (3-6 tool calls): Multiple related changes, small features → Use 3-6 subtasks",
+            "- Complex (7+ tool calls): Major features, large refactoring → Use 6-10 subtasks maximum",
+            "",
+            "Default to SIMPLER plans. Most tasks are simpler than they appear.",
+            "Combine related operations. Don't over-decompose simple tasks.",
         ]
         
         if past_history:
@@ -865,3 +925,64 @@ class PlanningCoordinator:
                 
         except Exception as e:
             self.logger.error("Failed to post phase comment: %s", str(e))
+
+    def restore_planning_state(self, planning_state: dict[str, Any]) -> None:
+        """Restore planning state from paused task.
+        
+        Args:
+            planning_state: Planning state dictionary from task_state.json
+        """
+        if not planning_state or not planning_state.get("enabled"):
+            return
+        
+        # Restore planning state
+        self.current_phase = planning_state.get("current_phase", "planning")
+        self.action_counter = planning_state.get("action_counter", 0)
+        self.revision_counter = planning_state.get("revision_counter", 0)
+        
+        # Restore checklist comment ID if available
+        saved_checklist_id = planning_state.get("checklist_comment_id")
+        if saved_checklist_id is not None:
+            self.checklist_comment_id = saved_checklist_id
+            self.plan_comment_id = saved_checklist_id
+        
+        self.logger.info(
+            "Planning状態を復元しました: phase=%s, action_counter=%d, revision_counter=%d, checklist_id=%s",
+            self.current_phase,
+            self.action_counter,
+            self.revision_counter,
+            self.checklist_comment_id,
+        )
+        
+        # Load existing plan from history
+        if self.history_store.has_plan():
+            plan_entry = self.history_store.get_latest_plan()
+            if plan_entry:
+                self.current_plan = plan_entry.get("plan") or plan_entry.get("updated_plan")
+                self.logger.info("既存のプランを復元しました")
+
+    def get_planning_state(self) -> dict[str, Any]:
+        """Get current planning state for pause.
+        
+        Returns:
+            Planning state dictionary
+        """
+        return {
+            "enabled": True,
+            "current_phase": self.current_phase,
+            "action_counter": self.action_counter,
+            "revision_counter": self.revision_counter,
+            "checklist_comment_id": self.plan_comment_id,
+        }
+
+    def _check_pause_signal(self) -> bool:
+        """Check if pause signal is detected.
+        
+        Returns:
+            True if pause signal is detected, False otherwise
+        """
+        if self.pause_manager is None:
+            return False
+        
+        return self.pause_manager.check_pause_signal()
+

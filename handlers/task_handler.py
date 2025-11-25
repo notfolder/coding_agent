@@ -127,6 +127,17 @@ class TaskHandler:
         """
         from clients.lm_client import get_llm_client
         from context_storage import ContextCompressor, TaskContextManager
+        from pause_resume_manager import PauseResumeManager
+        
+        # Initialize pause/resume manager
+        pause_manager = PauseResumeManager(task_config)
+        
+        # Check if this is a resumed task
+        is_resumed = getattr(task, "is_resumed", False)
+        if is_resumed:
+            # Restore task context from paused state
+            planning_state = pause_manager.restore_task_context(task, task.uuid)
+            self.logger.info("一時停止タスクを復元しました: %s", task.uuid)
         
         # Initialize context manager
         context_manager = TaskContextManager(
@@ -176,6 +187,12 @@ class TaskHandler:
             error_state = {"last_tool": None, "tool_error_count": 0}
             
             while count < max_count:
+                # Check for pause signal
+                if pause_manager.check_pause_signal():
+                    self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                    pause_manager.pause_task(task, task.uuid, planning_state=None)
+                    return  # Exit without calling finish()
+                
                 # Check if compression is needed
                 if compressor.should_compress():
                     self.logger.info("Context compression triggered")
@@ -210,6 +227,18 @@ class TaskHandler:
         """
         from context_storage import TaskContextManager
         from handlers.planning_coordinator import PlanningCoordinator
+        from pause_resume_manager import PauseResumeManager
+        
+        # Initialize pause/resume manager
+        pause_manager = PauseResumeManager(task_config)
+        
+        # Check if this is a resumed task
+        is_resumed = getattr(task, "is_resumed", False)
+        planning_state = None
+        if is_resumed:
+            # Restore task context from paused state
+            planning_state = pause_manager.restore_task_context(task, task.uuid)
+            self.logger.info("一時停止タスクを復元しました（Planning実行中）: %s", task.uuid)
         
         # Initialize context manager for planning
         context_manager = TaskContextManager(
@@ -217,6 +246,7 @@ class TaskHandler:
             task_uuid=task.uuid,
             config=task_config,
             user=task.user,
+            is_resumed=is_resumed,
         )
         
         try:
@@ -233,6 +263,13 @@ class TaskHandler:
                 task=task,
                 context_manager=context_manager,
             )
+            
+            # Restore planning state if resumed
+            if is_resumed and planning_state:
+                coordinator.restore_planning_state(planning_state)
+            
+            # Pass pause manager to coordinator
+            coordinator.pause_manager = pause_manager
             
             # Execute with planning
             success = coordinator.execute_with_planning()

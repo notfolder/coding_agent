@@ -320,6 +320,7 @@ def produce_tasks(
 
     指定されたタスクソース(GitHubまたはGitLab)からタスクを取得し、
     各タスクの準備処理を実行してからキューに追加します。
+    また、一時停止中のタスクを検出してキューに再投入します。
 
     Args:
         config: アプリケーション設定辞書
@@ -330,9 +331,36 @@ def produce_tasks(
 
     """
     import uuid
+    from pause_resume_manager import PauseResumeManager
     
     # タスクゲッターのファクトリーメソッドでインスタンス生成
     task_getter = TaskGetter.factory(config, mcp_clients, task_source)
+
+    # 一時停止タスクの検出と再投入
+    pause_manager = PauseResumeManager(config)
+    paused_tasks = pause_manager.get_paused_tasks()
+    
+    paused_count = 0
+    for task_state in paused_tasks:
+        # Validate task still exists on GitHub/GitLab
+        try:
+            task_dict_temp = task_state["task_key"]
+            task = task_getter.from_task_key(task_dict_temp)
+            
+            if task is None:
+                logger.warning("一時停止タスクが見つかりません（削除済み）: %s", task_state.get("uuid"))
+                continue
+            
+            # Prepare task dictionary for resuming
+            task_dict = pause_manager.prepare_resume_task_dict(task_state)
+            task_queue.put(task_dict)
+            paused_count += 1
+            logger.info("一時停止タスクをキューに再投入しました: %s", task_state.get("uuid"))
+        except Exception as e:
+            logger.exception("一時停止タスクの再投入エラー: %s", e)
+    
+    if paused_count > 0:
+        logger.info("%d件の一時停止タスクをキューに再投入しました", paused_count)
 
     # タスクリストを取得
     tasks = task_getter.get_task_list()
@@ -390,11 +418,17 @@ def consume_tasks(
         # UUIDとユーザー情報をタスクに設定
         task.uuid = task_key_dict.get("uuid")
         task.user = task_key_dict.get("user")
+        
+        # Check if this is a resumed task
+        task.is_resumed = task_key_dict.get("is_resumed", False)
 
-        # タスクの状態確認
-        if not hasattr(task, "check") or not task.check():
-            logger.info("スキップ: processing_labelが付与されていないタスク %s", task_key_dict)
-            continue
+        # タスクの状態確認（再開タスクの場合はスキップ）
+        if not task.is_resumed:
+            if not hasattr(task, "check") or not task.check():
+                logger.info("スキップ: processing_labelが付与されていないタスク %s", task_key_dict)
+                continue
+        else:
+            logger.info("再開タスクを処理します: %s", task_key_dict.get("uuid"))
 
         # タスクの処理実行
         try:
