@@ -29,6 +29,10 @@ class MockTask:
     def update_comment(self, comment_id, text):
         """Mock update_comment method."""
         return {"id": comment_id, "body": text}
+    
+    def get_prompt(self):
+        """Mock get_prompt method."""
+        return f"TASK: {self.title}\nDESCRIPTION: {self.body}\nNUMBER: {self.number}"
 
 
 class MockContextManager:
