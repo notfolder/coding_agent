@@ -368,7 +368,7 @@ class TaskHandler:
         prompt = task.get_prompt()
         self.logger.info("LLMに送信するプロンプト: %s", prompt)
 
-        self.llm_client.send_system_prompt(self._make_system_prompt(task_config))
+        self.llm_client.send_system_prompt(self._make_system_prompt(task_config, task))
         self.llm_client.send_user_message(prompt)
 
     def _process_llm_interaction(self, task: Task, count: int, error_state: dict) -> bool:
@@ -589,17 +589,23 @@ class TaskHandler:
 
     def get_system_prompt(self) -> str:
         """システムプロンプトを取得する(テスト用の公開メソッド)."""
-        return self._make_system_prompt(self.config)
+        return self._make_system_prompt(self.config, task=None)
 
-    def _make_system_prompt(self, task_config: dict[str, Any] | None = None) -> str:
+    def _make_system_prompt(
+        self,
+        task_config: dict[str, Any] | None = None,
+        task: Task | None = None,
+    ) -> str:
         """システムプロンプトを生成する.
 
         設定に基づいてfunction callingの有無を判定し、
         適切なシステムプロンプトファイルを読み込んで、
         MCPプロンプトを埋め込んで返します.
+        プロジェクト固有のエージェントルールがある場合は末尾に追加します。
         
         Args:
             task_config: タスク固有の設定（Noneの場合はself.configを使用）
+            task: タスクオブジェクト（プロジェクトルール取得用）
 
         Returns:
             生成されたシステムプロンプト文字列
@@ -623,7 +629,65 @@ class TaskHandler:
             mcp_prompt += client.system_prompt + "\n"
 
         # プロンプトテンプレートのプレースホルダーを置換
-        return prompt.replace("{mcp_prompt}", mcp_prompt)
+        prompt = prompt.replace("{mcp_prompt}", mcp_prompt)
+
+        # プロジェクト固有のエージェントルールを取得して追加
+        project_rules = self._load_project_agent_rules(task_config, task)
+        if project_rules:
+            prompt = prompt + "\n" + project_rules
+
+        return prompt
+
+    def _load_project_agent_rules(
+        self,
+        task_config: dict[str, Any],
+        task: Task | None = None,
+    ) -> str:
+        """プロジェクト固有のエージェントルールを読み込む.
+
+        Args:
+            task_config: タスク固有の設定
+            task: タスクオブジェクト
+
+        Returns:
+            プロジェクト固有のエージェントルール文字列
+
+        """
+        from handlers.project_agent_rules_loader import ProjectAgentRulesLoader
+
+        # 機能が無効の場合は空文字列を返す
+        rules_config = task_config.get("project_agent_rules", {})
+        if not rules_config.get("enabled", True):
+            return ""
+
+        # タスクからowner/repoを取得してMCPモードで読み込み
+        if task is not None:
+            try:
+                task_key = task.get_task_key()
+                owner = getattr(task_key, "owner", None)
+                repo = getattr(task_key, "repo", None)
+
+                if owner and repo:
+                    # タスクソースに応じたMCPクライアントを取得
+                    # GitHub または GitLab のMCPクライアントを使用
+                    mcp_client = None
+                    if "github" in self.mcp_clients:
+                        mcp_client = self.mcp_clients["github"]
+                    elif "gitlab" in self.mcp_clients:
+                        mcp_client = self.mcp_clients["gitlab"]
+
+                    if mcp_client:
+                        loader = ProjectAgentRulesLoader(
+                            config=task_config,
+                            mcp_client=mcp_client,
+                            owner=owner,
+                            repo=repo,
+                        )
+                        return loader.load_rules()
+            except Exception as e:
+                self.logger.warning("プロジェクトルールの読み込みに失敗しました: %s", e)
+
+        return ""
 
     def _extract_json(self, text: str) -> dict[str, Any]:
         """テキストから最初のJSONブロックを抽出する.
@@ -666,7 +730,7 @@ class TaskHandler:
         prompt = task.get_prompt()
         self.logger.info("LLMに送信するプロンプト: %s", prompt)
 
-        llm_client.send_system_prompt(self._make_system_prompt(task_config))
+        llm_client.send_system_prompt(self._make_system_prompt(task_config, task))
         llm_client.send_user_message(prompt)
 
     def _process_llm_interaction_with_client(

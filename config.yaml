@@ -138,6 +138,42 @@ gitlab:
 scheduling:
   interval: 300  # 秒
 
+# プロジェクト固有エージェントルールの設定
+project_agent_rules:
+  # 機能の有効/無効（デフォルト: true）
+  enabled: true
+  
+  # 検索対象の設定
+  search:
+    # ルートファイル検索の有効/無効（AGENT.md, CLAUDE.md）（デフォルト: true）
+    root_files: true
+    
+    # .github/agents/*.agent.md 検索の有効/無効（デフォルト: true）
+    agent_files: true
+    
+    # **/*.prompt.md 検索の有効/無効（デフォルト: true）
+    prompt_files: true
+    
+    # 大文字小文字を区別しない検索（デフォルト: true）
+    case_insensitive: true
+  
+  # 制限設定
+  limits:
+    # 単一ファイルの最大サイズ（バイト）（デフォルト: 102400）
+    max_file_size: 102400  # 100KB
+    
+    # 合計コンテンツの最大サイズ（バイト）（デフォルト: 512000）
+    max_total_size: 512000  # 500KB
+    
+    # .agent.md ファイルの最大数（デフォルト: 10）
+    max_agent_files: 10
+    
+    # .prompt.md ファイルの最大数（デフォルト: 50）
+    max_prompt_files: 50
+    
+    # ディレクトリ検索の最大深度（デフォルト: 10）
+    max_depth: 10
+
 # 一時停止・リジューム機能の設定
 pause_resume:
   # 一時停止機能の有効化
