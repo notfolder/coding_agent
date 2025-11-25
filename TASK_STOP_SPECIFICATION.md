@@ -21,8 +21,8 @@
 |------|------------------------|---------------------|
 | トリガー | `contexts/pause_signal`ファイル作成 | アサインの解除 |
 | 再開可能性 | 可能（再投入で再開） | 不可（タスク終了） |
-| 状態保存 | `contexts/paused/`に保存 | 保存しない |
-| ラベル変更 | `coding agent paused`に変更 | 処理中ラベルを削除 |
+| 状態保存 | `contexts/paused/`に保存 | `contexts/completed/`に保存 |
+| ラベル変更 | `coding agent paused`に変更 | `coding agent stopped`に変更 |
 | 完了通知 | 一時停止メッセージを投稿 | 停止理由をコメント |
 
 ## 2. 停止条件の定義
@@ -48,10 +48,10 @@ GITLAB_BOT_NAME: GitLabでのボットのユーザー名
 
 ```yaml
 github:
-  bot_name: "coding-agent-bot"  # GitHubのボット名
+  bot_name: "coding-agent-bot"
 
 gitlab:
-  bot_name: "coding-agent-bot"  # GitLabのボット名
+  bot_name: "coding-agent-bot"
 ```
 
 ## 3. アサイン状況チェックのタイミング
@@ -94,37 +94,30 @@ gitlab:
      ↓
 ```
 
-### 3.2 チェック頻度の設定
-設定ファイルで、アサインチェックの頻度を設定できます：
+### 3.2 デフォルト動作
+タスク停止機能はデフォルトで有効です。特別な設定がなくても、環境変数またはconfig.yamlにボット名が設定されていれば動作します。
+
+設定ファイルで、アサインチェックの頻度を変更することも可能です（デフォルト値で動作）：
 
 ```yaml
+# task_stop設定は省略可能（以下はすべてデフォルト値）
 task_stop:
-  # タスク停止機能の有効化
-  enabled: true
-  
-  # アサインチェック間隔（LLMループのN回ごとにチェック）
-  # 1の場合は毎回チェック、0の場合はチェック無効
-  check_interval: 1
-  
-  # APIレート制限を考慮したチェック間隔（秒）
-  # この時間内に複数回チェックが発生しても、実際のAPI呼び出しは1回に制限
-  min_check_interval_seconds: 30
+  enabled: true           # デフォルト: true（有効）
+  check_interval: 1       # デフォルト: 1（毎回チェック）
+  min_check_interval_seconds: 30  # デフォルト: 30秒
 ```
 
 ## 4. アサイン状況の取得方法
 
 ### 4.1 GitHub Issue のアサイン取得
 
-**API エンドポイント:**
-```
-GET /repos/{owner}/{repo}/issues/{issue_number}
-```
+**取得元:**
+`TaskGitHubIssue.issue` オブジェクトの `assignees` フィールドから取得します。
+タスク処理開始時に取得済みの情報を使用するため、追加のAPI呼び出しは不要です。
 
-**レスポンス例:**
+**データ構造:**
 ```json
 {
-  "number": 123,
-  "title": "Issue title",
   "assignees": [
     {
       "login": "user1",
@@ -139,49 +132,30 @@ GET /repos/{owner}/{repo}/issues/{issue_number}
 ```
 
 **チェックロジック:**
-```
-1. Issue情報をAPIで取得
-2. assignees配列からloginフィールドを抽出
-3. GITHUB_BOT_NAMEが含まれているかチェック
-4. 含まれていない場合 → タスク停止
-```
+1. `TaskGitHubIssue.issue["assignees"]` から `login` フィールドを抽出
+2. `GITHUB_BOT_NAME` が含まれているかチェック
+3. 含まれていない場合 → タスク停止
 
 ### 4.2 GitHub Pull Request のアサイン取得
 
-**API エンドポイント:**
-```
-GET /repos/{owner}/{repo}/pulls/{pull_number}
-```
-
-**レスポンス例:**
-```json
-{
-  "number": 456,
-  "title": "PR title",
-  "assignees": [
-    {
-      "login": "coding-agent-bot",
-      "id": 67890
-    }
-  ]
-}
-```
+**取得元:**
+`TaskGitHubPullRequest.pr` オブジェクトの `assignees` フィールドから取得します。
+タスク処理開始時に取得済みの情報を使用するため、追加のAPI呼び出しは不要です。
 
 **チェックロジック:**
-Pull Request もIssueと同様に `assignees` 配列でアサイン状況を確認します。
+1. `TaskGitHubPullRequest.pr["assignees"]` から `login` フィールドを抽出
+2. `GITHUB_BOT_NAME` が含まれているかチェック
+3. 含まれていない場合 → タスク停止
 
 ### 4.3 GitLab Issue のアサイン取得
 
-**API エンドポイント:**
-```
-GET /projects/{project_id}/issues/{issue_iid}
-```
+**取得元:**
+`TaskGitLabIssue.issue` オブジェクトの `assignees` または `assignee` フィールドから取得します。
+タスク処理開始時に取得済みの情報を使用するため、追加のAPI呼び出しは不要です。
 
-**レスポンス例:**
+**データ構造:**
 ```json
 {
-  "iid": 123,
-  "title": "Issue title",
   "assignees": [
     {
       "username": "user1",
@@ -200,40 +174,20 @@ GET /projects/{project_id}/issues/{issue_iid}
 ```
 
 **チェックロジック:**
-```
-1. Issue情報をAPIで取得
-2. assigneesまたはassigneeフィールドからusernameを抽出
-3. GITLAB_BOT_NAMEが含まれているかチェック
-4. 含まれていない場合 → タスク停止
-```
+1. `TaskGitLabIssue.issue["assignees"]` または `TaskGitLabIssue.issue["assignee"]` から `username` フィールドを抽出
+2. `GITLAB_BOT_NAME` が含まれているかチェック
+3. 含まれていない場合 → タスク停止
 
 ### 4.4 GitLab Merge Request のアサイン取得
 
-**API エンドポイント:**
-```
-GET /projects/{project_id}/merge_requests/{merge_request_iid}
-```
-
-**レスポンス例:**
-```json
-{
-  "iid": 456,
-  "title": "MR title",
-  "assignees": [
-    {
-      "username": "coding-agent-bot",
-      "id": 67890
-    }
-  ],
-  "assignee": {
-    "username": "coding-agent-bot",
-    "id": 67890
-  }
-}
-```
+**取得元:**
+`TaskGitLabMergeRequest.mr` オブジェクトの `assignees` または `assignee` フィールドから取得します。
+タスク処理開始時に取得済みの情報を使用するため、追加のAPI呼び出しは不要です。
 
 **チェックロジック:**
-Merge Request もIssueと同様に `assignees` または `assignee` フィールドでアサイン状況を確認します。
+1. `TaskGitLabMergeRequest.mr["assignees"]` または `TaskGitLabMergeRequest.mr["assignee"]` から `username` フィールドを抽出
+2. `GITLAB_BOT_NAME` が含まれているかチェック
+3. 含まれていない場合 → タスク停止
 
 ## 5. タスク停止処理の詳細フロー
 
@@ -242,7 +196,7 @@ Merge Request もIssueと同様に `assignees` または `assignee` フィール
 ```
 1. アサイン状況チェック開始
    ↓
-2. API経由でIssue/MR/PRの最新情報を取得
+2. タスクオブジェクトからアサイン情報を取得
    ↓
 3. アサイン状況を判定
    ├─ ボットがアサインされている場合 → 処理継続
@@ -254,11 +208,13 @@ Merge Request もIssueと同様に `assignees` または `assignee` フィール
    ↓
 6. 処理中ラベル（coding agent processing）を削除
    ↓
-7. Context Storage のクリーンアップ（オプション）
+7. 停止ラベル（coding agent stopped）を追加
    ↓
-8. タスク処理を終了（finish()は呼び出さない）
+8. Context Storage を completed ディレクトリに移動
    ↓
-9. Consumer処理ループを正常終了
+9. タスク処理を終了（finish()は呼び出さない）
+   ↓
+10. Consumer処理ループを正常終了
 ```
 
 ### 5.2 停止時のコメント
@@ -309,32 +265,32 @@ Merge Request もIssueと同様に `assignees` または `assignee` フィール
 
 **停止時のラベル処理:**
 1. `coding agent processing` ラベルを削除
-2. `coding agent stopped` ラベルを追加（オプション、設定で有効化可能）
+2. `coding agent stopped` ラベルを追加
 
-**設定例:**
+停止ラベルは config.yaml の github/gitlab セクションに、他のラベルと同じ位置で設定します：
+
 ```yaml
-task_stop:
-  stopped_label: "coding agent stopped"  # 停止時に付与するラベル（空の場合は付与しない）
+github:
+  bot_label: "coding agent"
+  processing_label: "coding agent processing"
+  done_label: "coding agent done"
+  paused_label: "coding agent paused"
+  stopped_label: "coding agent stopped"  # 停止時に付与するラベル
+
+gitlab:
+  bot_label: "coding agent"
+  processing_label: "coding agent processing"
+  done_label: "coding agent done"
+  paused_label: "coding agent paused"
+  stopped_label: "coding agent stopped"  # 停止時に付与するラベル
 ```
 
 ### 5.4 Context Storage の処理
 
-タスク停止時のContext Storage処理は以下の選択肢があります：
-
-**オプション1: クリーンアップ（デフォルト）**
-- `contexts/running/{task_uuid}/` ディレクトリを削除
-- 再開不可、ストレージ容量を節約
-
-**オプション2: 保持**
-- `contexts/running/{task_uuid}/` ディレクトリをそのまま保持
-- デバッグ目的で処理履歴を確認可能
-- 定期クリーンアップで削除
-
-**設定例:**
-```yaml
-task_stop:
-  cleanup_context: true  # true: 削除, false: 保持
-```
+タスク停止時は、Context Storage を completed ディレクトリに移動します：
+- `contexts/running/{task_uuid}/` → `contexts/completed/{task_uuid}/` に移動
+- 通常のタスク完了時と同様の処理を行い、処理履歴を保持
+- これにより、停止したタスクの処理履歴を後から確認可能
 
 ## 6. 実装の詳細設計
 
@@ -360,266 +316,140 @@ TaskStopManager
 │   └── GitLab Issue/MRのアサインをチェック
 ├── _post_stop_comment(task: Task, reason: str) -> None
 │   └── 停止コメントを投稿
-└── _cleanup_context(task_uuid: str) -> None
-    └── Context Storageをクリーンアップ
+└── _move_to_completed(task_uuid: str) -> None
+    └── Context Storage を completed に移動
 ```
 
 ### 6.2 Task クラスへの追加メソッド
 
-`Task` 抽象基底クラスに以下のメソッドを追加します：
+`Task` 抽象基底クラスに `get_assignees()` メソッドを追加します。
 
-```python
-@abstractmethod
-def get_assignees(self) -> list[str]:
-    """タスクにアサインされているユーザー名のリストを取得する.
+**メソッド仕様:**
+- **目的:** タスクにアサインされているユーザー名のリストを取得する
+- **戻り値:** アサインされているユーザー名のリスト（list[str]）
+- **例外:** API呼び出しに失敗した場合は例外をスロー
+- **注意:** 呼び出し元でエラーハンドリングを行い、エラー時はタスクを停止せずに処理を継続する
 
-    この処理は外部API（GitHub/GitLab）を呼び出すため、
-    ネットワークエラーやAPIエラーが発生する可能性があります。
-    
-    Returns:
-        アサインされているユーザー名のリスト
-        
-    Raises:
-        Exception: API呼び出しに失敗した場合
-        
-    Note:
-        呼び出し元でエラーハンドリングを行い、
-        エラー時はタスクを停止せずに処理を継続することを推奨
+**各タスククラスでの実装方針:**
 
-    """
-```
+**TaskGitHubIssue:**
+- `self.issue["assignees"]` から `login` フィールドを抽出してリストを返す
+- タスクオブジェクト内の既存データを使用するため、追加のAPI呼び出しは不要
 
-**GitHub Issue 実装例:**
-```python
-def get_assignees(self) -> list[str]:
-    """Issueにアサインされているユーザー名のリストを取得する.
-    
-    Raises:
-        Exception: API呼び出しに失敗した場合
-    """
-    try:
-        # 最新の情報を取得
-        issue = self.mcp_client.call_tool(
-            "get_issue",
-            {"owner": self.issue["owner"], "repo": self.issue["repo"], "issue_number": self.issue["number"]},
-        )
-        return [assignee.get("login", "") for assignee in issue.get("assignees", [])]
-    except Exception as e:
-        self.logger.exception("アサイン情報の取得に失敗: %s", e)
-        raise  # 呼び出し元でエラーハンドリングを行う
-```
+**TaskGitHubPullRequest:**
+- `self.pr["assignees"]` から `login` フィールドを抽出してリストを返す
+- タスクオブジェクト内の既存データを使用するため、追加のAPI呼び出しは不要
 
-**GitLab Issue 実装例:**
-```python
-def get_assignees(self) -> list[str]:
-    """Issueにアサインされているユーザー名のリストを取得する.
-    
-    Raises:
-        Exception: API呼び出しに失敗した場合
-    """
-    try:
-        # 最新の情報を取得
-        issue = self.mcp_client.call_tool(
-            "get_issue",
-            {"project_id": str(self.project_id), "issue_iid": self.issue_iid},
-        )
-        assignees = []
-        # assignees配列が存在し、かつ空でない場合
-        assignees_list = issue.get("assignees", [])
-        if assignees_list and len(assignees_list) > 0:
-            assignees = [a.get("username", "") for a in assignees_list]
-        # assignees配列がない、または空の場合、assignee単体フィールドを確認
-        elif issue.get("assignee"):
-            assignees = [issue["assignee"].get("username", "")]
-        return assignees
-    except Exception as e:
-        self.logger.exception("アサイン情報の取得に失敗: %s", e)
-        raise  # 呼び出し元でエラーハンドリングを行う
-```
+**TaskGitLabIssue:**
+- `self.issue["assignees"]` または `self.issue["assignee"]` から `username` フィールドを抽出
+- `assignees` 配列が空でなければ使用し、空の場合は `assignee` 単体フィールドを確認
+- タスクオブジェクト内の既存データを使用するため、追加のAPI呼び出しは不要
+
+**TaskGitLabMergeRequest:**
+- `self.mr["assignees"]` または `self.mr["assignee"]` から `username` フィールドを抽出
+- `assignees` 配列が空でなければ使用し、空の場合は `assignee` 単体フィールドを確認
+- タスクオブジェクト内の既存データを使用するため、追加のAPI呼び出しは不要
 
 ### 6.3 TaskHandler への組み込み
 
 `TaskHandler` クラスの処理ループに、アサインチェックを追加します。
 
-**_handle_with_context_storage メソッドの改修:**
-```python
-def _handle_with_context_storage(self, task: Task, task_config: dict[str, Any]) -> None:
-    from task_stop_manager import TaskStopManager
-    
-    # Initialize task stop manager
-    stop_manager = TaskStopManager(task_config)
-    
-    # ... 既存の初期化処理 ...
-    
-    # Check interval counter
-    check_counter = 0
-    check_interval = task_config.get("task_stop", {}).get("check_interval", 1)
-    
-    while count < max_count:
-        check_counter += 1
-        
-        # 優先順位の取得（デフォルトは pause_first）
-        priority = task_config.get("task_stop", {}).get("priority", "pause_first")
-        
-        if priority == "pause_first":
-            # Check for pause signal first (既存)
-            if pause_manager.check_pause_signal():
-                # ... 一時停止処理 ...
-                return
-            
-            # Then check assignee status (新規追加)
-            # check_interval に基づいてチェック頻度を制御
-            if check_interval > 0 and check_counter % check_interval == 0:
-                if stop_manager.enabled and stop_manager.should_check_now():
-                    if not stop_manager.check_assignee_status(task):
-                        self.logger.info("アサイン解除を検出、タスクを停止します")
-                        stop_manager.stop_task(task, task.uuid, "アサインが解除されました")
-                        return  # finish()を呼ばずに終了
-        else:  # stop_first
-            # Check assignee status first
-            if check_interval > 0 and check_counter % check_interval == 0:
-                if stop_manager.enabled and stop_manager.should_check_now():
-                    if not stop_manager.check_assignee_status(task):
-                        self.logger.info("アサイン解除を検出、タスクを停止します")
-                        stop_manager.stop_task(task, task.uuid, "アサインが解除されました")
-                        return
-            
-            # Then check for pause signal
-            if pause_manager.check_pause_signal():
-                # ... 一時停止処理 ...
-                return
-        
-        # ... 既存の処理ループ ...
-```
+**_handle_with_context_storage メソッドの改修内容:**
 
-### 6.4 TaskStopManager の should_check_now メソッド
+1. **初期化処理:**
+   - `TaskStopManager` をインスタンス化
+   - チェック間隔カウンターを初期化
 
-`min_check_interval_seconds` 設定に基づき、APIレート制限を考慮したチェックを実装します。
+2. **処理ループ内でのチェック:**
+   - 各イテレーション開始時にカウンターをインクリメント
+   - 一時停止シグナルのチェック（既存処理）を先に実行
+   - `check_interval` 設定に基づき、指定回数ごとにアサインチェックを実行
+   - `min_check_interval_seconds` 設定に基づき、前回チェックから指定秒数経過後にのみ実行
+   - アサイン解除を検出した場合、停止処理を実行してループを終了
 
-```python
-class TaskStopManager:
-    def __init__(self, config: dict[str, Any]) -> None:
-        # ... 既存の初期化処理 ...
-        task_stop_config = config.get("task_stop", {})
-        self.min_check_interval_seconds = task_stop_config.get("min_check_interval_seconds", 30)
-        self._last_check_time: float | None = None
-    
-    def should_check_now(self) -> bool:
-        """min_check_interval_seconds を考慮して、チェックを実行すべきかを判定.
-        
-        Returns:
-            True: チェックを実行すべき
-            False: 前回のチェックから十分な時間が経過していない
-        """
-        import time
-        current_time = time.time()
-        
-        if self._last_check_time is None:
-            self._last_check_time = current_time
-            return True
-        
-        elapsed = current_time - self._last_check_time
-        if elapsed >= self.min_check_interval_seconds:
-            self._last_check_time = current_time
-            return True
-        
-        return False
-```
+3. **停止処理の実行:**
+   - 停止コメントを投稿
+   - 処理中ラベルを削除し、停止ラベルを追加
+   - Context Storage を completed ディレクトリに移動
+   - `finish()` は呼び出さずにループを終了
 
-### 6.5 PlanningCoordinator への組み込み
+### 6.4 PlanningCoordinator への組み込み
 
 `PlanningCoordinator` クラスにも同様にアサインチェックを追加します。
 
-**execute_with_planning メソッドの改修:**
-```python
-def execute_with_planning(self) -> bool:
-    from task_stop_manager import TaskStopManager
-    
-    # Initialize task stop manager
-    stop_manager = TaskStopManager(self.config.get("main_config", {}))
-    self.stop_manager = stop_manager  # 保持して後で使用
-    
-    # ... 既存の処理 ...
-    
-    while iteration < max_iterations and not self._is_complete():
-        # Check for pause signal (既存)
-        if self._check_pause_signal():
-            # ... 一時停止処理 ...
-            return True
-        
-        # Check assignee status (新規追加)
-        if self._check_stop_signal():
-            self.logger.info("アサイン解除を検出、タスクを停止します")
-            self._handle_stop()
-            return True  # 失敗ではなく正常終了として扱う
-        
-        # ... 既存の処理ループ ...
-```
+**execute_with_planning メソッドの改修内容:**
 
-**_check_stop_signal メソッド（新規追加）:**
-```python
-def _check_stop_signal(self) -> bool:
-    """Check if stop signal is detected (assignee removed).
-    
-    Returns:
-        True if stop signal is detected, False otherwise
-    """
-    if self.stop_manager is None:
-        return False
-    
-    if not self.stop_manager.enabled:
-        return False
-    
-    return not self.stop_manager.check_assignee_status(self.task)
-```
+1. **初期化処理:**
+   - `TaskStopManager` をインスタンス化し、インスタンス変数に保持
 
-**_handle_stop メソッド（新規追加）:**
-```python
-def _handle_stop(self) -> None:
-    """Handle stop operation for planning mode."""
-    if self.stop_manager is None:
-        self.logger.warning("Stop manager not set, cannot stop")
-        return
-    
-    # Stop the task
-    self.stop_manager.stop_task(
-        self.task,
-        self.task.uuid,
-        f"アサインが解除されました（{self.action_counter}アクション実行済み）",
-    )
-```
+2. **チェックタイミング:**
+   - Planningフェーズ開始前・完了後
+   - 各アクション実行前
+   - リフレクション実行前
+   - プラン修正実行前
+   - 上記の各タイミングで、一時停止チェックの後にアサインチェックを実行
+
+3. **停止検出時の処理:**
+   - `_check_stop_signal()` メソッドでアサイン状況を確認
+   - アサイン解除を検出した場合、`_handle_stop()` メソッドを呼び出し
+   - 停止コメントには実行済みアクション数を含める
+   - 正常終了として `True` を返却（失敗扱いにしない）
+
+### 6.5 チェック頻度の制御
+
+**check_interval の動作:**
+- 設定値が 1 の場合（デフォルト）: 毎回チェック
+- 設定値が 0 の場合: チェック無効
+- 設定値が N（2以上）の場合: N 回のループごとにチェック
+
+**min_check_interval_seconds の動作:**
+- 前回のチェックから指定秒数が経過していない場合はチェックをスキップ
+- デフォルトは 30 秒
+- API レート制限への配慮として機能
+
+**should_check_now() メソッドの処理:**
+1. 前回チェック時刻が未設定の場合は現在時刻を設定し、チェックを実行
+2. 前回チェックから経過秒数を計算
+3. 経過秒数が `min_check_interval_seconds` 以上の場合、時刻を更新してチェックを実行
+4. それ以外の場合はチェックをスキップ
 
 ## 7. 設定ファイルへの追加項目
 
 ### 7.1 config.yaml への追加
 
-```yaml
-# タスク停止機能の設定
-task_stop:
-  # タスク停止機能の有効化
-  enabled: true
-  
-  # アサインチェック間隔（LLMループのN回ごとにチェック）
-  # 1の場合は毎回チェック、0の場合はチェック無効
-  check_interval: 1
-  
-  # APIレート制限を考慮したチェック間隔（秒）
-  # この時間内に複数回チェックが発生しても、実際のAPI呼び出しは1回に制限
-  min_check_interval_seconds: 30
-  
-  # 停止時に付与するラベル（空の場合は付与しない）
-  stopped_label: "coding agent stopped"
-  
-  # Context Storageのクリーンアップ
-  cleanup_context: true
+停止ラベルは github/gitlab セクションに、他のラベルと同じ位置で設定します：
 
+```yaml
 github:
-  # 既存の設定...
-  bot_name: ""  # GitHubでのボットのユーザー名（環境変数GITHUB_BOT_NAMEでも設定可能）
+  owner: "notfolder"
+  bot_label: "coding agent"
+  processing_label: "coding agent processing"
+  done_label: "coding agent done"
+  paused_label: "coding agent paused"
+  stopped_label: "coding agent stopped"  # 停止時に付与するラベル
+  bot_name: "coding-agent-bot"           # ボットのユーザー名
+  query: 'state:open archived:false sort:updated-desc'
 
 gitlab:
-  # 既存の設定...
-  bot_name: ""  # GitLabでのボットのユーザー名（環境変数GITLAB_BOT_NAMEでも設定可能）
+  owner: "notfolder"
+  bot_label: "coding agent"
+  processing_label: "coding agent processing"
+  done_label: "coding agent done"
+  paused_label: "coding agent paused"
+  stopped_label: "coding agent stopped"  # 停止時に付与するラベル
+  bot_name: "coding-agent-bot"           # ボットのユーザー名
+  project_id: "coding-agent-project"
+  query: ''
+```
+
+タスク停止機能の設定は省略可能です（以下はすべてデフォルト値で動作）：
+
+```yaml
+# 以下の設定は省略可能（デフォルト値で動作）
+task_stop:
+  enabled: true                    # デフォルト: true
+  check_interval: 1                # デフォルト: 1（毎回チェック）
+  min_check_interval_seconds: 30   # デフォルト: 30秒
 ```
 
 ### 7.2 環境変数
@@ -632,65 +462,29 @@ GITHUB_BOT_NAME=coding-agent-bot
 GITLAB_BOT_NAME=coding-agent-bot
 ```
 
+環境変数が設定されている場合は config.yaml の `bot_name` より優先されます。
+
 ## 8. エラーハンドリング
 
 ### 8.1 API エラー時の処理
 
-アサイン状況取得時にAPIエラーが発生した場合の処理：
+アサイン状況取得時にエラーが発生した場合の処理：
 
 ```
-1. APIエラーが発生
+1. エラーが発生
    ↓
 2. エラーログを記録
    ↓
-3. リトライ（最大3回、指数バックオフ）
-   ├─ 成功 → 通常処理継続
-   └─ 失敗 → 処理継続（停止しない）
+3. 処理継続（停止しない）
    ↓
-4. 次のチェックタイミングまで待機
-```
-
-**リトライ設定:**
-```yaml
-task_stop:
-  api_retry:
-    max_retries: 3
-    initial_delay_seconds: 1
-    max_delay_seconds: 10
-    exponential_base: 2
+4. 次のチェックタイミングで再度確認
 ```
 
 **理由:**
-APIエラーでタスクを停止すると、一時的なネットワーク障害でもタスクが中断されてしまうため、
+エラー発生時にタスクを停止すると、一時的な問題でもタスクが中断されてしまうため、
 エラー時は処理を継続し、次回のチェックで再度確認します。
 
-### 8.2 ボット名未設定時の処理
-
-ボット名が環境変数にも設定ファイルにも設定されていない場合：
-
-```
-1. ボット名が未設定
-   ↓
-2. 警告ログを出力
-   ↓
-3. タスク停止機能を無効化（enabled = false として扱う）
-   ↓
-4. 処理継続
-```
-
-### 8.3 チェック処理のタイムアウト
-
-API呼び出しがタイムアウトした場合：
-
-```
-1. タイムアウト発生（30秒）
-   ↓
-2. タイムアウトログを記録
-   ↓
-3. 処理継続（停止しない）
-   ↓
-4. 次のチェックタイミングまで待機
-```
+リトライ処理は、既存のAPI呼び出し実装（`requests` ライブラリのタイムアウト設定等）と同様の方式を使用します。
 
 ## 9. テストシナリオ
 
@@ -703,7 +497,8 @@ API呼び出しがタイムアウトした場合：
 4. 次のチェックタイミングでアサイン解除を検出
 5. 停止コメントが投稿されることを確認
 6. `coding agent processing` ラベルが削除されることを確認
-7. タスクが終了することを確認
+7. `coding agent stopped` ラベルが追加されることを確認
+8. タスクが終了することを確認
 
 **シナリオS2: GitHub Pull Request でのアサイン解除による停止**
 1. GitHub Pull Request に `coding agent` ラベルとボットのアサインを設定
@@ -738,46 +533,18 @@ API呼び出しがタイムアウトした場合：
 
 ### 9.3 エラーケースのテスト
 
-**シナリオS7: API エラー時の継続**
+**シナリオS7: エラー発生時の継続**
 1. タスク処理を開始
-2. アサインチェック時にAPIエラーを発生させる（モック）
+2. アサインチェック時にエラーを発生させる（モック）
 3. 処理が継続することを確認
 4. エラーログが出力されることを確認
 
-**シナリオS8: ボット名未設定時の継続**
-1. 環境変数と設定ファイルからボット名を削除
-2. タスク処理を開始
-3. 警告ログが出力されることを確認
-4. 処理が継続することを確認（停止機能が無効化される）
-
 ### 9.4 一時停止との連携テスト
 
-**シナリオS9: アサイン解除と一時停止シグナルの同時発生**
+**シナリオS8: アサイン解除と一時停止シグナルの同時発生**
 1. タスク処理を開始
 2. 同じタイミングでアサイン解除と `pause_signal` ファイル作成
-3. 設定に応じた優先順位で処理されることを確認
-
-**優先順位の実装:**
-セクション6.3「TaskHandler への組み込み」で説明したように、`priority` 設定に基づいて処理順序を制御します。
-
-**設定例:**
-```yaml
-task_stop:
-  # 一時停止シグナルとの優先順位
-  # "pause_first": 一時停止を優先（デフォルト）
-  #   - 一時停止シグナルが先にチェックされ、状態が保存される
-  #   - 後で再開可能
-  # "stop_first": 停止を優先
-  #   - アサイン解除が先にチェックされ、タスクが終了する
-  #   - 再開不可（新規タスクとして再実行が必要）
-  priority: "pause_first"
-```
-
-**シナリオS10: 優先順位 stop_first での同時発生**
-1. `priority: "stop_first"` を設定
-2. タスク処理を開始
-3. 同じタイミングでアサイン解除と `pause_signal` ファイル作成
-4. 停止が優先されることを確認（一時停止ではなく終了）
+3. 一時停止が優先されることを確認（一時停止シグナルが先にチェックされる）
 
 ## 10. 運用ガイドライン
 
@@ -829,9 +596,9 @@ INFO - タスクを停止しました: {task_uuid}
 - アサイン解除は Issue/MR/PR への書き込み権限を持つユーザーのみが実行可能
 - ボットの権限でアサイン状況を読み取り専用で確認
 
-### 11.2 レート制限対策
-- `min_check_interval_seconds` 設定でAPI呼び出し頻度を制限
-- キャッシュを使用して同一タスクへの重複チェックを防止
+### 11.2 チェック頻度制御
+- `min_check_interval_seconds` 設定でチェック頻度を制限
+- タスクオブジェクト内の既存データを使用するため、追加のAPI呼び出しは不要
 
 ### 11.3 ログとトレーサビリティ
 - すべての停止操作をログに記録
@@ -843,9 +610,10 @@ INFO - タスクを停止しました: {task_uuid}
 ### 12.1 主要な設計ポイント
 1. **アサイン解除による停止トリガー**: ユーザーが直接Issue/MR/PRからタスク停止を指示可能
 2. **既存の一時停止機能との統合**: 同じチェックタイミングでアサイン状況を確認
-3. **GitHub/GitLab両対応**: プラットフォームに依存しない抽象化層を提供
-4. **エラー時の安全な継続**: APIエラー時は停止せずに処理を継続
+3. **GitHub/GitLab両対応**: タスクオブジェクト内の既存データを使用してアサイン状況を確認
+4. **エラー時の安全な継続**: エラー時は停止せずに処理を継続
 5. **明確な停止通知**: Issue/MR/PRへのコメントで停止理由を明示
+6. **Context Storage の保持**: 停止したタスクの処理履歴を completed ディレクトリに保存
 
 ### 12.2 期待される効果
 - ユーザーが Issue/MR/PR 上で直接タスクを停止可能に
@@ -854,8 +622,7 @@ INFO - タスクを停止しました: {task_uuid}
 - 明確な停止理由の記録によるトレーサビリティ向上
 
 ### 12.3 実装時の注意点
-- API レート制限への配慮
 - ボット名の正確な設定
-- 一時停止機能との優先順位の明確化
+- 一時停止機能との優先順位の明確化（一時停止が優先）
 - エラーハンドリングの徹底
 - テストケースの網羅的な実装
