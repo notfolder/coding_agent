@@ -314,7 +314,6 @@ class TestTaskStopManagerGitLab(unittest.TestCase):
     def test_gitlab_bot_name_from_env(self):
         """Test that GitLab bot name is retrieved from environment variable."""
         from handlers.task_key import GitLabIssueTaskKey
-        
         del self.config["gitlab"]["bot_name"]
         manager = TaskStopManager(self.config)
 
