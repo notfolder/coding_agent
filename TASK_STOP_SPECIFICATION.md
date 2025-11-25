@@ -263,8 +263,10 @@ Merge Request もIssueと同様に `assignees` または `assignee` フィール
 
 ### 5.2 停止時のコメント
 
-タスク停止時に以下のコメントをissue/MR/PRに投稿します：
+タスク停止時に以下のコメントをissue/MR/PRに投稿します。
+処理モードに応じて異なるテンプレートを使用します。
 
+**Planningモードの場合:**
 ```markdown
 ## ⛔ タスク停止
 
@@ -272,6 +274,32 @@ Merge Request もIssueと同様に `assignees` または `assignee` フィール
 
 **停止時刻:** {ISO 8601形式のタイムスタンプ}
 **処理状況:** {実行済みアクション数}/{全アクション数} 完了
+**フェーズ:** {現在のフェーズ（planning/execution/reflection/revision）}
+
+タスクを再開する場合は、コーディングエージェントを再度アサインし、
+`coding agent` ラベルを付与してください。
+```
+
+**Context Storageモード（Planning無効）の場合:**
+```markdown
+## ⛔ タスク停止
+
+コーディングエージェントのアサインが解除されたため、タスクを停止しました。
+
+**停止時刻:** {ISO 8601形式のタイムスタンプ}
+**LLM対話回数:** {実行済みのLLM対話回数}
+
+タスクを再開する場合は、コーディングエージェントを再度アサインし、
+`coding agent` ラベルを付与してください。
+```
+
+**レガシーモードの場合:**
+```markdown
+## ⛔ タスク停止
+
+コーディングエージェントのアサインが解除されたため、タスクを停止しました。
+
+**停止時刻:** {ISO 8601形式のタイムスタンプ}
 
 タスクを再開する場合は、コーディングエージェントを再度アサインし、
 `coding agent` ラベルを付与してください。
@@ -345,8 +373,18 @@ TaskStopManager
 def get_assignees(self) -> list[str]:
     """タスクにアサインされているユーザー名のリストを取得する.
 
+    この処理は外部API（GitHub/GitLab）を呼び出すため、
+    ネットワークエラーやAPIエラーが発生する可能性があります。
+    
     Returns:
         アサインされているユーザー名のリスト
+        
+    Raises:
+        Exception: API呼び出しに失敗した場合
+        
+    Note:
+        呼び出し元でエラーハンドリングを行い、
+        エラー時はタスクを停止せずに処理を継続することを推奨
 
     """
 ```
@@ -354,32 +392,49 @@ def get_assignees(self) -> list[str]:
 **GitHub Issue 実装例:**
 ```python
 def get_assignees(self) -> list[str]:
-    """Issueにアサインされているユーザー名のリストを取得する."""
-    # 最新の情報を取得
-    issue = self.mcp_client.call_tool(
-        "get_issue",
-        {"owner": self.issue["owner"], "repo": self.issue["repo"], "issue_number": self.issue["number"]},
-    )
-    return [assignee.get("login", "") for assignee in issue.get("assignees", [])]
+    """Issueにアサインされているユーザー名のリストを取得する.
+    
+    Raises:
+        Exception: API呼び出しに失敗した場合
+    """
+    try:
+        # 最新の情報を取得
+        issue = self.mcp_client.call_tool(
+            "get_issue",
+            {"owner": self.issue["owner"], "repo": self.issue["repo"], "issue_number": self.issue["number"]},
+        )
+        return [assignee.get("login", "") for assignee in issue.get("assignees", [])]
+    except Exception as e:
+        self.logger.exception("アサイン情報の取得に失敗: %s", e)
+        raise  # 呼び出し元でエラーハンドリングを行う
 ```
 
 **GitLab Issue 実装例:**
 ```python
 def get_assignees(self) -> list[str]:
-    """Issueにアサインされているユーザー名のリストを取得する."""
-    # 最新の情報を取得
-    issue = self.mcp_client.call_tool(
-        "get_issue",
-        {"project_id": str(self.project_id), "issue_iid": self.issue_iid},
-    )
-    assignees = []
-    # assignees配列があれば使用
-    if issue.get("assignees"):
-        assignees = [a.get("username", "") for a in issue.get("assignees", [])]
-    # assignee単体フィールドがあれば追加
-    elif issue.get("assignee"):
-        assignees = [issue["assignee"].get("username", "")]
-    return assignees
+    """Issueにアサインされているユーザー名のリストを取得する.
+    
+    Raises:
+        Exception: API呼び出しに失敗した場合
+    """
+    try:
+        # 最新の情報を取得
+        issue = self.mcp_client.call_tool(
+            "get_issue",
+            {"project_id": str(self.project_id), "issue_iid": self.issue_iid},
+        )
+        assignees = []
+        # assignees配列が存在し、かつ空でない場合
+        assignees_list = issue.get("assignees", [])
+        if assignees_list and len(assignees_list) > 0:
+            assignees = [a.get("username", "") for a in assignees_list]
+        # assignees配列がない、または空の場合、assignee単体フィールドを確認
+        elif issue.get("assignee"):
+            assignees = [issue["assignee"].get("username", "")]
+        return assignees
+    except Exception as e:
+        self.logger.exception("アサイン情報の取得に失敗: %s", e)
+        raise  # 呼び出し元でエラーハンドリングを行う
 ```
 
 ### 6.3 TaskHandler への組み込み
@@ -396,22 +451,82 @@ def _handle_with_context_storage(self, task: Task, task_config: dict[str, Any]) 
     
     # ... 既存の初期化処理 ...
     
+    # Check interval counter
+    check_counter = 0
+    check_interval = task_config.get("task_stop", {}).get("check_interval", 1)
+    
     while count < max_count:
-        # Check for pause signal (既存)
-        if pause_manager.check_pause_signal():
-            # ... 一時停止処理 ...
-            return
+        check_counter += 1
         
-        # Check assignee status (新規追加)
-        if stop_manager.enabled and not stop_manager.check_assignee_status(task):
-            self.logger.info("アサイン解除を検出、タスクを停止します")
-            stop_manager.stop_task(task, task.uuid, "アサインが解除されました")
-            return  # finish()を呼ばずに終了
+        # 優先順位の取得（デフォルトは pause_first）
+        priority = task_config.get("task_stop", {}).get("priority", "pause_first")
+        
+        if priority == "pause_first":
+            # Check for pause signal first (既存)
+            if pause_manager.check_pause_signal():
+                # ... 一時停止処理 ...
+                return
+            
+            # Then check assignee status (新規追加)
+            # check_interval に基づいてチェック頻度を制御
+            if check_interval > 0 and check_counter % check_interval == 0:
+                if stop_manager.enabled and stop_manager.should_check_now():
+                    if not stop_manager.check_assignee_status(task):
+                        self.logger.info("アサイン解除を検出、タスクを停止します")
+                        stop_manager.stop_task(task, task.uuid, "アサインが解除されました")
+                        return  # finish()を呼ばずに終了
+        else:  # stop_first
+            # Check assignee status first
+            if check_interval > 0 and check_counter % check_interval == 0:
+                if stop_manager.enabled and stop_manager.should_check_now():
+                    if not stop_manager.check_assignee_status(task):
+                        self.logger.info("アサイン解除を検出、タスクを停止します")
+                        stop_manager.stop_task(task, task.uuid, "アサインが解除されました")
+                        return
+            
+            # Then check for pause signal
+            if pause_manager.check_pause_signal():
+                # ... 一時停止処理 ...
+                return
         
         # ... 既存の処理ループ ...
 ```
 
-### 6.4 PlanningCoordinator への組み込み
+### 6.4 TaskStopManager の should_check_now メソッド
+
+`min_check_interval_seconds` 設定に基づき、APIレート制限を考慮したチェックを実装します。
+
+```python
+class TaskStopManager:
+    def __init__(self, config: dict[str, Any]) -> None:
+        # ... 既存の初期化処理 ...
+        task_stop_config = config.get("task_stop", {})
+        self.min_check_interval_seconds = task_stop_config.get("min_check_interval_seconds", 30)
+        self._last_check_time: float | None = None
+    
+    def should_check_now(self) -> bool:
+        """min_check_interval_seconds を考慮して、チェックを実行すべきかを判定.
+        
+        Returns:
+            True: チェックを実行すべき
+            False: 前回のチェックから十分な時間が経過していない
+        """
+        import time
+        current_time = time.time()
+        
+        if self._last_check_time is None:
+            self._last_check_time = current_time
+            return True
+        
+        elapsed = current_time - self._last_check_time
+        if elapsed >= self.min_check_interval_seconds:
+            self._last_check_time = current_time
+            return True
+        
+        return False
+```
+
+### 6.5 PlanningCoordinator への組み込み
 
 `PlanningCoordinator` クラスにも同様にアサインチェックを追加します。
 
@@ -640,16 +755,29 @@ API呼び出しがタイムアウトした場合：
 **シナリオS9: アサイン解除と一時停止シグナルの同時発生**
 1. タスク処理を開始
 2. 同じタイミングでアサイン解除と `pause_signal` ファイル作成
-3. 一時停止が優先されることを確認（または設定で優先順位を変更可能）
+3. 設定に応じた優先順位で処理されることを確認
+
+**優先順位の実装:**
+セクション6.3「TaskHandler への組み込み」で説明したように、`priority` 設定に基づいて処理順序を制御します。
 
 **設定例:**
 ```yaml
 task_stop:
   # 一時停止シグナルとの優先順位
-  # "pause_first": 一時停止を優先
+  # "pause_first": 一時停止を優先（デフォルト）
+  #   - 一時停止シグナルが先にチェックされ、状態が保存される
+  #   - 後で再開可能
   # "stop_first": 停止を優先
+  #   - アサイン解除が先にチェックされ、タスクが終了する
+  #   - 再開不可（新規タスクとして再実行が必要）
   priority: "pause_first"
 ```
+
+**シナリオS10: 優先順位 stop_first での同時発生**
+1. `priority: "stop_first"` を設定
+2. タスク処理を開始
+3. 同じタイミングでアサイン解除と `pause_signal` ファイル作成
+4. 停止が優先されることを確認（一時停止ではなく終了）
 
 ## 10. 運用ガイドライン
 
