@@ -144,3 +144,30 @@ class Task(ABC):
             タスクの本文
 
         """
+
+    @abstractmethod
+    def get_assignees(self) -> list[str]:
+        """タスクにアサインされているユーザー名のリストを取得する.
+
+        タスクオブジェクト内にキャッシュされているアサイン情報を返します。
+        最新情報を取得する場合は refresh_assignees() を使用してください。
+
+        Returns:
+            アサインされているユーザー名のリスト
+
+        """
+
+    @abstractmethod
+    def refresh_assignees(self) -> list[str]:
+        """アサイン情報をAPIから再取得して返す.
+
+        GitHub/GitLab APIを呼び出して最新のアサイン情報を取得し、
+        内部状態を更新してから返します。
+
+        Returns:
+            アサインされているユーザー名のリスト
+
+        Raises:
+            Exception: API呼び出しに失敗した場合
+
+        """

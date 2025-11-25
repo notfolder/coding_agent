@@ -100,6 +100,9 @@ class PlanningCoordinator:
         # Pause/resume support
         self.pause_manager = None  # Will be set by TaskHandler
         
+        # Task stop support
+        self.stop_manager = None  # Will be set by TaskHandler
+        
         # Checkbox tracking for progress updates
         self.plan_comment_id = None  # ID of the comment containing the checklist
 
@@ -116,6 +119,12 @@ class PlanningCoordinator:
             if self._check_pause_signal():
                 self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
                 self._handle_pause()
+                return True  # Return success to avoid marking as failed
+            
+            # Check for stop signal before starting
+            if self._check_stop_signal():
+                self.logger.info("アサイン解除を検出、タスクを停止します")
+                self._handle_stop()
                 return True  # Return success to avoid marking as failed
             
             # Post start comment
@@ -149,6 +158,12 @@ class PlanningCoordinator:
                 self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
                 self._handle_pause()
                 return True
+            
+            # Check for stop signal after planning
+            if self._check_stop_signal():
+                self.logger.info("アサイン解除を検出、タスクを停止します")
+                self._handle_stop()
+                return True
 
             # Post execution start
             self._post_phase_comment("execution", "started", "Beginning execution of planned actions...")
@@ -164,6 +179,12 @@ class PlanningCoordinator:
                 if self._check_pause_signal():
                     self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
                     self._handle_pause()
+                    return True
+                
+                # Check for stop signal before each action
+                if self._check_stop_signal():
+                    self.logger.info("アサイン解除を検出、タスクを停止します")
+                    self._handle_stop()
                     return True
                 
                 # Execute next action
@@ -192,6 +213,12 @@ class PlanningCoordinator:
                         self._handle_pause()
                         return True
                     
+                    # Check for stop signal before reflection
+                    if self._check_stop_signal():
+                        self.logger.info("アサイン解除を検出、タスクを停止します")
+                        self._handle_stop()
+                        return True
+                    
                     self._post_phase_comment("reflection", "started", f"Analyzing results after {self.action_counter} actions...")
                     self.current_phase = "reflection"
                     reflection = self._execute_reflection_phase(result)
@@ -201,6 +228,12 @@ class PlanningCoordinator:
                         if self._check_pause_signal():
                             self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
                             self._handle_pause()
+                            return True
+                        
+                        # Check for stop signal before revision
+                        if self._check_stop_signal():
+                            self.logger.info("アサイン解除を検出、タスクを停止します")
+                            self._handle_stop()
                             return True
                         
                         # Revise plan if needed
@@ -967,12 +1000,19 @@ class PlanningCoordinator:
         Returns:
             Planning state dictionary
         """
+        # Get total actions count for stop message
+        total_actions = 0
+        if self.current_plan:
+            action_plan = self.current_plan.get("action_plan", {})
+            total_actions = len(action_plan.get("actions", []))
+        
         return {
             "enabled": True,
             "current_phase": self.current_phase,
             "action_counter": self.action_counter,
             "revision_counter": self.revision_counter,
             "checklist_comment_id": self.plan_comment_id,
+            "total_actions": total_actions,
         }
 
     def _check_pause_signal(self) -> bool:
@@ -985,4 +1025,35 @@ class PlanningCoordinator:
             return False
         
         return self.pause_manager.check_pause_signal()
+
+    def _check_stop_signal(self) -> bool:
+        """Check if stop signal (assignee removal) is detected.
+        
+        Returns:
+            True if stop signal is detected, False otherwise
+        """
+        if self.stop_manager is None:
+            return False
+        
+        # Check if it's time to check and if bot is unassigned
+        if self.stop_manager.should_check_now():
+            return not self.stop_manager.check_assignee_status(self.task)
+        
+        return False
+
+    def _handle_stop(self) -> None:
+        """Handle stop operation for planning mode."""
+        if self.stop_manager is None:
+            self.logger.warning("Stop manager not set, cannot stop")
+            return
+        
+        # Get current planning state with total actions
+        planning_state = self.get_planning_state()
+        
+        # Stop the task with planning state
+        self.stop_manager.stop_task(
+            self.task,
+            self.task.uuid,
+            planning_state=planning_state,
+        )
 
