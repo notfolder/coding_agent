@@ -129,6 +129,32 @@ class TaskGitLabIssue(Task):
         """Issueの本文を取得する."""
         return self.issue.get("description", "")
 
+    def get_assignees(self) -> list[str]:
+        """Issueにアサインされているユーザー名のリストを取得する."""
+        # GitLabでは assignees (複数) と assignee (単一) の両方がある
+        assignees = self.issue.get("assignees", [])
+        if assignees:
+            return [a.get("username", "") for a in assignees if a.get("username")]
+        
+        # assignees が空の場合は assignee を確認
+        assignee = self.issue.get("assignee")
+        if assignee and assignee.get("username"):
+            return [assignee.get("username")]
+        
+        return []
+
+    def refresh_assignees(self) -> list[str]:
+        """APIからアサイン情報を再取得して返す."""
+        # Fetch latest issue data from GitLab API
+        args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid}
+        updated_issue = self.mcp_client.call_tool("get_issue", args)
+        
+        # Update internal state
+        self.issue["assignees"] = updated_issue.get("assignees", [])
+        self.issue["assignee"] = updated_issue.get("assignee")
+        
+        return self.get_assignees()
+
 
 class TaskGitLabMergeRequest(Task):
     def __init__(
@@ -250,6 +276,34 @@ class TaskGitLabMergeRequest(Task):
     def body(self) -> str:
         """Merge Requestの本文を取得する."""
         return self.mr.get("description", "")
+
+    def get_assignees(self) -> list[str]:
+        """Merge Requestにアサインされているユーザー名のリストを取得する."""
+        # GitLabでは assignees (複数) と assignee (単一) の両方がある
+        assignees = self.mr.get("assignees", [])
+        if assignees:
+            return [a.get("username", "") for a in assignees if a.get("username")]
+        
+        # assignees が空の場合は assignee を確認
+        assignee = self.mr.get("assignee")
+        if assignee and assignee.get("username"):
+            return [assignee.get("username")]
+        
+        return []
+
+    def refresh_assignees(self) -> list[str]:
+        """APIからアサイン情報を再取得して返す."""
+        # Fetch latest MR data from GitLab API
+        updated_mr = self.gitlab_client.get_merge_request(
+            project_id=self.project_id,
+            mr_iid=self.merge_request_iid,
+        )
+        
+        # Update internal state
+        self.mr["assignees"] = updated_mr.get("assignees", [])
+        self.mr["assignee"] = updated_mr.get("assignee")
+        
+        return self.get_assignees()
 
 
 class TaskGetterFromGitLab(TaskGetter):

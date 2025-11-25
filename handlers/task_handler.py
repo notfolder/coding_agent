@@ -128,9 +128,13 @@ class TaskHandler:
         from clients.lm_client import get_llm_client
         from context_storage import ContextCompressor, TaskContextManager
         from pause_resume_manager import PauseResumeManager
+        from task_stop_manager import TaskStopManager
         
         # Initialize pause/resume manager
         pause_manager = PauseResumeManager(task_config)
+        
+        # Initialize task stop manager
+        stop_manager = TaskStopManager(task_config)
         
         # Check if this is a resumed task
         is_resumed = getattr(task, "is_resumed", False)
@@ -193,6 +197,12 @@ class TaskHandler:
                     pause_manager.pause_task(task, task.uuid, planning_state=None)
                     return  # Exit without calling finish()
                 
+                # Check for assignee removal (task stop)
+                if stop_manager.should_check_now() and not stop_manager.check_assignee_status(task):
+                    self.logger.info("アサイン解除を検出、タスクを停止します")
+                    stop_manager.stop_task(task, task.uuid, llm_call_count=count)
+                    return  # Exit without calling finish()
+                
                 # Check if compression is needed
                 if compressor.should_compress():
                     self.logger.info("Context compression triggered")
@@ -228,9 +238,13 @@ class TaskHandler:
         from context_storage import TaskContextManager
         from handlers.planning_coordinator import PlanningCoordinator
         from pause_resume_manager import PauseResumeManager
+        from task_stop_manager import TaskStopManager
         
         # Initialize pause/resume manager
         pause_manager = PauseResumeManager(task_config)
+        
+        # Initialize task stop manager
+        stop_manager = TaskStopManager(task_config)
         
         # Check if this is a resumed task
         is_resumed = getattr(task, "is_resumed", False)
@@ -270,6 +284,9 @@ class TaskHandler:
             
             # Pass pause manager to coordinator
             coordinator.pause_manager = pause_manager
+            
+            # Pass stop manager to coordinator
+            coordinator.stop_manager = stop_manager
             
             # Execute with planning
             success = coordinator.execute_with_planning()

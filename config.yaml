@@ -120,6 +120,8 @@ github:
   processing_label: "coding agent processing"
   done_label: "coding agent done"
   paused_label: "coding agent paused"
+  stopped_label: "coding agent stopped"
+  # bot_name: "coding-agent-bot"  # ボットのユーザー名（環境変数 GITHUB_BOT_NAME で上書き可能）
   query: 'state:open archived:false sort:updated-desc sort:updated-desc'
 
 gitlab:
@@ -128,6 +130,8 @@ gitlab:
   processing_label: "coding agent processing"
   done_label: "coding agent done"
   paused_label: "coding agent paused"
+  stopped_label: "coding agent stopped"
+  # bot_name: "coding-agent-bot"  # ボットのユーザー名（環境変数 GITLAB_BOT_NAME で上書き可能）
   project_id: "coding-agent-project"
   query: ''
 

@@ -149,6 +149,26 @@ class TaskGitHubIssue(Task):
         """Issueの本文を取得する."""
         return self.issue.get("body", "")
 
+    def get_assignees(self) -> list[str]:
+        """Issueにアサインされているユーザー名のリストを取得する."""
+        assignees = self.issue.get("assignees", [])
+        return [a.get("login", "") for a in assignees if a.get("login")]
+
+    def refresh_assignees(self) -> list[str]:
+        """APIからアサイン情報を再取得して返す."""
+        # Fetch latest issue data from GitHub API
+        args = {
+            "owner": self.config["github"]["owner"],
+            "repo": self.issue["repo"],
+            "issue_number": self.issue["number"],
+        }
+        updated_issue = self.mcp_client.call_tool("get_issue", args)
+        
+        # Update internal state
+        self.issue["assignees"] = updated_issue.get("assignees", [])
+        
+        return self.get_assignees()
+
 
 class TaskGitHubPullRequest(Task):
     def __init__(
@@ -276,6 +296,25 @@ class TaskGitHubPullRequest(Task):
     def body(self) -> str:
         """Pull Requestの本文を取得する."""
         return self.pr.get("body", "")
+
+    def get_assignees(self) -> list[str]:
+        """Pull Requestにアサインされているユーザー名のリストを取得する."""
+        assignees = self.pr.get("assignees", [])
+        return [a.get("login", "") for a in assignees if a.get("login")]
+
+    def refresh_assignees(self) -> list[str]:
+        """APIからアサイン情報を再取得して返す."""
+        # Fetch latest PR data from GitHub API
+        updated_pr = self.github_client.get_pull_request(
+            owner=self.pr["owner"],
+            repo=self.pr["repo"],
+            pull_number=self.pr["number"],
+        )
+        
+        # Update internal state
+        self.pr["assignees"] = updated_pr.get("assignees", [])
+        
+        return self.get_assignees()
 
 
 class TaskGetterFromGitHub(TaskGetter):
