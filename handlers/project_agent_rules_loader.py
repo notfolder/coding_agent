@@ -382,8 +382,6 @@ class ProjectAgentRulesLoader:
 
         return []
 
-        return []
-
     def _find_root_files(self) -> list[Path]:
         """AGENT.mdとCLAUDE.mdを検索する.
 
