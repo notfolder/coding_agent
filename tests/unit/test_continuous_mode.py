@@ -259,7 +259,10 @@ class TestContinuousModeConfig:
         """デフォルト設定値が正しく読み込まれる."""
         import yaml
 
-        config_path = Path("/home/runner/work/coding_agent/coding_agent/config.yaml")
+        # テストファイルからの相対パスでconfig.yamlを取得
+        current_file = Path(__file__)
+        repo_root = current_file.parent.parent.parent  # tests/unit -> tests -> repo root
+        config_path = repo_root / "config.yaml"
         with config_path.open() as f:
             config = yaml.safe_load(f)
 

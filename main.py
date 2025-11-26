@@ -358,7 +358,9 @@ def produce_tasks(
             paused_count += 1
             logger.info("一時停止タスクをキューに再投入しました: %s", task_state.get("uuid"))
         except Exception:
-            logger.exception("一時停止タスクの再投入エラー")
+            logger.exception(
+                "一時停止タスクの再投入エラー: uuid=%s", task_state.get("uuid")
+            )
 
     if paused_count > 0:
         logger.info("%d件の一時停止タスクをキューに再投入しました", paused_count)
