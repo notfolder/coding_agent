@@ -892,6 +892,12 @@ class PlanningCoordinator:
             # Replace placeholder with MCP prompts
             planning_prompt = planning_prompt.replace("{mcp_prompt}", mcp_prompt)
             
+            # プロジェクト固有のエージェントルールを読み込み
+            project_rules = self._load_project_agent_rules()
+            if project_rules:
+                planning_prompt = planning_prompt + "\n" + project_rules
+                self.logger.info("Added project-specific agent rules to planning prompt")
+            
             # Send system prompt to LLM client
             if hasattr(self.llm_client, "send_system_prompt"):
                 self.llm_client.send_system_prompt(planning_prompt)
@@ -1056,4 +1062,56 @@ class PlanningCoordinator:
             self.task.uuid,
             planning_state=planning_state,
         )
+
+    def _load_project_agent_rules(self) -> str:
+        """プロジェクト固有のエージェントルールを読み込む.
+
+        Returns:
+            プロジェクト固有のエージェントルール文字列
+
+        """
+        import os
+
+        from handlers.project_agent_rules_loader import ProjectAgentRulesLoader
+
+        # 環境変数による有効/無効チェック
+        env_enabled = os.getenv("PROJECT_AGENT_RULES_ENABLED")
+        if env_enabled is not None:
+            if env_enabled.lower() in ("false", "0", "no"):
+                return ""
+        else:
+            # 環境変数が設定されていない場合は設定ファイルをチェック
+            rules_config = self.config.get("project_agent_rules", {})
+            if not rules_config.get("enabled", True):
+                return ""
+
+        # タスクからowner/repo (GitHub) または project_id (GitLab) を取得してMCPモードで読み込み
+        try:
+            task_key = self.task.get_task_key()
+            owner = getattr(task_key, "owner", None)
+            repo = getattr(task_key, "repo", None)
+            project_id = getattr(task_key, "project_id", None)
+
+            # GitHub の場合
+            if owner and repo and "github" in self.mcp_clients:
+                loader = ProjectAgentRulesLoader(
+                    config=self.config,
+                    mcp_client=self.mcp_clients["github"],
+                    owner=owner,
+                    repo=repo,
+                )
+                return loader.load_rules()
+
+            # GitLab の場合
+            if project_id and "gitlab" in self.mcp_clients:
+                loader = ProjectAgentRulesLoader(
+                    config=self.config,
+                    mcp_client=self.mcp_clients["gitlab"],
+                    project_id=str(project_id),
+                )
+                return loader.load_rules()
+        except Exception as e:
+            self.logger.warning("プロジェクトルールの読み込みに失敗しました: %s", e)
+
+        return ""
 
