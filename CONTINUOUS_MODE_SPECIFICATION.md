@@ -11,7 +11,7 @@
 - コンテナ化により、スケーラビリティと運用管理が向上する
 
 ### 1.3 要求事項
-- producerは設定ファイルまたは環境変数で指定された時間（分単位）待機してからループ実行する
+- producerは設定ファイルで指定された時間（分単位）待機してからループ実行する
 - consumerはsleep無しで、処理が終了次第すぐに次のタスクを取得してループ実行する
 - 両モードとも、gracefulな停止をサポートする
 - 既存のcron実行との互換性を維持する
@@ -93,10 +93,9 @@ main.pyに`--continuous`オプションを追加します。
 
 #### 3.2.2 待機時間の設定
 
-**設定方法（優先順位順）:**
-1. 環境変数: `PRODUCER_INTERVAL_MINUTES`
-2. 設定ファイル: `continuous.producer.interval_minutes`
-3. デフォルト値: 5分
+**設定方法:**
+- 設定ファイル: `continuous.producer.interval_minutes`
+- デフォルト値: 5分
 
 **設定例:**
 ```yaml
@@ -105,11 +104,6 @@ continuous:
   producer:
     # タスク取得間隔（分）
     interval_minutes: 5
-```
-
-```bash
-# 環境変数での設定
-export PRODUCER_INTERVAL_MINUTES=10
 ```
 
 #### 3.2.3 待機処理の実装方針
@@ -171,10 +165,9 @@ export PRODUCER_INTERVAL_MINUTES=10
 
 #### 3.3.2 キュー取得のタイムアウト設定
 
-**設定方法（優先順位順）:**
-1. 環境変数: `CONSUMER_QUEUE_TIMEOUT_SECONDS`
-2. 設定ファイル: `continuous.consumer.queue_timeout_seconds`
-3. デフォルト値: 30秒
+**設定方法:**
+- 設定ファイル: `continuous.consumer.queue_timeout_seconds`
+- デフォルト値: 30秒
 
 **設定例:**
 ```yaml
@@ -204,24 +197,13 @@ continuous:
 
 ### 3.4 Gracefulシャットダウン
 
-#### 3.4.1 停止シグナルの種類
+#### 3.4.1 停止シグナル
 
-1. **UNIXシグナル**: SIGTERM, SIGINT (Ctrl+C)
-2. **停止ファイル**: `contexts/stop_signal`（既存のpause_signalとは別）
+**停止ファイル:** `contexts/pause_signal`（既存の一時停止機能と同じファイルを使用）
 
-#### 3.4.2 シグナルハンドリング
+継続動作モードでは、`contexts/pause_signal`ファイルの存在をチェックし、ファイルが存在する場合はgracefulシャットダウンを開始します。このファイルは既存の一時停止機能でも使用されており、継続動作モードでは一時停止ではなくプロセス終了として動作します。
 
-**シグナルハンドラの実装方針:**
-1. SIGTERM, SIGINTをキャッチするハンドラを登録
-2. ハンドラ内でグローバルフラグを設定
-3. メインループでフラグをチェックして終了判定
-
-**停止ファイルによるシャットダウン:**
-- `contexts/stop_signal`ファイルの存在をチェック
-- ファイルが存在する場合、gracefulシャットダウンを開始
-- シャットダウン完了後、ファイルを削除
-
-#### 3.4.3 シャットダウン時の動作
+#### 3.4.2 シャットダウン時の動作
 
 **Producerの場合:**
 1. 現在のタスク取得処理を完了
@@ -234,10 +216,6 @@ continuous:
 2. タスク完了後、新しいタスクを取得しない
 3. ログに停止メッセージを出力
 4. プロセスを終了
-
-**注意事項:**
-- 処理中タスクの中断は行わない（一時停止機能は別途pause_signalで対応）
-- シャットダウンタイムアウト（Dockerのstop_grace_period）を考慮
 
 ### 3.5 設定ファイルの拡張
 
@@ -252,7 +230,6 @@ continuous:
   
   producer:
     # タスク取得間隔（分）
-    # 環境変数 PRODUCER_INTERVAL_MINUTES で上書き可能
     interval_minutes: 5
     
     # 起動時の初回実行を遅延させるか（デフォルト: false）
@@ -261,24 +238,14 @@ continuous:
   
   consumer:
     # キュー取得タイムアウト（秒）
-    # 環境変数 CONSUMER_QUEUE_TIMEOUT_SECONDS で上書き可能
     queue_timeout_seconds: 30
     
     # タスク処理間の最小待機時間（秒、デフォルト: 0）
     # レート制限などが必要な場合に設定
     min_interval_seconds: 0
-  
-  # 停止シグナルファイルのパス
-  stop_signal_file: "contexts/stop_signal"
 ```
 
-#### 3.5.2 環境変数での上書き
-
-| 環境変数名 | 説明 | デフォルト |
-|-----------|------|-----------|
-| PRODUCER_INTERVAL_MINUTES | Producer待機間隔（分） | 5 |
-| CONSUMER_QUEUE_TIMEOUT_SECONDS | Consumerキュー取得タイムアウト（秒） | 30 |
-| CONTINUOUS_STOP_SIGNAL_FILE | 停止シグナルファイルパス | contexts/stop_signal |
+**注:** 停止シグナルファイルは`contexts/pause_signal`を使用します（config.yamlの`pause_resume.signal_file`設定と同じパス）。
 
 ### 3.6 docker-compose.ymlの拡張
 
@@ -308,9 +275,6 @@ services:
       - RABBITMQ_PORT=5672
       - RABBITMQ_USER=guest
       - RABBITMQ_PASSWORD=guest
-      
-      # 継続動作モード設定
-      - PRODUCER_INTERVAL_MINUTES=${PRODUCER_INTERVAL_MINUTES:-5}
       
       # LLM設定
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
@@ -347,9 +311,6 @@ services:
       - RABBITMQ_PORT=5672
       - RABBITMQ_USER=guest
       - RABBITMQ_PASSWORD=guest
-      
-      # 継続動作モード設定
-      - CONSUMER_QUEUE_TIMEOUT_SECONDS=${CONSUMER_QUEUE_TIMEOUT_SECONDS:-30}
       
       # LLM設定
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
@@ -437,13 +398,10 @@ services:
 
 ### 4.2 一時停止・リジューム機能との連携
 
-- 継続動作モードでも、`contexts/pause_signal`による一時停止は有効
-- 一時停止シグナル検出時の動作:
-  - Producer: タスク取得後、キュー追加前に一時停止チェック
-  - Consumer: タスク処理中は既存の一時停止機能で対応
-- 停止シグナル（`contexts/stop_signal`）との違い:
-  - pause_signal: タスク状態を保存して一時停止（再開可能）
-  - stop_signal: プロセスをgracefulに終了（再起動で継続）
+- 継続動作モードでも、`contexts/pause_signal`による停止制御は有効
+- シグナル検出時の動作:
+  - Producer: タスク取得後、キュー追加前にシグナルチェックし、検出時はプロセスを終了
+  - Consumer: タスク処理完了後、次のタスク取得前にシグナルチェックし、検出時はプロセスを終了
 
 ### 4.3 ファイルロック機能
 
@@ -505,7 +463,6 @@ INFO - 継続動作モードを終了しました（Producer）
 
 1. **ログ出力**: 定期的にINFOレベルで統計情報を出力
 2. **ヘルスチェックファイル**: JSON形式でメトリクスを記録
-3. **将来的な拡張**: Prometheus形式でのメトリクスエクスポート対応
 
 ## 6. エラーハンドリング
 
@@ -555,80 +512,37 @@ INFO - 継続動作モードを終了しました（Producer）
 3. 認証エラー（トークン無効）
 4. 致命的な内部エラー
 
-## 7. セキュリティ考慮事項
+## 7. テストシナリオ
 
-### 7.1 シグナルファイルのセキュリティ
-
-- 停止シグナルファイルは特定のディレクトリ（contexts/）内に限定
-- ファイルパスの正規化とバリデーション
-- シンボリックリンク攻撃の防止
-
-### 7.2 環境変数の管理
-
-- APIキーなどの機密情報は環境変数で管理
-- docker-compose.ymlには機密情報を直接記載しない
-- .envファイルを使用し、.gitignoreに追加
-
-### 7.3 コンテナセキュリティ
-
-- 非rootユーザーでの実行を推奨
-- 最小権限の原則に従う
-- ボリュームマウントの制限
-
-## 8. テストシナリオ
-
-### 8.1 基本動作テスト
+### 7.1 基本動作テスト
 
 #### シナリオ1: Producer継続動作
 1. `--mode producer --continuous`で起動
 2. タスクが取得されることを確認
 3. 指定間隔で待機することを確認
 4. 待機後に再度タスク取得が行われることを確認
-5. SIGTERM送信でgracefulに終了することを確認
+5. `contexts/pause_signal`でgracefulに終了することを確認
 
 #### シナリオ2: Consumer継続動作
 1. `--mode consumer --continuous`で起動
 2. キューにタスクがない場合、タイムアウト後にループ継続を確認
 3. タスク追加後、即座に処理開始を確認
 4. タスク完了後、sleepなしで次のタスク取得を確認
-5. SIGTERM送信でgracefulに終了することを確認
+5. `contexts/pause_signal`でgracefulに終了することを確認
 
-### 8.2 シグナルハンドリングテスト
+### 7.2 スケーラビリティテスト
 
-#### シナリオ3: SIGTERM シャットダウン
-1. 継続動作モードで起動
-2. タスク処理中にSIGTERMを送信
-3. 現在のタスクが完了することを確認
-4. 新しいタスクを取得せずに終了することを確認
-
-#### シナリオ4: 停止ファイルによるシャットダウン
-1. 継続動作モードで起動
-2. `contexts/stop_signal`ファイルを作成
-3. 次のループでシャットダウンが開始されることを確認
-4. プロセス終了後、停止ファイルが削除されることを確認
-
-### 8.3 エラーハンドリングテスト
-
-#### シナリオ5: RabbitMQ接続断
-1. 継続動作モードで起動
-2. RabbitMQコンテナを停止
-3. 再接続リトライが行われることを確認
-4. RabbitMQコンテナを再起動
-5. 自動的に接続が回復することを確認
-
-### 8.4 スケーラビリティテスト
-
-#### シナリオ6: 複数Consumer
+#### シナリオ3: 複数Consumer
 1. docker-compose upで複数のConsumerを起動（replicas: 3）
 2. 複数タスクをキューに追加
 3. 各Consumerが異なるタスクを処理することを確認
 4. タスクの重複処理がないことを確認
 
-## 9. 運用ガイドライン
+## 8. 運用ガイドライン
 
-### 9.1 起動方法
+### 8.1 起動方法
 
-#### 9.1.1 docker-composeでの起動
+#### 8.1.1 docker-composeでの起動
 
 ```bash
 # 全サービス起動
@@ -641,7 +555,7 @@ docker-compose up -d coding-agent-producer coding-agent-consumer
 docker-compose up -d --scale coding-agent-consumer=3
 ```
 
-#### 9.1.2 手動起動（デバッグ用）
+#### 8.1.2 手動起動（デバッグ用）
 
 ```bash
 # Producer継続動作
@@ -651,26 +565,17 @@ python main.py --mode producer --continuous
 python main.py --mode consumer --continuous
 ```
 
-### 9.2 停止方法
-
-#### 9.2.1 Graceful停止（推奨）
+### 8.2 停止方法
 
 ```bash
 # docker-composeで停止
 docker-compose stop coding-agent-producer coding-agent-consumer
 
 # または停止ファイルを作成
-touch contexts/stop_signal
+touch contexts/pause_signal
 ```
 
-#### 9.2.2 強制停止（非推奨）
-
-```bash
-# docker-compose killで強制終了
-docker-compose kill coding-agent-producer coding-agent-consumer
-```
-
-### 9.3 ログ確認
+### 8.3 ログ確認
 
 ```bash
 # Producerログ
@@ -684,63 +589,27 @@ tail -f logs/producer.log
 tail -f logs/consumer.log
 ```
 
-### 9.4 ヘルスチェック確認
+## 9. まとめ
 
-```bash
-# コンテナのヘルス状態確認
-docker-compose ps
+### 9.1 主要な設計ポイント
 
-# 詳細なヘルスチェック情報
-docker inspect coding-agent-producer | jq '.[0].State.Health'
-```
-
-### 9.5 トラブルシューティング
-
-#### 9.5.1 Producerが起動しない
-1. RabbitMQ接続を確認
-2. 設定ファイルを確認
-3. 環境変数（APIトークン等）を確認
-4. ログで詳細エラーを確認
-
-#### 9.5.2 Consumerがタスクを処理しない
-1. RabbitMQキューにタスクがあるか確認
-2. Producerが正常動作しているか確認
-3. ログでエラーを確認
-
-#### 9.5.3 停止しない
-1. 停止シグナルファイルが正しい場所にあるか確認
-2. ファイルの権限を確認
-3. stop_grace_periodを超えていないか確認
-
-## 10. まとめ
-
-### 10.1 主要な設計ポイント
-
-1. **Producerの待機間隔設定**: 環境変数または設定ファイルで分単位で指定可能
+1. **Producerの待機間隔設定**: 設定ファイルで分単位で指定可能
 2. **Consumerのsleepなし動作**: タイムアウト付きキュー取得で即時処理を実現
-3. **Gracefulシャットダウン**: UNIXシグナルと停止ファイルの両方に対応
+3. **Gracefulシャットダウン**: `contexts/pause_signal`ファイルによる停止に対応
 4. **既存機能との互換性**: cronベース実行、一時停止機能との共存
 5. **スケーラビリティ**: Consumerの水平スケール対応
 
-### 10.2 期待される効果
+### 9.2 期待される効果
 
 - タスク処理のリアルタイム性向上
 - 運用管理の簡素化（docker-compose による一元管理）
 - スケーラビリティの向上（Consumer の水平スケール）
 - 監視・モニタリングの容易化
 
-### 10.3 実装時の注意点
+### 9.3 実装時の注意点
 
 - 既存のmain.pyへの変更は最小限に抑える
 - 新機能は`--continuous`オプション有効時のみ動作
 - テストは単発実行と継続動作の両方で実施
-- セキュリティ（シグナルファイル、環境変数）に注意
-
-### 10.4 将来の拡張性
-
-- Prometheusメトリクスエクスポート対応
-- Kubernetes対応（Deploymentマニフェスト）
-- 自動スケーリング対応
-- 分散トレーシング対応
 
 本仕様に基づいて実装を進めることで、cronベースの定期実行から、docker-composeによる継続動作モードへの移行が可能になります。
