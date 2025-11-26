@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -295,20 +296,26 @@ class TestTaskStopManagerGitLab(unittest.TestCase):
         """Test that GitLab bot name is retrieved from config."""
         from handlers.task_key import GitLabIssueTaskKey
 
-        class MockGitLabTask:
-            def __init__(self):
-                self.uuid = "test-uuid"
-                self._assignees = ["gitlab-bot"]
+        # 環境変数をクリアして設定ファイルからの読み込みを確実にする
+        with patch.dict("os.environ", {}, clear=False):
+            # GITLAB_BOT_NAMEが設定されている場合は削除
+            if "GITLAB_BOT_NAME" in os.environ:
+                del os.environ["GITLAB_BOT_NAME"]
 
-            def get_task_key(self):
-                return GitLabIssueTaskKey(123, 1)
+            class MockGitLabTask:
+                def __init__(self):
+                    self.uuid = "test-uuid"
+                    self._assignees = ["gitlab-bot"]
 
-            def refresh_assignees(self):
-                return self._assignees
+                def get_task_key(self):
+                    return GitLabIssueTaskKey(123, 1)
 
-        task = MockGitLabTask()
-        result = self.manager.check_assignee_status(task)
-        self.assertTrue(result)
+                def refresh_assignees(self):
+                    return self._assignees
+
+            task = MockGitLabTask()
+            result = self.manager.check_assignee_status(task)
+            self.assertTrue(result)
 
     @patch.dict("os.environ", {"GITLAB_BOT_NAME": "env-gitlab-bot"})
     def test_gitlab_bot_name_from_env(self):
