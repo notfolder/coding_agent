@@ -3,7 +3,7 @@ services:
   user-config-api:
     build: ./user_config_api
     container_name: user-config-api
-    # Docker内部ネットワークのみで使用（外部公開不要）
+    # Docker内部ネットワークのみで使用(外部公開不要)
     # テスト用に外部アクセスが必要な場合のみ、以下のコメントを外す
     ports:
       - "8081:8080"
@@ -34,6 +34,98 @@ services:
       RABBITMQ_DEFAULT_PASS: guest
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+
+  # Producer サービス - タスクを継続的に取得してキューに追加
+  coding-agent-producer:
+    build: .
+    container_name: coding-agent-producer
+    command: ["python", "main.py", "--mode", "producer", "--continuous"]
+    depends_on:
+      - rabbitmq
+      - user-config-api
+    environment:
+      # 必須環境変数
+      - TASK_SOURCE=${TASK_SOURCE:-github}
+      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN}
+      - GITLAB_PERSONAL_ACCESS_TOKEN=${GITLAB_PERSONAL_ACCESS_TOKEN:-}
+
+      # RabbitMQ設定
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASSWORD=guest
+
+      # LLM設定
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+
+      # ログ設定
+      - LOGS=/app/logs/producer.log
+      - DEBUG=${DEBUG:-false}
+    volumes:
+      - ./logs:/app/logs
+      - ./contexts:/app/contexts
+      - ./healthcheck:/app/healthcheck
+    restart: unless-stopped
+    # gracefulシャットダウンの猶予時間
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, time; f='/app/healthcheck/producer.health'; exit(0 if os.path.exists(f) and time.time() - os.path.getmtime(f) < 600 else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Consumer サービス - キューからタスクを継続的に取得して処理
+  coding-agent-consumer:
+    build: .
+    container_name: coding-agent-consumer
+    command: ["python", "main.py", "--mode", "consumer", "--continuous"]
+    depends_on:
+      - rabbitmq
+      - user-config-api
+    environment:
+      # 必須環境変数
+      - TASK_SOURCE=${TASK_SOURCE:-github}
+      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN}
+      - GITLAB_PERSONAL_ACCESS_TOKEN=${GITLAB_PERSONAL_ACCESS_TOKEN:-}
+
+      # RabbitMQ設定
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASSWORD=guest
+
+      # LLM設定
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+
+      # ログ設定
+      - LOGS=/app/logs/consumer.log
+      - DEBUG=${DEBUG:-false}
+    volumes:
+      - ./logs:/app/logs
+      - ./contexts:/app/contexts
+      - ./healthcheck:/app/healthcheck
+    restart: unless-stopped
+    # gracefulシャットダウンの猶予時間(タスク処理完了を待つ)
+    # 注: タスク処理に時間がかかる場合(LLM呼び出し、ファイル操作等)、
+    # 処理中のタスクを完了させるために十分な時間を確保する必要があります。
+    # デフォルト: 300秒(5分)
+    # - 短時間タスクが多い場合: 60s〜120s に短縮可能
+    # - 長時間タスクがある場合: 600s 以上に延長を推奨
+    # max_llm_process_numの設定値と平均処理時間を考慮して調整してください。
+    stop_grace_period: 300s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, time; f='/app/healthcheck/consumer.health'; exit(0 if os.path.exists(f) and time.time() - os.path.getmtime(f) < 600 else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   rabbitmq_data:
