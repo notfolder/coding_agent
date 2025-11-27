@@ -9,16 +9,17 @@
 ### 1.2 主要機能
 
 1. **データベースによるユーザー設定の永続化**
+   - SQLAlchemyを使用してデータベースアクセスを抽象化
    - SQLiteを初期実装として採用
-   - 将来的なデータベース変更に対応できるモジュラー設計
+   - 将来的なデータベース変更（PostgreSQL、MySQL等）に対応可能
 
 2. **管理者画面**
    - ユーザーの追加・削除・編集機能
-   - ユーザー設定の一覧表示・管理
+   - ユーザー一覧表示
 
-3. **LDAP認証**
-   - 既存のLDAPサーバーと連携した認証
-   - GitHub/GitLabユーザー名との紐付け（LDAPメールアドレスの@以前をユーザー名として使用）
+3. **Active Directory認証**
+   - Active Directoryサーバーと連携した認証
+   - GitHub/GitLabユーザー名との紐付け（ADメールアドレスの@以前をユーザー名として使用）
 
 ### 1.3 技術スタック
 
@@ -33,16 +34,21 @@
   - コーディングエージェントからの設定取得用API
   - Streamlit管理画面からも呼び出し可能
 
+**データベース:**
+- **SQLAlchemy**: PythonのORMライブラリ
+  - データベース抽象化により将来のDB変更に対応
+  - SQLite（初期実装）からPostgreSQL/MySQL等への移行が容易
+
 ### 1.4 システムアーキテクチャ概要
 
 ```
 [管理者/ユーザー（ブラウザ）]
-            ↓
+            |
     [Streamlit管理画面]
-            ↓
-[コーディングエージェント]  ←→  [FastAPI（REST API）]
-                                         ↓
-                              [LDAPサーバー]    [データベース（SQLite）]
+            |
+[コーディングエージェント]  <-->  [FastAPI（REST API）]
+                                         |
+                              [Active Directory]    [データベース（SQLite）]
 ```
 
 **2つのサーバー構成:**
@@ -53,41 +59,52 @@
 
 ### 2.1 設計方針
 
-データベース層は抽象化し、将来的にSQLite以外のデータベース（PostgreSQL、MySQLなど）への移行を容易にします。
+SQLAlchemyを使用してデータベースアクセスを抽象化し、将来的にSQLite以外のデータベース（PostgreSQL、MySQLなど）への移行を容易にします。
 
-### 2.2 データベース抽象化レイヤー
+### 2.2 SQLAlchemyモデル定義
 
-#### 2.2.1 リポジトリパターンの採用
+SQLAlchemyのORMを使用してモデルを定義します。
 
-データベースアクセスをリポジトリパターンで抽象化し、具体的なデータベース実装から分離します。
-
-**抽象インターフェース定義:**
-
+**Baseクラス:**
 ```
-UserRepository（抽象クラス）
-├── find_by_username(username: str) -> User | None
-├── find_by_ldap_email(email: str) -> User | None
-├── find_all() -> list[User]
-├── create(user: User) -> User
-├── update(user: User) -> User
-├── delete(username: str) -> bool
-└── exists(username: str) -> bool
+from sqlalchemy.orm import DeclarativeBase
 
-UserConfigRepository（抽象クラス）
-├── find_by_username(username: str) -> UserConfig | None
-├── create(config: UserConfig) -> UserConfig
-├── update(config: UserConfig) -> UserConfig
-├── delete(username: str) -> bool
-└── find_all() -> list[UserConfig]
+class Base(DeclarativeBase):
+    pass
 ```
 
-#### 2.2.2 具象実装
-
-初期実装としてSQLite用のリポジトリを作成します。
-
+**Userモデル:**
 ```
-SQLiteUserRepository（UserRepositoryを継承）
-SQLiteUserConfigRepository（UserConfigRepositoryを継承）
+class User(Base):
+    __tablename__ = "users"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    ldap_uid: Mapped[str] = mapped_column(String(255), unique=True, nullable=True)
+    ldap_email: Mapped[str] = mapped_column(String(255), unique=True, nullable=True)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    
+    config: Mapped["UserConfig"] = relationship(back_populates="user", uselist=False)
+```
+
+**UserConfigモデル:**
+```
+class UserConfig(Base):
+    __tablename__ = "user_configs"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, nullable=False)
+    llm_api_key: Mapped[str] = mapped_column(Text, nullable=True)  # 暗号化保存
+    llm_model: Mapped[str] = mapped_column(String(255), nullable=True)
+    additional_system_prompt: Mapped[str] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    
+    user: Mapped["User"] = relationship(back_populates="config")
 ```
 
 ### 2.3 テーブル設計
@@ -99,9 +116,10 @@ SQLiteUserConfigRepository（UserConfigRepositoryを継承）
 | カラム名 | データ型 | 制約 | 説明 |
 |---------|---------|------|------|
 | id | INTEGER | PRIMARY KEY, AUTOINCREMENT | ユーザーID |
-| username | TEXT | NOT NULL, UNIQUE | GitHub/GitLabユーザー名 |
-| ldap_email | TEXT | UNIQUE | LDAPのメールアドレス |
-| display_name | TEXT | | 表示名 |
+| username | VARCHAR(255) | NOT NULL, UNIQUE | GitHub/GitLabユーザー名 |
+| ldap_uid | VARCHAR(255) | UNIQUE | Active DirectoryのUID |
+| ldap_email | VARCHAR(255) | UNIQUE | Active Directoryのメールアドレス |
+| display_name | VARCHAR(255) | | 表示名 |
 | is_admin | BOOLEAN | NOT NULL, DEFAULT FALSE | 管理者フラグ |
 | is_active | BOOLEAN | NOT NULL, DEFAULT TRUE | 有効フラグ |
 | created_at | TIMESTAMP | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 作成日時 |
@@ -109,6 +127,7 @@ SQLiteUserConfigRepository（UserConfigRepositoryを継承）
 
 **インデックス:**
 - `idx_users_username` ON username
+- `idx_users_ldap_uid` ON ldap_uid
 - `idx_users_ldap_email` ON ldap_email
 
 #### 2.3.2 user_configsテーブル
@@ -119,55 +138,14 @@ SQLiteUserConfigRepository（UserConfigRepositoryを継承）
 |---------|---------|------|------|
 | id | INTEGER | PRIMARY KEY, AUTOINCREMENT | 設定ID |
 | user_id | INTEGER | FOREIGN KEY(users.id), UNIQUE | ユーザーID |
-| llm_provider | TEXT | | LLMプロバイダ（openai/lmstudio/ollama） |
-| openai_api_key | TEXT | | OpenAI APIキー（暗号化保存） |
-| openai_base_url | TEXT | | OpenAI ベースURL |
-| openai_model | TEXT | | OpenAI モデル名 |
-| lmstudio_base_url | TEXT | | LM Studio ベースURL |
-| lmstudio_model | TEXT | | LM Studio モデル名 |
-| ollama_endpoint | TEXT | | Ollama エンドポイント |
-| ollama_model | TEXT | | Ollama モデル名 |
-| system_prompt | TEXT | | システムプロンプト（上書き用） |
-| max_llm_process_num | INTEGER | | 最大LLM処理回数 |
-| function_calling | BOOLEAN | DEFAULT TRUE | Function Calling有効フラグ |
+| llm_api_key | TEXT | | LLM APIキー（暗号化保存） |
+| llm_model | VARCHAR(255) | | LLMモデル名 |
+| additional_system_prompt | TEXT | | 追加のシステムプロンプト |
 | created_at | TIMESTAMP | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 作成日時 |
 | updated_at | TIMESTAMP | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 更新日時 |
 
 **インデックス:**
 - `idx_user_configs_user_id` ON user_id
-
-#### 2.3.3 planning_configsテーブル
-
-ユーザーごとのプランニング設定を管理するテーブル。
-
-| カラム名 | データ型 | 制約 | 説明 |
-|---------|---------|------|------|
-| id | INTEGER | PRIMARY KEY, AUTOINCREMENT | 設定ID |
-| user_id | INTEGER | FOREIGN KEY(users.id), UNIQUE | ユーザーID |
-| enabled | BOOLEAN | DEFAULT TRUE | プランニング機能有効フラグ |
-| strategy | TEXT | DEFAULT 'chain_of_thought' | プランニング戦略 |
-| max_subtasks | INTEGER | DEFAULT 100 | 最大サブタスク数 |
-| decomposition_level | TEXT | DEFAULT 'moderate' | タスク分解の詳細度 |
-| reflection_enabled | BOOLEAN | DEFAULT TRUE | リフレクション有効フラグ |
-| reflection_trigger_on_error | BOOLEAN | DEFAULT TRUE | エラー時リフレクション |
-| reflection_trigger_interval | INTEGER | DEFAULT 3 | リフレクション実行間隔 |
-| max_revisions | INTEGER | DEFAULT 3 | 最大計画修正回数 |
-| created_at | TIMESTAMP | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 作成日時 |
-| updated_at | TIMESTAMP | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 更新日時 |
-
-#### 2.3.4 audit_logsテーブル
-
-管理操作の監査ログを記録するテーブル。
-
-| カラム名 | データ型 | 制約 | 説明 |
-|---------|---------|------|------|
-| id | INTEGER | PRIMARY KEY, AUTOINCREMENT | ログID |
-| admin_username | TEXT | NOT NULL | 操作した管理者ユーザー名 |
-| action | TEXT | NOT NULL | 操作内容（create/update/delete） |
-| target_username | TEXT | NOT NULL | 対象ユーザー名 |
-| details | TEXT | | 詳細情報（JSON形式） |
-| ip_address | TEXT | | IPアドレス |
-| created_at | TIMESTAMP | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 操作日時 |
 
 ### 2.4 データ暗号化
 
@@ -176,93 +154,86 @@ SQLiteUserConfigRepository（UserConfigRepositoryを継承）
 APIキーなどの機密情報は暗号化して保存します。
 
 **暗号化対象:**
-- `user_configs.openai_api_key`
+- `user_configs.llm_api_key`
 
 #### 2.4.2 暗号化方式
 
 - **アルゴリズム**: AES-256-GCM
 - **鍵管理**: 環境変数（`ENCRYPTION_KEY`）から読み込み
-- **鍵のローテーション**: 設定ファイルで管理、ローテーション時は既存データを再暗号化
 
-### 2.5 マイグレーション戦略
+### 2.5 SQLAlchemyセッション管理
 
-#### 2.5.1 スキーママイグレーション
-
-データベーススキーマの変更は、バージョン管理されたマイグレーションスクリプトで管理します。
+#### 2.5.1 データベース接続設定
 
 ```
-migrations/
-├── 001_initial_schema.sql
-├── 002_add_planning_configs.sql
-└── ...
+# config.yamlの設定例
+database:
+  url: "sqlite:///./data/users.db"  # SQLite
+  # url: "postgresql://user:password@localhost/dbname"  # PostgreSQL
+  # url: "mysql+pymysql://user:password@localhost/dbname"  # MySQL
+  echo: false  # SQLログ出力
 ```
 
-#### 2.5.2 データベース変更時の移行手順
+#### 2.5.2 セッションファクトリ
 
-SQLiteから他のデータベースへの移行手順を定義します。
+```
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
-1. 新しいデータベース用のリポジトリ実装を作成
-2. 設定ファイルでデータベースタイプを変更
-3. データ移行スクリプトを実行
-4. 接続テストを実施
-5. 本番環境へのデプロイ
+engine = create_engine(database_url, echo=echo)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+```
 
-## 3. LDAP認証設計
+## 3. Active Directory認証設計
 
 ### 3.1 設計方針
 
-LDAP認証を使用してユーザーを認証し、認証されたユーザーのメールアドレスからGitHub/GitLabユーザー名を導出します。
+Active Directory認証を使用してユーザーを認証し、認証されたユーザーのメールアドレスからGitHub/GitLabユーザー名を導出します。
 
 ### 3.2 認証フロー
 
 ```
-1. ユーザーがログイン画面でLDAP認証情報を入力
-   ↓
-2. LDAPサーバーに認証リクエストを送信
-   ↓
-3. LDAP認証が成功した場合:
-   a. ユーザーのメールアドレスを取得
+1. ユーザーがログイン画面でAD認証情報を入力
+   |
+2. Active Directoryサーバーに認証リクエストを送信
+   |
+3. AD認証が成功した場合:
+   a. ユーザーのメールアドレスとUIDを取得
    b. メールアドレスの@以前をGitHub/GitLabユーザー名として抽出
    c. データベースでユーザーを検索または新規作成
-   d. JWTトークンを発行
-   ↓
-4. クライアントにJWTトークンを返却
+   d. セッションを開始
+   |
+4. ログイン完了
 ```
 
-### 3.3 LDAP設定
+### 3.3 Active Directory設定
 
 #### 3.3.1 config.yamlへの追加設定
 
 ```yaml
-# LDAP認証設定
-ldap:
-  # LDAP有効/無効
-  enabled: true
-  
-  # LDAPサーバー設定
+# Active Directory認証設定
+active_directory:
+  # ADサーバー設定
   server:
-    host: "ldap.example.com"
-    port: 389
-    use_ssl: false
-    use_tls: true
+    host: "ad.example.com"
+    port: 636
+    use_ssl: true
   
   # バインド設定（サービスアカウント）
   bind:
-    dn: "cn=service_account,ou=service,dc=example,dc=com"
-    password_env: "LDAP_BIND_PASSWORD"
+    dn: "CN=service_account,OU=Service Accounts,DC=example,DC=com"
+    password_env: "AD_BIND_PASSWORD"
   
   # ユーザー検索設定
   user_search:
-    base_dn: "ou=users,dc=example,dc=com"
-    filter: "(uid={username})"
-    # または "(sAMAccountName={username})" for Active Directory
+    base_dn: "OU=Users,DC=example,DC=com"
+    filter: "(sAMAccountName={username})"
     
     # 取得する属性
     attributes:
-      email: "mail"
+      uid: "sAMAccountName"
+      email: "userPrincipalName"
       display_name: "displayName"
-      # Active Directoryの場合
-      # email: "userPrincipalName"
   
   # タイムアウト設定
   timeout:
@@ -274,105 +245,78 @@ ldap:
 
 #### 3.4.1 基本ルール
 
-LDAPメールアドレスからGitHub/GitLabユーザー名を導出します。
+ADメールアドレスからGitHub/GitLabユーザー名を導出します。
 
 ```
-LDAPメールアドレス: "taro.yamada@example.com"
-              ↓
+ADメールアドレス: "taro.yamada@example.com"
+              |
 GitHub/GitLabユーザー名: "taro.yamada"
 ```
 
 #### 3.4.2 導出処理
 
-1. LDAP認証後、ユーザーのメールアドレス（mail属性）を取得
+1. AD認証後、ユーザーのメールアドレス（userPrincipalName属性）を取得
 2. メールアドレスから`@`以前の部分を抽出
 3. 抽出した文字列をGitHub/GitLabユーザー名として使用
 4. データベースのusersテーブルでusernameとして保存
 
-#### 3.4.3 カスタム導出ルール
-
-必要に応じて、設定でカスタム導出ルールを定義可能にします。
-
-```yaml
-ldap:
-  username_derivation:
-    # 導出方法: email_prefix（デフォルト）/ email_full / custom_attribute
-    method: "email_prefix"
-    
-    # custom_attributeの場合に使用する属性名
-    # custom_attribute: "githubUsername"
-```
-
-### 3.5 LDAPClientクラス設計
+### 3.5 ADClientクラス設計
 
 #### 3.5.1 責務
 
-- LDAPサーバーへの接続管理
+- Active Directoryサーバーへの接続管理
 - ユーザー認証の実行
 - ユーザー属性の取得
 
 #### 3.5.2 主要メソッド
 
 ```
-LDAPClient
-├── __init__(config: dict)
-│   - LDAP設定を初期化
-│
-├── authenticate(username: str, password: str) -> LDAPUser | None
-│   - ユーザーの認証を実行
-│   - 成功時: LDAPUserオブジェクトを返却
-│   - 失敗時: Noneを返却
-│
-├── get_user_info(username: str) -> LDAPUser | None
-│   - ユーザー情報を取得（認証なし、サービスアカウントで検索）
-│
-└── test_connection() -> bool
-    - LDAP接続テスト
+ADClient
+|-- __init__(config: dict)
+|   - AD設定を初期化
+|
+|-- authenticate(username: str, password: str) -> ADUser | None
+|   - ユーザーの認証を実行
+|   - 成功時: ADUserオブジェクトを返却
+|   - 失敗時: Noneを返却
+|
+|-- get_user_info(username: str) -> ADUser | None
+|   - ユーザー情報を取得（認証なし、サービスアカウントで検索）
+|
++-- test_connection() -> bool
+    - AD接続テスト
 ```
 
-#### 3.5.3 LDAPUserデータクラス
+#### 3.5.3 ADUserデータクラス
 
 ```
-LDAPUser
-├── dn: str                    # 識別名
-├── username: str              # ユーザー名
-├── email: str                 # メールアドレス
-├── display_name: str          # 表示名
-└── derived_username: str      # 導出されたGitHub/GitLabユーザー名
+ADUser
+|-- dn: str                    # 識別名
+|-- uid: str                   # sAMAccountName
+|-- email: str                 # メールアドレス
+|-- display_name: str          # 表示名
++-- derived_username: str      # 導出されたGitHub/GitLabユーザー名
 ```
 
 ### 3.6 セッション管理
 
-#### 3.6.1 JWT（JSON Web Token）の使用
+Streamlitの`st.session_state`を使用してセッション情報を管理します。
 
-LDAP認証後、JWTトークンを発行してステートレスなセッション管理を行います。
+**セッション状態の構造:**
 
-**JWTペイロード:**
-```json
-{
-  "sub": "taro.yamada",
-  "ldap_email": "taro.yamada@example.com",
-  "display_name": "山田太郎",
-  "is_admin": false,
-  "iat": 1700000000,
-  "exp": 1700086400
-}
 ```
-
-#### 3.6.2 トークン設定
-
-```yaml
-auth:
-  jwt:
-    # 署名キー（環境変数から読み込み推奨）
-    secret_key_env: "JWT_SECRET_KEY"
-    
-    # アルゴリズム
-    algorithm: "HS256"
-    
-    # 有効期限（秒）
-    access_token_expire: 3600      # 1時間
-    refresh_token_expire: 604800   # 7日
+st.session_state = {
+    "authenticated": bool,        # 認証済みフラグ
+    "user": {                     # ログインユーザー情報
+        "username": str,
+        "ldap_uid": str,
+        "ldap_email": str,
+        "display_name": str,
+        "is_admin": bool
+    },
+    "current_page": str,          # 現在のページ
+    "messages": list,             # フラッシュメッセージ
+}
 ```
 
 ## 4. 管理者画面設計
@@ -384,310 +328,180 @@ auth:
 | 機能 | 説明 | 権限 |
 |------|------|------|
 | ユーザー一覧表示 | 登録済みユーザーの一覧を表示 | 管理者 |
-| ユーザー追加 | 新規ユーザーを手動で追加（LDAP同期とは別に） | 管理者 |
+| ユーザー追加 | 新規ユーザーを手動で追加 | 管理者 |
 | ユーザー編集 | ユーザー情報の編集（管理者フラグ、有効フラグ等） | 管理者 |
 | ユーザー削除 | ユーザーの削除（論理削除） | 管理者 |
-| LDAP同期 | LDAPからユーザー情報を同期 | 管理者 |
 
-#### 4.1.2 ユーザー設定管理
-
-| 機能 | 説明 | 権限 |
-|------|------|------|
-| 設定一覧表示 | ユーザー設定の一覧を表示 | 管理者 |
-| 設定編集 | ユーザーのLLM設定を編集 | 管理者/本人 |
-| デフォルト設定管理 | 新規ユーザー用のデフォルト設定を管理 | 管理者 |
-
-#### 4.1.3 監査ログ
+#### 4.1.2 個人設定
 
 | 機能 | 説明 | 権限 |
 |------|------|------|
-| 監査ログ閲覧 | 管理操作の履歴を閲覧 | 管理者 |
-| ログ検索 | 日時、操作者、対象者でログを検索 | 管理者 |
+| モデル設定 | 使用するLLMモデル名を入力・変更 | 本人 |
 
 ### 4.2 画面遷移
 
 ```
 [ログイン画面]
-      ↓ LDAP認証
+      | AD認証
 [ダッシュボード]
-      ↓
-  ├── [ユーザー管理]
-  │      ├── [ユーザー一覧]
-  │      │      ├── [ユーザー追加]
-  │      │      ├── [ユーザー編集]
-  │      │      └── [ユーザー削除確認]
-  │      └── [LDAP同期]
-  │
-  ├── [設定管理]
-  │      ├── [設定一覧]
-  │      ├── [設定編集]
-  │      └── [デフォルト設定]
-  │
-  ├── [監査ログ]
-  │      └── [ログ検索・一覧]
-  │
-  └── [個人設定]（一般ユーザー）
-         └── [自分の設定編集]
+      |
+  |-- [ユーザー管理]（管理者のみ）
+  |      |-- [ユーザー一覧]
+  |      |      |-- [ユーザー追加]
+  |      |      |-- [ユーザー編集]
+  |      |      +-- [ユーザー削除確認]
+  |
+  +-- [個人設定]（一般ユーザー）
+         +-- [モデル設定]
 ```
 
 ### 4.3 Streamlit管理画面設計
 
-#### 4.3.1 Streamlitを採用する理由
-
-1. **Pythonのみで完結**: フロントエンド専門知識（HTML/CSS/JavaScript）が不要
-2. **迅速な開発**: 数百行のコードでフル機能の管理画面を構築可能
-3. **既存コードとの統合**: バックエンドのPythonコードを直接呼び出し可能
-4. **リアルタイム更新**: ウィジェットの変更が即座に反映される
-5. **セッション状態管理**: `st.session_state`による状態管理機能を内蔵
-
-#### 4.3.2 ディレクトリ構成
+#### 4.3.1 ディレクトリ構成
 
 ```
 user_config_api/
-├── streamlit_app/           # Streamlit管理画面
-│   ├── app.py               # メインエントリポイント
-│   ├── pages/               # マルチページ構成
-│   │   ├── 01_🏠_ダッシュボード.py
-│   │   ├── 02_👥_ユーザー管理.py
-│   │   ├── 03_⚙️_設定管理.py
-│   │   ├── 04_📋_監査ログ.py
-│   │   └── 05_👤_個人設定.py
-│   ├── components/          # 再利用可能なUIコンポーネント
-│   │   ├── __init__.py
-│   │   ├── auth.py          # 認証コンポーネント
-│   │   ├── user_form.py     # ユーザーフォーム
-│   │   ├── config_form.py   # 設定フォーム
-│   │   └── data_table.py    # データテーブル
-│   ├── utils/               # ユーティリティ
-│   │   ├── __init__.py
-│   │   ├── session.py       # セッション管理
-│   │   └── api_client.py    # API呼び出しクライアント
-│   └── .streamlit/          # Streamlit設定
-│       └── config.toml
-├── server.py                # FastAPIサーバー
-└── ...
+|-- streamlit_app/           # Streamlit管理画面
+|   |-- app.py               # メインエントリポイント
+|   |-- pages/               # マルチページ構成
+|   |   |-- 01_dashboard.py
+|   |   |-- 02_user_management.py
+|   |   +-- 03_personal_settings.py
+|   |-- components/          # 再利用可能なUIコンポーネント
+|   |   |-- __init__.py
+|   |   |-- auth.py          # 認証コンポーネント
+|   |   |-- user_form.py     # ユーザーフォーム
+|   |   +-- data_table.py    # データテーブル
+|   |-- utils/               # ユーティリティ
+|   |   |-- __init__.py
+|   |   +-- session.py       # セッション管理
+|   +-- .streamlit/          # Streamlit設定
+|       +-- config.toml
+|-- server.py                # FastAPIサーバー
++-- ...
 ```
 
-#### 4.3.3 画面設計詳細
+#### 4.3.2 画面設計詳細
 
 ##### ログイン画面（app.py）
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                                                         │
-│              🔐 ユーザーコンフィグ管理                  │
-│                                                         │
-│     ┌──────────────────────────────────────┐           │
-│     │ ユーザー名                           │           │
-│     │ [                                  ] │           │
-│     └──────────────────────────────────────┘           │
-│                                                         │
-│     ┌──────────────────────────────────────┐           │
-│     │ パスワード                           │           │
-│     │ [••••••••••••                      ] │           │
-│     └──────────────────────────────────────┘           │
-│                                                         │
-│              [ ログイン ]                               │
-│                                                         │
-│     ⚠️ LDAP認証を使用します                            │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
++----------------------------------------------------------+
+|                                                          |
+|              ユーザーコンフィグ管理                       |
+|                                                          |
+|     +------------------------------------------+         |
+|     | ユーザー名                               |         |
+|     | [                                      ] |         |
+|     +------------------------------------------+         |
+|                                                          |
+|     +------------------------------------------+         |
+|     | パスワード                               |         |
+|     | [                                      ] |         |
+|     +------------------------------------------+         |
+|                                                          |
+|              [ ログイン ]                                |
+|                                                          |
++----------------------------------------------------------+
 ```
 
 **処理フロー:**
 1. ユーザー名とパスワードを入力
-2. LDAP認証を実行（LDAPClientを呼び出し）
+2. AD認証を実行（ADClientを呼び出し）
 3. 認証成功時: セッション状態にユーザー情報を保存し、ダッシュボードへ遷移
 4. 認証失敗時: エラーメッセージを表示
 
-##### ダッシュボード（01_🏠_ダッシュボード.py）
+##### ダッシュボード（01_dashboard.py）
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ 🏠 ダッシュボード                    [ログアウト]       │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  ようこそ、山田太郎 さん                                │
-│                                                         │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
-│  │ 👥 ユーザー │  │ ⚙️ 設定    │  │ 📋 ログ    │    │
-│  │    数: 42   │  │  設定済: 38  │  │ 今日: 156   │    │
-│  └─────────────┘  └─────────────┘  └─────────────┘    │
-│                                                         │
-│  📊 最近のアクティビティ                                │
-│  ────────────────────────────────                      │
-│  • 2024-11-27 10:30 - admin がユーザー xxx を追加      │
-│  • 2024-11-27 10:25 - taro がLLM設定を変更             │
-│  • 2024-11-27 10:20 - hanako がログイン                │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
++----------------------------------------------------------+
+| ダッシュボード                         [ログアウト]       |
++----------------------------------------------------------+
+|                                                          |
+|  ようこそ、山田太郎 さん                                 |
+|                                                          |
+|  +---------------+  +---------------+                    |
+|  | ユーザー      |  | 設定済        |                    |
+|  |    数: 42     |  |    数: 38     |                    |
+|  +---------------+  +---------------+                    |
+|                                                          |
++----------------------------------------------------------+
 ```
 
-##### ユーザー管理（02_👥_ユーザー管理.py）
+##### ユーザー管理（02_user_management.py）
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ 👥 ユーザー管理                      [ログアウト]       │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  [➕ ユーザー追加] [🔄 LDAP同期]                        │
-│                                                         │
-│  🔍 検索: [________________] [アクティブのみ ☑️]       │
-│                                                         │
-│  ┌────────────────────────────────────────────────────┐│
-│  │ ユーザー名    │ 表示名    │ 管理者 │ 状態  │ 操作 ││
-│  ├───────────────┼───────────┼────────┼───────┼──────┤│
-│  │ taro.yamada   │ 山田太郎  │ ✓      │ 有効  │ ✏️🗑️ ││
-│  │ hanako.suzuki │ 鈴木花子  │        │ 有効  │ ✏️🗑️ ││
-│  │ jiro.tanaka   │ 田中次郎  │        │ 無効  │ ✏️🗑️ ││
-│  └────────────────────────────────────────────────────┘│
-│                                                         │
-│  ◀️ 1 / 5 ▶️                                           │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
++----------------------------------------------------------+
+| ユーザー管理                           [ログアウト]       |
++----------------------------------------------------------+
+|                                                          |
+|  [+ ユーザー追加]                                        |
+|                                                          |
+|  検索: [________________] [アクティブのみ]               |
+|                                                          |
+|  +------------------------------------------------------+|
+|  | ユーザー名    | 表示名    | 管理者 | 状態  | 操作    ||
+|  +---------------+-----------+--------+-------+---------+|
+|  | taro.yamada   | 山田太郎  | Yes    | 有効  | 編集 削除||
+|  | hanako.suzuki | 鈴木花子  |        | 有効  | 編集 削除||
+|  | jiro.tanaka   | 田中次郎  |        | 無効  | 編集 削除||
+|  +------------------------------------------------------+|
+|                                                          |
+|  < 1 / 5 >                                               |
+|                                                          |
++----------------------------------------------------------+
 ```
 
-**ユーザー追加/編集モーダル:**
+**ユーザー追加/編集ダイアログ:**
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ ➕ ユーザー追加                              [✕]        │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  ユーザー名（GitHub/GitLab）                            │
-│  [_______________________]                              │
-│                                                         │
-│  LDAPメールアドレス                                     │
-│  [_______________________]                              │
-│                                                         │
-│  表示名                                                 │
-│  [_______________________]                              │
-│                                                         │
-│  ☐ 管理者権限を付与                                    │
-│  ☑️ アクティブ                                          │
-│                                                         │
-│              [キャンセル] [保存]                         │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
++----------------------------------------------------------+
+| ユーザー追加                                    [X]       |
++----------------------------------------------------------+
+|                                                          |
+|  ユーザー名（GitHub/GitLab）                             |
+|  [_______________________]                               |
+|                                                          |
+|  AD UID                                                  |
+|  [_______________________]                               |
+|                                                          |
+|  ADメールアドレス                                        |
+|  [_______________________]                               |
+|                                                          |
+|  表示名                                                  |
+|  [_______________________]                               |
+|                                                          |
+|  [ ] 管理者権限を付与                                    |
+|  [x] アクティブ                                          |
+|                                                          |
+|              [キャンセル] [保存]                         |
+|                                                          |
++----------------------------------------------------------+
 ```
 
-##### 設定管理（03_⚙️_設定管理.py）
+##### 個人設定（03_personal_settings.py）
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ ⚙️ 設定管理                          [ログアウト]       │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  タブ: [ユーザー設定] [デフォルト設定]                  │
-│                                                         │
-│  ユーザー選択: [▼ taro.yamada - 山田太郎          ]    │
-│                                                         │
-│  ─── LLM設定 ───                                       │
-│                                                         │
-│  プロバイダ: [▼ openai  ]                              │
-│                                                         │
-│  ┌─ OpenAI設定 ─────────────────────────────────────┐  │
-│  │ APIキー: [sk-proj-***************           ]    │  │
-│  │ ベースURL: [https://api.openai.com/v1       ]    │  │
-│  │ モデル: [▼ gpt-4o                           ]    │  │
-│  │ 最大トークン: [40960                        ]    │  │
-│  └──────────────────────────────────────────────────┘  │
-│                                                         │
-│  ─── システムプロンプト ───                             │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │ あなたは優秀なコーディングアシスタントです...    │  │
-│  │                                                  │  │
-│  └──────────────────────────────────────────────────┘  │
-│                                                         │
-│  ─── プランニング設定 ───                               │
-│  ☑️ プランニング機能を有効化                            │
-│  戦略: [▼ chain_of_thought  ]                          │
-│  最大サブタスク数: [100]                                │
-│                                                         │
-│              [リセット] [保存]                          │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
++----------------------------------------------------------+
+| 個人設定                               [ログアウト]       |
++----------------------------------------------------------+
+|                                                          |
+|  ユーザー: taro.yamada                                   |
+|  メール: taro.yamada@example.com                         |
+|  権限: 一般ユーザー                                      |
+|                                                          |
+|  --- モデル設定 ---                                      |
+|                                                          |
+|  LLMモデル名                                             |
+|  [gpt-4o                                    ]            |
+|  ※ 使用するLLMモデル名を入力してください                 |
+|                                                          |
+|              [デフォルトに戻す] [保存]                    |
+|                                                          |
++----------------------------------------------------------+
 ```
 
-##### 監査ログ（04_📋_監査ログ.py）
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ 📋 監査ログ                          [ログアウト]       │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  🔍 フィルタ                                            │
-│  期間: [2024-11-01] 〜 [2024-11-27]                    │
-│  操作者: [▼ すべて      ] 対象者: [▼ すべて      ]    │
-│  操作種別: [▼ すべて    ]                              │
-│                                                         │
-│  [検索]                                                 │
-│                                                         │
-│  ┌────────────────────────────────────────────────────┐│
-│  │ 日時              │ 操作者 │ 操作   │ 対象者    │ ││
-│  ├───────────────────┼────────┼────────┼───────────┤ ││
-│  │ 2024-11-27 10:30  │ admin  │ create │ jiro      │▶️││
-│  │ 2024-11-27 10:25  │ admin  │ update │ taro      │▶️││
-│  │ 2024-11-27 10:20  │ hanako │ login  │ hanako    │▶️││
-│  └────────────────────────────────────────────────────┘│
-│                                                         │
-│  ◀️ 1 / 10 ▶️                              [📥 CSV出力] │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
-```
-
-##### 個人設定（05_👤_個人設定.py）
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ 👤 個人設定                          [ログアウト]       │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  ユーザー: taro.yamada                                  │
-│  メール: taro.yamada@example.com                        │
-│  権限: 一般ユーザー                                     │
-│                                                         │
-│  ─── LLM設定 ───                                       │
-│                                                         │
-│  プロバイダ: [▼ openai  ]                              │
-│                                                         │
-│  ┌─ OpenAI設定 ─────────────────────────────────────┐  │
-│  │ APIキー: [sk-proj-***************           ]    │  │
-│  │ ※ 自分専用のAPIキーを設定できます               │  │
-│  └──────────────────────────────────────────────────┘  │
-│                                                         │
-│  ─── システムプロンプト（カスタム） ───                 │
-│  ☐ カスタムシステムプロンプトを使用                    │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │                                                  │  │
-│  └──────────────────────────────────────────────────┘  │
-│                                                         │
-│              [デフォルトに戻す] [保存]                  │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
-```
-
-#### 4.3.4 Streamlitセッション管理
-
-Streamlitの`st.session_state`を使用してセッション情報を管理します。
-
-**セッション状態の構造:**
-
-```
-st.session_state = {
-    "authenticated": bool,        # 認証済みフラグ
-    "user": {                     # ログインユーザー情報
-        "username": str,
-        "ldap_email": str,
-        "display_name": str,
-        "is_admin": bool
-    },
-    "token": str,                 # JWTトークン（API呼び出し用）
-    "token_expiry": datetime,     # トークン有効期限
-    "current_page": str,          # 現在のページ
-    "messages": list,             # フラッシュメッセージ
-}
-```
+#### 4.3.3 Streamlitセッション管理
 
 **認証チェック処理:**
 
@@ -697,12 +511,10 @@ st.session_state = {
 処理フロー:
 1. st.session_state.authenticatedをチェック
 2. Falseの場合: ログイン画面を表示
-3. Trueの場合: トークン有効期限をチェック
-4. 期限切れの場合: トークンリフレッシュまたは再ログイン
-5. 有効な場合: ページコンテンツを表示
+3. Trueの場合: ページコンテンツを表示
 ```
 
-#### 4.3.5 Streamlit設定（.streamlit/config.toml）
+#### 4.3.4 Streamlit設定（.streamlit/config.toml）
 
 ```toml
 [server]
@@ -726,13 +538,13 @@ showErrorDetails = false
 toolbarMode = "minimal"
 ```
 
-#### 4.3.6 コンポーネント設計
+#### 4.3.5 コンポーネント設計
 
 ##### 認証コンポーネント（components/auth.py）
 
 **責務:**
 - ログインフォームの表示
-- LDAP認証の実行
+- AD認証の実行
 - セッション状態の更新
 - ログアウト処理
 
@@ -744,13 +556,12 @@ show_login_form()
     - 入力値のバリデーション
 
 authenticate_user(username: str, password: str) -> bool
-    - LDAPClientを使用してユーザーを認証
+    - ADClientを使用してユーザーを認証
     - 成功時: セッション状態を更新しTrueを返す
     - 失敗時: エラーメッセージを表示しFalseを返す
 
 check_authentication() -> bool
     - 現在の認証状態をチェック
-    - トークン有効期限も確認
 
 logout()
     - セッション状態をクリア
@@ -785,33 +596,6 @@ show_delete_confirmation(user: User) -> bool
     - 確認された場合Trueを返す
 ```
 
-##### 設定フォームコンポーネント（components/config_form.py）
-
-**責務:**
-- LLM設定フォームの表示
-- プランニング設定フォームの表示
-- 設定のプレビュー
-
-**主要関数:**
-
-```
-show_llm_config_form(config: UserConfig | None = None) -> dict
-    - LLM設定フォームを表示
-    - プロバイダ選択に応じて動的にフィールドを表示
-    - 設定値を辞書形式で返す
-
-show_planning_config_form(config: PlanningConfig | None = None) -> dict
-    - プランニング設定フォームを表示
-    - 設定値を辞書形式で返す
-
-show_system_prompt_editor(prompt: str = "") -> str
-    - システムプロンプトエディタを表示
-    - 編集されたプロンプトを返す
-
-preview_config(config: dict)
-    - 設定のプレビューを表示（JSON形式）
-```
-
 ##### データテーブルコンポーネント（components/data_table.py）
 
 **責務:**
@@ -842,347 +626,13 @@ show_search_filter(placeholder: str = "検索...") -> str
     - 入力された検索文字列を返す
 ```
 
-### 4.4 API仕様（管理者向け）
-
-#### 4.3.1 認証エンドポイント
-
-**ログイン:**
-```
-POST /api/v1/auth/login
-
-Request Body:
-{
-  "username": "taro.yamada",
-  "password": "password123"
-}
-
-Response (成功時):
-{
-  "status": "success",
-  "data": {
-    "access_token": "eyJhbG...",
-    "refresh_token": "eyJhbG...",
-    "token_type": "Bearer",
-    "expires_in": 3600,
-    "user": {
-      "username": "taro.yamada",
-      "display_name": "山田太郎",
-      "is_admin": false
-    }
-  }
-}
-
-Response (認証失敗時):
-{
-  "status": "error",
-  "message": "認証に失敗しました"
-}
-HTTP Status: 401 Unauthorized
-```
-
-**トークンリフレッシュ:**
-```
-POST /api/v1/auth/refresh
-
-Request Body:
-{
-  "refresh_token": "eyJhbG..."
-}
-
-Response:
-{
-  "status": "success",
-  "data": {
-    "access_token": "eyJhbG...",
-    "expires_in": 3600
-  }
-}
-```
-
-**ログアウト:**
-```
-POST /api/v1/auth/logout
-Authorization: Bearer <access_token>
-
-Response:
-{
-  "status": "success",
-  "message": "ログアウトしました"
-}
-```
-
-#### 4.3.2 ユーザー管理エンドポイント
-
-**ユーザー一覧取得:**
-```
-GET /api/v1/admin/users
-Authorization: Bearer <access_token>
-
-Query Parameters:
-- page: ページ番号（デフォルト: 1）
-- per_page: 1ページあたりの件数（デフォルト: 20、最大: 100）
-- search: 検索文字列（username, display_name, ldap_emailで部分一致検索）
-- is_active: アクティブフィルタ（true/false）
-
-Response:
-{
-  "status": "success",
-  "data": {
-    "users": [
-      {
-        "id": 1,
-        "username": "taro.yamada",
-        "ldap_email": "taro.yamada@example.com",
-        "display_name": "山田太郎",
-        "is_admin": false,
-        "is_active": true,
-        "created_at": "2024-01-01T00:00:00Z",
-        "updated_at": "2024-01-01T00:00:00Z"
-      }
-    ],
-    "pagination": {
-      "page": 1,
-      "per_page": 20,
-      "total": 100,
-      "total_pages": 5
-    }
-  }
-}
-```
-
-**ユーザー詳細取得:**
-```
-GET /api/v1/admin/users/{username}
-Authorization: Bearer <access_token>
-
-Response:
-{
-  "status": "success",
-  "data": {
-    "user": {
-      "id": 1,
-      "username": "taro.yamada",
-      "ldap_email": "taro.yamada@example.com",
-      "display_name": "山田太郎",
-      "is_admin": false,
-      "is_active": true,
-      "created_at": "2024-01-01T00:00:00Z",
-      "updated_at": "2024-01-01T00:00:00Z"
-    },
-    "config": {
-      "llm_provider": "openai",
-      "openai_model": "gpt-4o",
-      "system_prompt": "...",
-      "max_llm_process_num": 1000
-    }
-  }
-}
-```
-
-**ユーザー追加:**
-```
-POST /api/v1/admin/users
-Authorization: Bearer <access_token>
-
-Request Body:
-{
-  "username": "hanako.suzuki",
-  "ldap_email": "hanako.suzuki@example.com",
-  "display_name": "鈴木花子",
-  "is_admin": false
-}
-
-Response:
-{
-  "status": "success",
-  "data": {
-    "user": {
-      "id": 2,
-      "username": "hanako.suzuki",
-      ...
-    }
-  }
-}
-```
-
-**ユーザー更新:**
-```
-PUT /api/v1/admin/users/{username}
-Authorization: Bearer <access_token>
-
-Request Body:
-{
-  "display_name": "鈴木花子（更新）",
-  "is_admin": true,
-  "is_active": true
-}
-
-Response:
-{
-  "status": "success",
-  "data": {
-    "user": { ... }
-  }
-}
-```
-
-**ユーザー削除:**
-```
-DELETE /api/v1/admin/users/{username}
-Authorization: Bearer <access_token>
-
-Response:
-{
-  "status": "success",
-  "message": "ユーザーを削除しました"
-}
-```
-
-#### 4.3.3 ユーザー設定エンドポイント
-
-**設定取得:**
-```
-GET /api/v1/admin/users/{username}/config
-Authorization: Bearer <access_token>
-
-Response:
-{
-  "status": "success",
-  "data": {
-    "config": {
-      "llm_provider": "openai",
-      "openai_base_url": "https://api.openai.com/v1",
-      "openai_model": "gpt-4o",
-      "system_prompt": "あなたは優秀なコーディングアシスタントです...",
-      "max_llm_process_num": 1000,
-      "function_calling": true,
-      "planning": {
-        "enabled": true,
-        "strategy": "chain_of_thought",
-        "max_subtasks": 100,
-        "reflection": {
-          "enabled": true,
-          "trigger_interval": 3
-        }
-      }
-    }
-  }
-}
-```
-
-**設定更新:**
-```
-PUT /api/v1/admin/users/{username}/config
-Authorization: Bearer <access_token>
-
-Request Body:
-{
-  "llm_provider": "openai",
-  "openai_api_key": "sk-...",
-  "openai_model": "gpt-4o-mini",
-  "system_prompt": "カスタムプロンプト...",
-  "max_llm_process_num": 500,
-  "planning": {
-    "enabled": true,
-    "strategy": "hierarchical"
-  }
-}
-
-Response:
-{
-  "status": "success",
-  "data": {
-    "config": { ... }
-  }
-}
-```
-
-#### 4.3.4 監査ログエンドポイント
-
-**監査ログ取得:**
-```
-GET /api/v1/admin/audit-logs
-Authorization: Bearer <access_token>
-
-Query Parameters:
-- page: ページ番号
-- per_page: 1ページあたりの件数
-- admin_username: 操作者でフィルタ
-- target_username: 対象者でフィルタ
-- action: 操作種別でフィルタ（create/update/delete）
-- from: 開始日時（ISO 8601形式）
-- to: 終了日時（ISO 8601形式）
-
-Response:
-{
-  "status": "success",
-  "data": {
-    "logs": [
-      {
-        "id": 1,
-        "admin_username": "admin",
-        "action": "create",
-        "target_username": "taro.yamada",
-        "details": "{\"display_name\": \"山田太郎\"}",
-        "ip_address": "192.168.1.100",
-        "created_at": "2024-01-01T00:00:00Z"
-      }
-    ],
-    "pagination": { ... }
-  }
-}
-```
-
-### 4.4 一般ユーザー向けAPI
-
-#### 4.4.1 自分の設定取得
-
-```
-GET /api/v1/me/config
-Authorization: Bearer <access_token>
-
-Response:
-{
-  "status": "success",
-  "data": {
-    "config": {
-      "llm_provider": "openai",
-      "openai_model": "gpt-4o",
-      "system_prompt": "...",
-      ...
-    }
-  }
-}
-```
-
-#### 4.4.2 自分の設定更新
-
-```
-PUT /api/v1/me/config
-Authorization: Bearer <access_token>
-
-Request Body:
-{
-  "openai_api_key": "sk-...",
-  "system_prompt": "カスタムプロンプト..."
-}
-
-Response:
-{
-  "status": "success",
-  "data": {
-    "config": { ... }
-  }
-}
-```
-
-### 4.5 既存API（コーディングエージェント用）との互換性
+### 4.4 API仕様（コーディングエージェント用）
 
 既存の`/config/{platform}/{username}`エンドポイントは維持し、データベースから設定を取得するように拡張します。
 
 ```
 GET /config/{platform}/{username}
-Authorization: Bearer <api_key>
+Authorization: Bearer {api_key}
 
 処理フロー:
 1. APIキーの検証
@@ -1205,11 +655,7 @@ Response:
       }
     },
     "system_prompt": "...",
-    "max_llm_process_num": 1000,
-    "planning": {
-      "enabled": true,
-      ...
-    }
+    "max_llm_process_num": 1000
   }
 }
 ```
@@ -1220,123 +666,96 @@ Response:
 
 ```
 user_config_api/
-├── server.py                # FastAPIサーバー（APIエントリポイント）
-├── streamlit_app.py         # Streamlitアプリ（管理画面エントリポイント）
-├── config.yaml              # 設定ファイル
-├── requirements.txt         # Python依存関係
-├── Dockerfile               # Dockerイメージ（API + Streamlit）
-├── Dockerfile.streamlit     # Streamlit専用Dockerイメージ
-├── docker-compose.yml       # Docker Compose設定
-├── migrations/              # データベースマイグレーション
-│   ├── 001_initial_schema.sql
-│   └── ...
-├── data/                    # データディレクトリ
-│   └── users.db             # SQLiteデータベース
-├── app/                     # 共通アプリケーションコード
-│   ├── __init__.py
-│   ├── config.py            # 設定読み込み
-│   ├── models/              # データモデル
-│   │   ├── __init__.py
-│   │   ├── user.py
-│   │   └── user_config.py
-│   ├── repositories/        # リポジトリ（データアクセス層）
-│   │   ├── __init__.py
-│   │   ├── base.py          # 抽象リポジトリ
-│   │   ├── sqlite/          # SQLite実装
-│   │   │   ├── __init__.py
-│   │   │   ├── user_repository.py
-│   │   │   └── user_config_repository.py
-│   │   └── database.py      # データベース接続管理
-│   ├── services/            # ビジネスロジック
-│   │   ├── __init__.py
-│   │   ├── auth_service.py
-│   │   ├── user_service.py
-│   │   └── config_service.py
-│   ├── auth/                # 認証関連
-│   │   ├── __init__.py
-│   │   ├── ldap_client.py
-│   │   └── jwt_handler.py
-│   └── utils/               # ユーティリティ
-│       ├── __init__.py
-│       ├── encryption.py    # 暗号化ユーティリティ
-│       └── audit.py         # 監査ログ
-├── api/                     # FastAPI関連
-│   ├── __init__.py
-│   ├── dependencies.py      # 依存関係注入
-│   └── routers/             # APIルーター
-│       ├── __init__.py
-│       ├── auth.py
-│       ├── admin.py
-│       ├── users.py
-│       └── config.py        # 既存API互換
-├── streamlit/               # Streamlit管理画面
-│   ├── __init__.py
-│   ├── pages/               # マルチページ構成
-│   │   ├── 01_🏠_ダッシュボード.py
-│   │   ├── 02_👥_ユーザー管理.py
-│   │   ├── 03_⚙️_設定管理.py
-│   │   ├── 04_📋_監査ログ.py
-│   │   └── 05_👤_個人設定.py
-│   ├── components/          # 再利用可能なUIコンポーネント
-│   │   ├── __init__.py
-│   │   ├── auth.py          # 認証コンポーネント
-│   │   ├── user_form.py     # ユーザーフォーム
-│   │   ├── config_form.py   # 設定フォーム
-│   │   └── data_table.py    # データテーブル
-│   ├── utils/               # Streamlit用ユーティリティ
-│   │   ├── __init__.py
-│   │   └── session.py       # セッション管理
-│   └── .streamlit/          # Streamlit設定
-│       └── config.toml
-└── tests/                   # テスト
-    ├── __init__.py
-    ├── unit/
-    │   ├── test_auth_service.py
-    │   ├── test_user_service.py
-    │   └── test_ldap_client.py
-    └── integration/
-        └── test_api.py
+|-- server.py                # FastAPIサーバー（APIエントリポイント）
+|-- streamlit_app.py         # Streamlitアプリ（管理画面エントリポイント）
+|-- config.yaml              # 設定ファイル
+|-- requirements.txt         # Python依存関係
+|-- Dockerfile               # Dockerイメージ（API + Streamlit）
+|-- Dockerfile.streamlit     # Streamlit専用Dockerイメージ
+|-- docker-compose.yml       # Docker Compose設定
+|-- data/                    # データディレクトリ
+|   +-- users.db             # SQLiteデータベース
+|-- app/                     # 共通アプリケーションコード
+|   |-- __init__.py
+|   |-- config.py            # 設定読み込み
+|   |-- database.py          # SQLAlchemyセッション管理
+|   |-- models/              # SQLAlchemyモデル
+|   |   |-- __init__.py
+|   |   |-- user.py
+|   |   +-- user_config.py
+|   |-- services/            # ビジネスロジック
+|   |   |-- __init__.py
+|   |   |-- auth_service.py
+|   |   +-- user_service.py
+|   |-- auth/                # 認証関連
+|   |   |-- __init__.py
+|   |   +-- ad_client.py
+|   +-- utils/               # ユーティリティ
+|       |-- __init__.py
+|       +-- encryption.py    # 暗号化ユーティリティ
+|-- api/                     # FastAPI関連
+|   |-- __init__.py
+|   |-- dependencies.py      # 依存関係注入
+|   +-- routers/             # APIルーター
+|       |-- __init__.py
+|       +-- config.py        # 既存API互換
+|-- streamlit/               # Streamlit管理画面
+|   |-- __init__.py
+|   |-- pages/               # マルチページ構成
+|   |   |-- 01_dashboard.py
+|   |   |-- 02_user_management.py
+|   |   +-- 03_personal_settings.py
+|   |-- components/          # 再利用可能なUIコンポーネント
+|   |   |-- __init__.py
+|   |   |-- auth.py          # 認証コンポーネント
+|   |   |-- user_form.py     # ユーザーフォーム
+|   |   +-- data_table.py    # データテーブル
+|   |-- utils/               # Streamlit用ユーティリティ
+|   |   |-- __init__.py
+|   |   +-- session.py       # セッション管理
+|   +-- .streamlit/          # Streamlit設定
+|       +-- config.toml
++-- tests/                   # テスト
+    |-- __init__.py
+    +-- unit/
+        |-- test_auth_service.py
+        +-- test_user_service.py
 ```
 
 ### 5.2 レイヤー構成
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                   プレゼンテーション層                   │
-│  ┌──────────────────┐    ┌──────────────────┐          │
-│  │ Streamlit管理画面 │    │   FastAPI REST   │          │
-│  │   (ポート8501)    │    │    (ポート8080)   │          │
-│  └────────┬─────────┘    └────────┬─────────┘          │
-└───────────┼───────────────────────┼─────────────────────┘
-            │                       │
-            ▼                       ▼
-┌─────────────────────────────────────────────────────────┐
-│                   サービス層（共有）                     │
-│  ┌────────────┐ ┌────────────┐ ┌────────────┐         │
-│  │AuthService │ │UserService │ │ConfigService│         │
-│  └────────────┘ └────────────┘ └────────────┘         │
-└──────────────────────────┬──────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│                   データアクセス層                       │
-│  ┌───────────────────┐ ┌───────────────────┐           │
-│  │  UserRepository   │ │UserConfigRepository│           │
-│  │    (抽象クラス)    │ │    (抽象クラス)    │           │
-│  └─────────┬─────────┘ └─────────┬─────────┘           │
-│            │                     │                      │
-│  ┌─────────▼─────────┐ ┌─────────▼─────────┐           │
-│  │SQLiteUserRepository│ │SQLiteUserConfigRepo│           │
-│  └───────────────────┘ └───────────────────┘           │
-└──────────────────────────┬──────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│                   データベース層                         │
-│  ┌───────────────────────────────────────────────────┐ │
-│  │                SQLite / PostgreSQL                 │ │
-│  └───────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────┘
++----------------------------------------------------------+
+|                   プレゼンテーション層                    |
+|  +--------------------+    +--------------------+        |
+|  | Streamlit管理画面  |    |   FastAPI REST     |        |
+|  |   (ポート8501)     |    |    (ポート8080)    |        |
+|  +---------+----------+    +---------+----------+        |
++------------|--------------------------|-------------------+
+             |                          |
+             v                          v
++----------------------------------------------------------+
+|                   サービス層（共有）                      |
+|  +--------------+ +---------------+                      |
+|  | AuthService  | | UserService   |                      |
+|  +--------------+ +---------------+                      |
++----------------------------+-----------------------------+
+                             |
+                             v
++----------------------------------------------------------+
+|                   データアクセス層                        |
+|  +--------------------------------------------------+   |
+|  |              SQLAlchemy ORM                       |   |
+|  +--------------------------------------------------+   |
++----------------------------+-----------------------------+
+                             |
+                             v
++----------------------------------------------------------+
+|                   データベース層                          |
+|  +--------------------------------------------------+   |
+|  |            SQLite / PostgreSQL / MySQL            |   |
+|  +--------------------------------------------------+   |
++----------------------------------------------------------+
 ```
 
 ### 5.3 Streamlitとサービス層の連携
@@ -1346,86 +765,57 @@ FastAPIを経由せず、Pythonコードを直接呼び出すことで効率的�
 
 ```
 Streamlit管理画面
-        │
-        ├── 認証 ─────→ AuthService ─────→ LDAPClient
-        │                    │
-        │                    └─────→ UserRepository
-        │
-        ├── ユーザー管理 ─→ UserService ─→ UserRepository
-        │
-        └── 設定管理 ───→ ConfigService ─→ UserConfigRepository
+        |
+        |-- 認証 ------> AuthService ------> ADClient
+        |                    |
+        |                    +------> SQLAlchemy Session
+        |
+        +-- ユーザー管理 --> UserService --> SQLAlchemy Session
 ```
 
-### 5.4 依存関係注入
-
-FastAPIの依存関係注入機能を使用して、各レイヤー間の依存関係を管理します。
-
-```
-# 依存関係の定義例
-
-get_db_session()
-    ↓
-get_user_repository(session)
-    ↓
-get_user_service(repository)
-    ↓
-Router（API）
-```
-
-### 5.4 設定管理
+### 5.4 SQLAlchemy設定
 
 #### 5.4.1 config.yamlの拡張
 
 ```yaml
-# データベース設定
+# データベース設定（SQLAlchemy）
 database:
-  # データベースタイプ: sqlite / postgresql / mysql
-  type: "sqlite"
+  # 接続URL
+  # SQLite: sqlite:///./data/users.db
+  # PostgreSQL: postgresql://user:password@localhost/dbname
+  # MySQL: mysql+pymysql://user:password@localhost/dbname
+  url: "sqlite:///./data/users.db"
   
-  # SQLite設定
-  sqlite:
-    path: "/app/data/users.db"
+  # SQLログ出力
+  echo: false
   
-  # PostgreSQL設定（将来用）
-  # postgresql:
-  #   host: "localhost"
-  #   port: 5432
-  #   database: "user_config"
-  #   user: "admin"
-  #   password_env: "DB_PASSWORD"
+  # コネクションプール設定（PostgreSQL/MySQL用）
+  pool_size: 5
+  max_overflow: 10
 
-# LDAP認証設定
-ldap:
-  enabled: true
+# Active Directory認証設定
+active_directory:
   server:
-    host: "ldap.example.com"
-    port: 389
-    use_ssl: false
-    use_tls: true
+    host: "ad.example.com"
+    port: 636
+    use_ssl: true
   bind:
-    dn: "cn=service_account,ou=service,dc=example,dc=com"
-    password_env: "LDAP_BIND_PASSWORD"
+    dn: "CN=service_account,OU=Service Accounts,DC=example,DC=com"
+    password_env: "AD_BIND_PASSWORD"
   user_search:
-    base_dn: "ou=users,dc=example,dc=com"
-    filter: "(uid={username})"
+    base_dn: "OU=Users,DC=example,DC=com"
+    filter: "(sAMAccountName={username})"
     attributes:
-      email: "mail"
+      uid: "sAMAccountName"
+      email: "userPrincipalName"
       display_name: "displayName"
-  username_derivation:
-    method: "email_prefix"
-
-# JWT認証設定
-auth:
-  jwt:
-    secret_key_env: "JWT_SECRET_KEY"
-    algorithm: "HS256"
-    access_token_expire: 3600
-    refresh_token_expire: 604800
+  timeout:
+    connect: 5
+    operation: 10
 
 # 暗号化設定
 encryption:
   key_env: "ENCRYPTION_KEY"
-  algorithm: "AES-256-GCM"
 
 # APIサーバー設定（既存）
 api_server:
@@ -1440,13 +830,6 @@ llm:
     api_key: "OPENAI_API_KEY"
     model: "gpt-4o"
     max_token: 40960
-  # ...
-
-# プランニング設定（デフォルト）
-planning:
-  enabled: true
-  strategy: "chain_of_thought"
-  # ...
 ```
 
 ## 6. セキュリティ仕様
@@ -1457,16 +840,15 @@ planning:
 
 | 認証方式 | 用途 | 説明 |
 |---------|------|------|
-| LDAP認証 | 管理画面ログイン | LDAPサーバーによるユーザー認証 |
-| JWT | APIアクセス（認証後） | ステートレスなセッション管理 |
+| AD認証 | 管理画面ログイン | Active Directoryサーバーによるユーザー認証 |
 | APIキー | コーディングエージェント | 既存の固定APIキー認証を維持 |
 
 #### 6.1.2 認可（権限管理）
 
 | ロール | 権限 |
 |--------|------|
-| 管理者（is_admin=true） | 全ユーザーの管理、設定変更、監査ログ閲覧 |
-| 一般ユーザー | 自分の設定の閲覧・変更のみ |
+| 管理者（is_admin=true） | 全ユーザーの管理 |
+| 一般ユーザー | 自分のモデル設定の変更のみ |
 
 ### 6.2 データ保護
 
@@ -1480,52 +862,7 @@ planning:
 - APIキー等の機密データはAES-256-GCMで暗号化して保存
 - 暗号化キーは環境変数から読み込み
 
-#### 6.2.3 パスワードハッシュ
-
-- LDAP認証を使用するため、パスワードはローカルに保存しない
-- 将来的にローカル認証を追加する場合はbcryptを使用
-
-### 6.3 監査ログ
-
-#### 6.3.1 記録対象
-
-以下の操作を監査ログに記録します。
-
-- ユーザーのログイン/ログアウト
-- ユーザーの作成/更新/削除
-- 設定の変更
-- 管理者権限の変更
-
-#### 6.3.2 ログ保持期間
-
-- デフォルト: 1年
-- 設定ファイルで変更可能
-
-### 6.4 セキュリティベストプラクティス
-
-#### 6.4.1 入力検証
-
-- 全ての入力をバリデーション
-- SQLインジェクション対策（パラメータ化クエリの使用）
-- XSS対策（出力のエスケープ）
-
-#### 6.4.2 レート制限
-
-```yaml
-security:
-  rate_limit:
-    # ログイン試行制限
-    login:
-      max_attempts: 5
-      window_seconds: 300
-      lockout_seconds: 900
-    
-    # API呼び出し制限
-    api:
-      requests_per_minute: 60
-```
-
-#### 6.4.3 セキュリティヘッダー
+### 6.3 セキュリティヘッダー
 
 ```
 X-Content-Type-Options: nosniff
@@ -1539,37 +876,7 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains
 
 ### 7.1 Docker構成
 
-#### 7.1.1 Dockerfile（統合版）
-
-FastAPIとStreamlitの両方を含む統合イメージ：
-
-```dockerfile
-FROM python:3.13-slim
-
-WORKDIR /app
-
-# 依存関係のインストール
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# アプリケーションのコピー
-COPY . .
-
-# データディレクトリの作成
-RUN mkdir -p /app/data
-
-# マイグレーションの実行
-RUN python -m app.migrations.run
-
-# 両方のポートを公開
-EXPOSE 8080 8501
-
-# supervisordで両方のサービスを起動
-COPY supervisord.conf /etc/supervisord.conf
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
-```
-
-#### 7.1.2 Dockerfile.api（API専用）
+#### 7.1.1 Dockerfile.api（API専用）
 
 ```dockerfile
 FROM python:3.13-slim
@@ -1587,7 +894,7 @@ EXPOSE 8080
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
-#### 7.1.3 Dockerfile.streamlit（Streamlit専用）
+#### 7.1.2 Dockerfile.streamlit（Streamlit専用）
 
 ```dockerfile
 FROM python:3.13-slim
@@ -1604,7 +911,7 @@ EXPOSE 8501
 CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
 ```
 
-#### 7.1.4 docker-compose.yml
+#### 7.1.3 docker-compose.yml
 
 ```yaml
 version: '3.8'
@@ -1617,11 +924,10 @@ services:
       dockerfile: Dockerfile.api
     container_name: user-config-api
     environment:
-      - LDAP_BIND_PASSWORD=${LDAP_BIND_PASSWORD}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - AD_BIND_PASSWORD=${AD_BIND_PASSWORD}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - API_SERVER_KEY=${API_SERVER_KEY}
-      - DATABASE_PATH=/app/data/users.db
+      - DATABASE_URL=sqlite:///./data/users.db
     volumes:
       - user-config-data:/app/data
     ports:
@@ -1636,10 +942,9 @@ services:
       dockerfile: Dockerfile.streamlit
     container_name: user-config-web
     environment:
-      - LDAP_BIND_PASSWORD=${LDAP_BIND_PASSWORD}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - AD_BIND_PASSWORD=${AD_BIND_PASSWORD}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
-      - DATABASE_PATH=/app/data/users.db
+      - DATABASE_URL=sqlite:///./data/users.db
     volumes:
       - user-config-data:/app/data
     ports:
@@ -1649,15 +954,58 @@ services:
     depends_on:
       - user-config-api
 
+  # テスト用OpenLDAPサーバー
+  openldap:
+    image: osixia/openldap:1.5.0
+    container_name: openldap
+    environment:
+      - LDAP_ORGANISATION=Example Inc
+      - LDAP_DOMAIN=example.com
+      - LDAP_ADMIN_PASSWORD=admin_password
+      - LDAP_CONFIG_PASSWORD=config_password
+      - LDAP_READONLY_USER=true
+      - LDAP_READONLY_USER_USERNAME=readonly
+      - LDAP_READONLY_USER_PASSWORD=readonly_password
+    volumes:
+      - openldap-data:/var/lib/ldap
+      - openldap-config:/etc/ldap/slapd.d
+    ports:
+      - "389:389"
+      - "636:636"
+    networks:
+      - coding-agent-network
+
+  # テスト用LDAP管理画面（LAM）
+  ldap-account-manager:
+    image: ldapaccountmanager/lam:stable
+    container_name: ldap-account-manager
+    environment:
+      - LAM_SKIP_PRECONFIGURE=false
+      - LDAP_DOMAIN=example.com
+      - LDAP_BASE_DN=dc=example,dc=com
+      - LDAP_USERS_DN=ou=users,dc=example,dc=com
+      - LDAP_GROUPS_DN=ou=groups,dc=example,dc=com
+      - LDAP_SERVER=ldap://openldap:389
+      - LAM_LANG=ja_JP
+      - LAM_PASSWORD=lam_password
+    ports:
+      - "8090:80"
+    networks:
+      - coding-agent-network
+    depends_on:
+      - openldap
+
 volumes:
   user-config-data:
+  openldap-data:
+  openldap-config:
 
 networks:
   coding-agent-network:
     driver: bridge
 ```
 
-#### 7.1.5 requirements.txt
+#### 7.1.4 requirements.txt
 
 ```
 # FastAPI関連
@@ -1668,13 +1016,12 @@ pydantic==2.5.0
 # Streamlit関連
 streamlit==1.29.0
 
-# データベース
+# データベース（SQLAlchemy）
 sqlalchemy==2.0.23
 aiosqlite==0.19.0
 
 # 認証関連
 python-ldap==3.4.4
-PyJWT==2.8.0
 bcrypt==4.1.1
 
 # 暗号化
@@ -1692,11 +1039,10 @@ pandas==2.1.3
 
 | 環境変数 | 説明 | 必須 |
 |---------|------|------|
-| LDAP_BIND_PASSWORD | LDAPサービスアカウントのパスワード | Yes |
-| JWT_SECRET_KEY | JWT署名キー（32文字以上推奨） | Yes |
+| AD_BIND_PASSWORD | Active Directoryサービスアカウントのパスワード | Yes |
 | ENCRYPTION_KEY | データ暗号化キー（32バイト） | Yes |
 | API_SERVER_KEY | コーディングエージェント用APIキー | Yes |
-| DATABASE_PATH | SQLiteデータベースパス（デフォルト: /app/data/users.db） | No |
+| DATABASE_URL | データベースURL（デフォルト: sqlite:///./data/users.db） | No |
 | STREAMLIT_SERVER_PORT | Streamlitポート（デフォルト: 8501） | No |
 
 ### 7.3 初期セットアップ
@@ -1707,20 +1053,22 @@ pandas==2.1.3
 # コンテナ内で実行
 docker-compose exec user-config-web python -m app.commands.create_admin \
   --username admin \
+  --ldap-uid admin \
   --ldap-email admin@example.com
 
 # または環境変数で初期管理者を指定
 INITIAL_ADMIN_USERNAME=admin
+INITIAL_ADMIN_LDAP_UID=admin
 INITIAL_ADMIN_LDAP_EMAIL=admin@example.com
 ```
 
 #### 7.3.2 データベース初期化
 
-```bash
-# マイグレーションの実行
-docker-compose exec user-config-api python -m app.migrations.run
+SQLAlchemyのマイグレーション機能を使用してデータベースを初期化します。
 
-# または起動時に自動実行（Dockerfile内）
+```bash
+# テーブル作成
+docker-compose exec user-config-api python -c "from app.database import engine, Base; Base.metadata.create_all(engine)"
 ```
 
 ### 7.4 起動方法
@@ -1759,142 +1107,110 @@ streamlit run streamlit_app.py --server.port 8501
 # - 管理画面: http://localhost:8501
 ```
 
-### 7.5 アクセスURL
+### 7.5 テスト用LDAP環境
+
+#### 7.5.1 OpenLDAPの設定
+
+docker-compose.ymlに含まれるOpenLDAPサーバーをテスト用ADサーバーとして使用します。
+
+**初期設定:**
+- ドメイン: example.com
+- Base DN: dc=example,dc=com
+- 管理者DN: cn=admin,dc=example,dc=com
+- 管理者パスワード: admin_password
+
+#### 7.5.2 LDAP Account Manager (LAM)
+
+WebベースのLDAP管理ツールでテストユーザーを作成できます。
+
+**アクセス:**
+- URL: http://localhost:8090
+- 初期パスワード: lam_password
+
+**使用方法:**
+1. ブラウザでhttp://localhost:8090にアクセス
+2. LAM設定画面でLDAPサーバー接続を確認
+3. ユーザー管理画面でテストユーザーを作成
+
+### 7.6 アクセスURL
 
 | サービス | URL | 説明 |
 |---------|-----|------|
 | Streamlit管理画面 | http://localhost:8501 | ブラウザで管理操作 |
 | FastAPI REST API | http://localhost:8080 | コーディングエージェント用API |
 | API ドキュメント | http://localhost:8080/docs | Swagger UI |
-| API ドキュメント（ReDoc） | http://localhost:8080/redoc | ReDoc形式 |
+| LDAP Account Manager | http://localhost:8090 | テスト用LDAP管理 |
 
-## 8. テスト戦略
+## 8. 実装フェーズ
 
-### 8.1 ユニットテスト
+### 8.1 Phase 1: 基盤構築（1週間）
 
-#### 8.1.1 認証関連テスト
-
-- LDAP認証の成功/失敗
-- JWT生成/検証
-- ユーザー名導出ロジック
-
-#### 8.1.2 リポジトリテスト
-
-- CRUD操作
-- 検索機能
-- エラーハンドリング
-
-#### 8.1.3 サービステスト
-
-- ビジネスロジック
-- 権限チェック
-- データ変換
-
-### 8.2 統合テスト
-
-#### 8.2.1 API統合テスト
-
-- 認証フロー全体
-- ユーザー管理API
-- 設定管理API
-
-#### 8.2.2 データベース統合テスト
-
-- トランザクション
-- 外部キー制約
-- マイグレーション
-
-### 8.3 E2Eテスト
-
-#### 8.3.1 シナリオテスト
-
-- 管理者によるユーザー追加→設定変更→削除
-- 一般ユーザーによる自己設定変更
-- コーディングエージェントによる設定取得
-
-## 9. 実装フェーズ
-
-### 9.1 Phase 1: 基盤構築（1週間）
-
-- データベース抽象化レイヤーの実装
-- SQLiteリポジトリの実装
+- SQLAlchemyモデルの実装
+- データベース接続・セッション管理の実装
 - マイグレーション機能の実装
-- 共通モデル（User, UserConfig）の実装
 
-### 9.2 Phase 2: 認証機能（1週間）
+### 8.2 Phase 2: 認証機能（1週間）
 
-- LDAPクライアントの実装
+- ADクライアントの実装
 - セッション管理の実装
 - 認可ロジックの実装
 
-### 9.3 Phase 3: Streamlit管理画面（1週間）
+### 8.3 Phase 3: Streamlit管理画面（1週間）
 
 - ログイン画面の実装
 - ダッシュボードの実装
 - ユーザー管理画面の実装
-- 設定管理画面の実装
-- 監査ログ画面の実装
 - 個人設定画面の実装
 
-### 9.4 Phase 4: FastAPI（REST API）（1週間）
+### 8.4 Phase 4: FastAPI（REST API）（3日）
 
-- 認証APIの実装
-- ユーザー管理APIの実装
-- 設定管理APIの実装
 - 既存API（/config/{platform}/{username}）の拡張
+- データベース連携
+- デフォルト設定マージ
 
-### 9.5 Phase 5: テストとドキュメント（3日）
+### 8.5 Phase 5: テスト環境構築（3日）
 
-- ユニットテストの作成
-- 統合テストの作成
-- Streamlit画面のテスト
-- ドキュメントの整備
+- OpenLDAP/LAMの設定
+- テストユーザーの作成
+- 動作確認
 
-**合計: 約4〜5週間**
+**合計: 約4週間**
 
-## 10. まとめ
+## 9. まとめ
 
-### 10.1 主要な設計ポイント
+### 9.1 主要な設計ポイント
 
 1. **Streamlitによる管理画面**
    - Pythonのみでフル機能の管理UIを構築
    - 迅速な開発とメンテナンス性の向上
    - バックエンドコードとの直接連携
 
-2. **モジュラーなデータベース設計**
-   - リポジトリパターンによる抽象化
-   - SQLiteから他DBへの移行を容易に
+2. **SQLAlchemyによるデータベース抽象化**
+   - ORMによる型安全なデータアクセス
+   - SQLiteからPostgreSQL/MySQL等への移行が容易
+   - マイグレーション機能でスキーマ変更を管理
 
-3. **LDAP認証との統合**
-   - メールアドレスからユーザー名を導出
-   - GitHub/GitLabユーザー名との紐付け
+3. **Active Directory認証**
+   - 既存のADインフラを活用
+   - メールアドレスからGitHub/GitLabユーザー名を自動導出
 
 4. **2サーバー構成**
    - Streamlit管理画面（ポート8501）: 人間向けUI
    - FastAPI REST API（ポート8080）: コーディングエージェント向け
 
-5. **セキュリティ重視**
-   - 機密データの暗号化
-   - 監査ログによる追跡可能性
+5. **テスト環境**
+   - OpenLDAP + LAMでADサーバーをシミュレート
+   - 開発・テストが容易
 
-### 10.2 Streamlit採用のメリット
+### 9.2 今後の拡張性
 
-1. **開発速度**: HTML/CSS/JavaScriptの知識不要
-2. **保守性**: Pythonコードのみで管理可能
-3. **統合性**: バックエンドサービスを直接呼び出し
-4. **状態管理**: `st.session_state`による簡潔な実装
-5. **リアルタイム性**: ウィジェット変更が即座に反映
-
-### 10.3 今後の拡張性
-
-- 複数LDAPサーバーのサポート
+- 複数ADサーバーのサポート
 - OAuth2/OIDC認証の追加
 - ロールベースアクセス制御（RBAC）の拡張
 - ダークモード対応
-- 多言語対応（i18n）
 
 ---
 
-**文書バージョン:** 1.1  
+**文書バージョン:** 2.0  
 **最終更新日:** 2024-11-27  
-**ステータス:** 詳細設計完了（Streamlit版）
+**ステータス:** 詳細設計完了（レビュー反映版）
