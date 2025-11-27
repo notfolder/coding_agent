@@ -42,19 +42,19 @@ database:
 # Active Directory認証設定
 active_directory:
   server:
-    host: "ad.example.com"
-    port: 636
-    use_ssl: true
+    host: "openldap"  # Docker内部ネットワーク名（ローカル開発時は"localhost"）
+    port: 389  # 非暗号化LDAP（テスト用）
+    use_ssl: false  # テスト環境ではfalse
   bind:
-    dn: "CN=service_account,OU=Service Accounts,DC=example,DC=com"
-    password_env: "AD_BIND_PASSWORD"
+    dn: "cn=admin,dc=example,dc=com"
+    password_env: "AD_BIND_PASSWORD"  # admin_password
   user_search:
-    base_dn: "OU=Users,DC=example,DC=com"
-    filter: "(sAMAccountName={username})"
+    base_dn: "ou=people,dc=example,dc=com"
+    filter: "(uid={username})"  # sAMAccountNameではなくuid
     attributes:
-      uid: "sAMAccountName"
+      uid: "uid"
       email: "userPrincipalName"
-      display_name: "displayName"
+      display_name: "cn"
   timeout:
     connect: 5
     operation: 10

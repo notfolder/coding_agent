@@ -15,8 +15,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.database import get_db_context
 from app.services.user_service import UserService
-from ..components.auth import show_logout_button
-from ..utils.session import check_authentication, get_current_user
+from streamlit_custom.components.auth import show_logout_button
+from streamlit_custom.utils.session import check_authentication, get_current_user
 
 # ページ設定
 st.set_page_config(
@@ -59,27 +59,40 @@ with col3:
     st.text_input("権限", value=role, disabled=True)
 
 st.markdown("---")
-st.markdown("### モデル設定")
-st.markdown("使用するLLMモデル名を設定できます。")
+st.markdown("### LLM設定")
+st.markdown("使用するLLMモデル名とAPIキーを設定できます。")
 
 # 現在の設定を取得
 current_model = ""
+current_api_key_exists = False
 with get_db_context() as db:
     user_service = UserService(db)
     user_config = user_service.get_user_config(user_id)
     if user_config:
         current_model = user_config.llm_model or ""
+        # APIキーが設定されているかチェック（復号化せずに存在確認のみ）
+        current_api_key_exists = bool(user_config.llm_api_key)
 
 # モデル設定フォーム
 with st.form("model_settings_form"):
     llm_model = st.text_input(
         "LLMモデル名",
         value=current_model,
-        placeholder="gpt-4o, gpt-4-turbo, etc.",
+        placeholder="gpt-4o, gpt-4-turbo, claude-3-5-sonnet, etc.",
         help="使用するLLMモデル名を入力してください。空の場合はデフォルト設定が使用されます。",
     )
+    
+    llm_api_key = st.text_input(
+        "LLM APIキー",
+        type="password",
+        placeholder="APIキーを入力（変更する場合のみ）",
+        help="LLM APIキーを入力してください。空の場合は現在の設定を維持します。",
+    )
+    
+    if current_api_key_exists:
+        st.info("✓ APIキーが設定されています（入力欄に値を入力すると上書きされます）")
 
-    st.markdown("※ 使用するLLMモデル名を入力してください")
+    st.markdown("※ APIキーは暗号化されてデータベースに保存されます")
 
     col1, col2 = st.columns(2)
 
@@ -92,11 +105,22 @@ with st.form("model_settings_form"):
     if submitted:
         with get_db_context() as db:
             user_service = UserService(db)
-            user_service.update_user_config(
-                user_id,
-                llm_model=llm_model or None,
-            )
-            st.success("設定を保存しました")
+            
+            # APIキーが入力されている場合のみ更新
+            if llm_api_key:
+                user_service.update_user_config(
+                    user_id,
+                    llm_model=llm_model or None,
+                    llm_api_key=llm_api_key,
+                )
+                st.success("設定を保存しました（APIキーを含む）")
+            else:
+                # APIキーが入力されていない場合はモデル名のみ更新
+                user_service.update_user_config(
+                    user_id,
+                    llm_model=llm_model or None,
+                )
+                st.success("設定を保存しました")
             st.rerun()
 
     if reset:
@@ -111,7 +135,12 @@ with st.form("model_settings_form"):
 st.markdown("---")
 st.markdown("### 現在の設定")
 
-if current_model:
-    st.info(f"カスタム設定: モデル = **{current_model}**")
+if current_model or current_api_key_exists:
+    settings_info = []
+    if current_model:
+        settings_info.append(f"モデル = **{current_model}**")
+    if current_api_key_exists:
+        settings_info.append("APIキー = **設定済み**")
+    st.info("カスタム設定: " + ", ".join(settings_info))
 else:
     st.info("デフォルト設定を使用しています")

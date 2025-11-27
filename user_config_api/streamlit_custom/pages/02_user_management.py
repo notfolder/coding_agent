@@ -15,10 +15,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.database import get_db_context
 from app.services.user_service import UserService
-from ..components.auth import show_logout_button
-from ..components.data_table import show_data_table, show_pagination, show_search_filter
-from ..components.user_form import show_delete_confirmation, show_user_form
-from ..utils.session import check_authentication, get_current_user, require_admin
+from streamlit_custom.components.auth import show_logout_button
+from streamlit_custom.components.data_table import show_data_table, show_pagination, show_search_filter
+from streamlit_custom.components.user_form import show_delete_confirmation, show_user_form
+from streamlit_custom.utils.session import check_authentication, get_current_user, require_admin
 
 # ページ設定
 st.set_page_config(

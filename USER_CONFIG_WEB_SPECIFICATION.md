@@ -921,17 +921,18 @@ services:
   user-config-api:
     build:
       context: ./user_config_api
-      dockerfile: Dockerfile.api
+      dockerfile: Dockerfile
     container_name: user-config-api
     environment:
-      - AD_BIND_PASSWORD=${AD_BIND_PASSWORD}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
-      - API_SERVER_KEY=${API_SERVER_KEY}
+      - AD_BIND_PASSWORD=${AD_BIND_PASSWORD:-admin_password}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      - API_SERVER_KEY=${API_SERVER_KEY:-your-secret-api-key-here}
       - DATABASE_URL=sqlite:///./data/users.db
+      - USE_MOCK_AD=${USE_MOCK_AD:-false}
     volumes:
       - user-config-data:/app/data
     ports:
-      - "8080:8080"
+      - "8081:8080"
     networks:
       - coding-agent-network
 
@@ -942,9 +943,10 @@ services:
       dockerfile: Dockerfile.streamlit
     container_name: user-config-web
     environment:
-      - AD_BIND_PASSWORD=${AD_BIND_PASSWORD}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - AD_BIND_PASSWORD=${AD_BIND_PASSWORD:-admin_password}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       - DATABASE_URL=sqlite:///./data/users.db
+      - USE_MOCK_AD=${USE_MOCK_AD:-false}
     volumes:
       - user-config-data:/app/data
     ports:
@@ -953,11 +955,13 @@ services:
       - coding-agent-network
     depends_on:
       - user-config-api
+      - openldap
 
   # テスト用OpenLDAPサーバー
   openldap:
     image: osixia/openldap:1.5.0
     container_name: openldap
+    hostname: ldap.example.com
     environment:
       - LDAP_ORGANISATION=Example Inc
       - LDAP_DOMAIN=example.com
@@ -966,6 +970,7 @@ services:
       - LDAP_READONLY_USER=true
       - LDAP_READONLY_USER_USERNAME=readonly
       - LDAP_READONLY_USER_PASSWORD=readonly_password
+      - LDAP_TLS_VERIFY_CLIENT=never
     volumes:
       - openldap-data:/var/lib/ldap
       - openldap-config:/etc/ldap/slapd.d
@@ -980,10 +985,9 @@ services:
     image: ldapaccountmanager/lam:stable
     container_name: ldap-account-manager
     environment:
-      - LAM_SKIP_PRECONFIGURE=false
       - LDAP_DOMAIN=example.com
       - LDAP_BASE_DN=dc=example,dc=com
-      - LDAP_USERS_DN=ou=users,dc=example,dc=com
+      - LDAP_USERS_DN=ou=people,dc=example,dc=com
       - LDAP_GROUPS_DN=ou=groups,dc=example,dc=com
       - LDAP_SERVER=ldap://openldap:389
       - LAM_LANG=ja_JP
@@ -1109,7 +1113,7 @@ streamlit run streamlit_app.py --server.port 8501
 
 ### 7.5 テスト用LDAP環境
 
-#### 7.5.1 OpenLDAPの設定
+#### 7.5.1 OpenLDAPの概要
 
 docker-compose.ymlに含まれるOpenLDAPサーバーをテスト用ADサーバーとして使用します。
 
@@ -1118,6 +1122,24 @@ docker-compose.ymlに含まれるOpenLDAPサーバーをテスト用ADサーバ�
 - Base DN: dc=example,dc=com
 - 管理者DN: cn=admin,dc=example,dc=com
 - 管理者パスワード: admin_password
+- 読み取り専用ユーザー: readonly / readonly_password
+
+**ポート:**
+- 389: LDAP（非暗号化）
+- 636: LDAPS（SSL/TLS）
+
+**OpenLDAP環境変数の説明:**
+
+| 環境変数 | 値 | 説明 |
+|---------|-----|------|
+| LDAP_ORGANISATION | Example Inc | 組織名 |
+| LDAP_DOMAIN | example.com | 組織のドメイン |
+| LDAP_ADMIN_PASSWORD | admin_password | 管理者パスワード |
+| LDAP_CONFIG_PASSWORD | config_password | 設定用パスワード |
+| LDAP_READONLY_USER | true | 読み取り専用ユーザーの有効化 |
+| LDAP_READONLY_USER_USERNAME | readonly | 読み取り専用ユーザー名 |
+| LDAP_READONLY_USER_PASSWORD | readonly_password | 読み取り専用ユーザーパスワード |
+| LDAP_TLS_VERIFY_CLIENT | never | SSLクライアント認証の無効化 |
 
 #### 7.5.2 LDAP Account Manager (LAM)
 
@@ -1125,21 +1147,281 @@ WebベースのLDAP管理ツールでテストユーザーを作成できます�
 
 **アクセス:**
 - URL: http://localhost:8090
-- 初期パスワード: lam_password
+- 初期設定パスワード: lam_password
+- 管理者DN: cn=admin,dc=example,dc=com
+- 管理者パスワード: admin_password
 
-**使用方法:**
-1. ブラウザでhttp://localhost:8090にアクセス
-2. LAM設定画面でLDAPサーバー接続を確認
-3. ユーザー管理画面でテストユーザーを作成
+**LAM環境変数の説明:**
+
+| 環境変数 | 値 | 説明 |
+|---------|-----|------|
+| LDAP_DOMAIN | example.com | 組織のドメイン（OpenLDAPと一致） |
+| LDAP_BASE_DN | dc=example,dc=com | LDAPルートDN |
+| LDAP_USERS_DN | ou=people,dc=example,dc=com | ユーザーOU |
+| LDAP_GROUPS_DN | ou=groups,dc=example,dc=com | グループOU |
+| LDAP_SERVER | ldap://openldap:389 | LDAPサーバー接続先 |
+| LAM_LANG | ja_JP | 日本語UI |
+| LAM_PASSWORD | lam_password | LAM初期設定パスワード |
+
+#### 7.5.3 初回起動とLAM初期設定
+
+**1. サービスの起動**
+
+```bash
+# Docker Composeでサービスを起動
+docker compose up -d user-config-api user-config-web openldap ldap-account-manager
+
+# サービスの状態を確認
+docker compose ps
+
+# ログを確認
+docker compose logs -f openldap
+docker compose logs -f ldap-account-manager
+```
+
+**2. LAM管理画面へのアクセス**
+
+ブラウザで http://localhost:8090 にアクセスします。
+
+**3. LAM初期設定**
+
+右上の「LAM構成設定」→「サーバープロファイルの編集」を開きます。
+
+- パスワード: `lam_password`（docker-compose.ymlで設定）
+
+**設定項目:**
+
+a) **一般設定タブ**
+- タイムゾーン: `Asia/Tokyo` に変更
+
+b) **アカウントタイプタブ**
+- ユーザーのOU: `ou=people,dc=example,dc=com`
+- グループのOU: `ou=groups,dc=example,dc=com`
+
+c) **モジュールタブ**（Linux認証用の推奨設定）
+- **ユーザーモジュール**:
+  - 削除: `shadow`（shadowアカウント）
+  - 追加: `SSH公開鍵`（SSH鍵認証用）
+  
+設定を保存します。
+
+#### 7.5.4 テストユーザーの作成
+
+**1. LAMにログイン**
+
+- ユーザーDN: `cn=admin,dc=example,dc=com`
+- パスワード: `admin_password`
+
+**2. グループの作成**
+
+「グループ」タブ → 「新しいグループ」
+
+- グループ名: `testuser`
+- GID番号: 自動割り当て
+
+保存します。
+
+**3. ユーザーの作成**
+
+「ユーザー」タブ → 「新しいユーザー」
+
+**個人情報タブ:**
+- RDN識別子: `uid`
+- 姓: `Test`
+- 名: `User`
+
+**UNIXタブ:**
+- ユーザー名: `testuser`
+- Common name: `Test User`
+- プライマリグループ: `testuser`
+- UID番号: 自動割り当て
+- ホームディレクトリ: `/home/testuser`
+- ログインシェル: `/bin/bash`
+
+**パスワード設定:**
+- 「パスワード設定」を選択
+- パスワード: `testpass`（任意）
+- パスワード確認: `testpass`
+
+**SSH公開鍵タブ:**（オプション）
+- 「SSH公開鍵拡張を追加」を選択
+- SSH公開鍵を入力（`ssh-rsa AAAA...` 形式）
+
+設定を保存します。
+
+#### 7.5.5 テストユーザーのメールアドレス設定
+
+GitHub/GitLabユーザー名の自動導出を確認するため、メールアドレスを設定します。
+
+**1. ユーザーの編集**
+
+「ユーザー」タブで作成したユーザー（`testuser`）を選択し、編集モードに入ります。
+
+**2. 連絡先情報の追加**
+
+「個人情報」タブで以下を設定:
+- メール: `testuser@example.com`
+
+または
+
+「属性」タブで直接追加:
+- 属性名: `userPrincipalName`
+- 値: `testuser@example.com`
+
+保存します。
+
+#### 7.5.6 config.yamlの設定
+
+テスト用LDAP環境に接続するため、`user_config_api/config.yaml`のAD設定を更新します:
+
+```yaml
+active_directory:
+  server:
+    host: "openldap"  # Docker内部ネットワーク名
+    # host: "localhost"  # ローカル開発時
+    port: 389  # 非暗号化LDAP（テスト用）
+    use_ssl: false  # テスト環境ではfalse
+  bind:
+    dn: "cn=admin,dc=example,dc=com"
+    password_env: "AD_BIND_PASSWORD"  # admin_password
+  user_search:
+    base_dn: "ou=people,dc=example,dc=com"
+    filter: "(uid={username})"  # sAMAccountNameではなくuid
+    attributes:
+      uid: "uid"
+      email: "userPrincipalName"
+      display_name: "cn"
+  timeout:
+    connect: 5
+    operation: 10
+```
+
+**環境変数の設定（.env）:**
+
+```bash
+# LDAP認証
+AD_BIND_PASSWORD=admin_password
+USE_MOCK_AD=false  # 実際のLDAP接続を使用
+
+# 暗号化キー
+ENCRYPTION_KEY=dev-encryption-key-32-bytes!!
+
+# APIキー
+API_SERVER_KEY=your-secret-api-key-here
+```
+
+#### 7.5.7 動作確認
+
+**1. Streamlit管理画面でのログイン**
+
+http://localhost:8501 にアクセス
+
+- ユーザー名: `testuser`
+- パスワード: `testpass`
+
+ログインに成功すると:
+- ダッシュボードが表示される
+- ユーザー情報が自動的にデータベースに登録される
+- GitHub/GitLabユーザー名: `testuser`（メールの@以前）
+
+**2. LDAPコマンドラインでの確認**（オプション）
+
+```bash
+# ユーザー検索
+docker compose exec openldap ldapsearch \
+  -x -H ldap://localhost:389 \
+  -D "cn=admin,dc=example,dc=com" \
+  -w admin_password \
+  -b "ou=people,dc=example,dc=com" \
+  "(uid=testuser)"
+
+# 全ユーザー一覧
+docker compose exec openldap ldapsearch \
+  -x -H ldap://localhost:389 \
+  -D "cn=admin,dc=example,dc=com" \
+  -w admin_password \
+  -b "dc=example,dc=com" \
+  "(objectClass=posixAccount)"
+```
+
+**3. Apache Directory Studioでの接続**（GUI LDAPブラウザ）
+
+- プロトコル: LDAP（非暗号化）
+- ホスト: localhost
+- ポート: 389
+- ユーザーDN: `cn=admin,dc=example,dc=com`
+- パスワード: `admin_password`
+
+#### 7.5.8 複数テストユーザーの追加例
+
+LAMで以下のようなテストユーザーを追加できます:
+
+| ユーザー名 | メールアドレス | パスワード | 権限 | 用途 |
+|-----------|---------------|-----------|------|------|
+| testuser | testuser@example.com | testpass | 一般 | 基本動作確認 |
+| admin.user | admin.user@example.com | adminpass | 管理者 | 管理者権限テスト |
+| taro.yamada | taro.yamada@example.com | taropass | 一般 | 日本語名テスト |
+| john.doe | john.doe@example.com | johnpass | 一般 | 英語名テスト |
+
+**管理者ユーザーの作成後:**
+
+Streamlit管理画面で管理者フラグを有効化:
+1. 管理者権限を持つユーザーでログイン
+2. 「ユーザー管理」→ 対象ユーザーを編集
+3. 「管理者権限を付与」をチェック
+4. 保存
+
+#### 7.5.9 トラブルシューティング
+
+**LDAP接続エラー**
+
+```bash
+# OpenLDAPコンテナの状態確認
+docker compose logs openldap
+
+# 接続テスト
+docker compose exec openldap ldapsearch \
+  -x -H ldap://localhost:389 \
+  -D "cn=admin,dc=example,dc=com" \
+  -w admin_password \
+  -b "dc=example,dc=com"
+```
+
+**LAMにアクセスできない**
+
+```bash
+# LAMコンテナの状態確認
+docker compose logs ldap-account-manager
+
+# LAMコンテナの再起動
+docker compose restart ldap-account-manager
+```
+
+**ユーザー認証に失敗**
+
+- LDAP検索フィルタが正しいか確認: `(uid={username})`
+- Base DNが正しいか確認: `ou=people,dc=example,dc=com`
+- メールアドレス属性が設定されているか確認: `userPrincipalName`
+
+**データのリセット**
+
+```bash
+# LDAPデータを完全にリセット
+docker compose down
+docker volume rm coding-agent_openldap-data coding-agent_openldap-config
+docker compose up -d openldap ldap-account-manager
+```
 
 ### 7.6 アクセスURL
 
 | サービス | URL | 説明 |
 |---------|-----|------|
 | Streamlit管理画面 | http://localhost:8501 | ブラウザで管理操作 |
-| FastAPI REST API | http://localhost:8080 | コーディングエージェント用API |
-| API ドキュメント | http://localhost:8080/docs | Swagger UI |
-| LDAP Account Manager | http://localhost:8090 | テスト用LDAP管理 |
+| FastAPI REST API | http://localhost:8081 | コーディングエージェント用API |
+| API ドキュメント | http://localhost:8081/docs | Swagger UI |
+| LDAP Account Manager | http://localhost:8090 | テスト用LDAP管理画面 |
+| OpenLDAP | ldap://localhost:389 | LDAP接続（非暗号化） |
+| OpenLDAP（SSL） | ldaps://localhost:636 | LDAPS接続（暗号化） |
 
 ## 8. まとめ
 
