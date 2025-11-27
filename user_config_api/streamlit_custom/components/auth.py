@@ -16,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from app.database import get_db_context
 from app.services.auth_service import AuthService
 
-from streamlit.utils.session import logout as session_logout
-from streamlit.utils.session import set_user
+from ..utils.session import logout as session_logout
+from ..utils.session import set_user
 
 
 def show_login_form() -> tuple[str, str] | None:

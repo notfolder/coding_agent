@@ -15,8 +15,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.database import get_db_context
 from app.services.user_service import UserService
-from streamlit.components.auth import show_logout_button
-from streamlit.utils.session import check_authentication, get_current_user
+from ..components.auth import show_logout_button
+from ..utils.session import check_authentication, get_current_user
 
 # ページ設定
 st.set_page_config(

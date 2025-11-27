@@ -48,7 +48,7 @@ user_config_api/
 │   ├── dependencies.py
 │   └── routers/
 │       └── config.py
-├── streamlit/             # Streamlit管理画面
+├── streamlit_custom/      # Streamlit管理画面
 │   ├── pages/
 │   │   ├── 01_dashboard.py
 │   │   ├── 02_user_management.py

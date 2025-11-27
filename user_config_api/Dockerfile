@@ -2,12 +2,13 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# システム依存関係のインストール（python-ldap用）
+# システム依存関係のインストール（python-ldap、pandas用）
 RUN apt-get update && apt-get install -y \
     libldap2-dev \
     libsasl2-dev \
     libssl-dev \
     gcc \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -19,7 +20,7 @@ COPY streamlit_app.py .
 COPY config.yaml .
 COPY app/ ./app/
 COPY api/ ./api/
-COPY streamlit/ ./streamlit/
+COPY streamlit_custom/ ./streamlit_custom/
 
 # データディレクトリを作成
 RUN mkdir -p /app/data

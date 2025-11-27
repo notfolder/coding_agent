@@ -3,7 +3,7 @@
 セッション管理等のユーティリティ関数を提供します。
 """
 
-from streamlit.utils.session import (
+from .session import (
     check_authentication,
     get_current_user,
     initialize_session,

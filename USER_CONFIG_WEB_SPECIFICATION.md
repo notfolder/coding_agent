@@ -699,7 +699,7 @@ user_config_api/
 |   +-- routers/             # APIルーター
 |       |-- __init__.py
 |       +-- config.py        # 既存API互換
-|-- streamlit/               # Streamlit管理画面
+|-- streamlit_custom/        # Streamlit管理画面
 |   |-- __init__.py
 |   |-- pages/               # マルチページ構成
 |   |   |-- 01_dashboard.py

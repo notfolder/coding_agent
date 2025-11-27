@@ -14,8 +14,8 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).parent))
 
 from app.database import init_db
-from streamlit.components.auth import authenticate_user, show_login_form
-from streamlit.utils.session import check_authentication, initialize_session
+from streamlit_custom.components import auth as custom_auth
+from streamlit_custom.utils import session as custom_session
 
 # ページ設定
 st.set_page_config(
@@ -28,17 +28,17 @@ st.set_page_config(
 init_db()
 
 # セッション初期化
-initialize_session()
+custom_session.initialize_session()
 
 # 認証済みの場合はダッシュボードにリダイレクト
-if check_authentication():
+if custom_session.check_authentication():
     st.switch_page("pages/01_dashboard.py")
 
 # ログインフォーム表示
-credentials = show_login_form()
+credentials = custom_auth.show_login_form()
 
 if credentials:
     username, password = credentials
-    if authenticate_user(username, password):
+    if custom_auth.authenticate_user(username, password):
         st.success("ログインに成功しました")
         st.switch_page("pages/01_dashboard.py")
