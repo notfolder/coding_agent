@@ -11,6 +11,9 @@ import logging.config
 import os
 import sys
 import tempfile
+import time
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +25,7 @@ from clients.mcp_tool_client import MCPToolClient
 from filelock_util import FileLock
 from handlers.task_getter import TaskGetter
 from handlers.task_handler import TaskHandler
+from pause_resume_manager import PauseResumeManager
 from queueing import InMemoryTaskQueue, RabbitMQTaskQueue
 
 
@@ -259,6 +263,8 @@ def _override_openai_config(config: dict[str, Any]) -> None:
 
 def _override_mcp_config(config: dict[str, Any]) -> None:
     """MCP設定を環境変数で上書きする."""
+    logger = logging.getLogger(__name__)
+    
     # GitHub MCPコマンド設定の処理
     github_cmd_env = os.environ.get("GITHUB_MCP_COMMAND")
     if github_cmd_env:
@@ -266,6 +272,35 @@ def _override_mcp_config(config: dict[str, Any]) -> None:
             if server.get("mcp_server_name") == "github":
                 # スペース区切りで分割してコマンドリストを作成
                 server["command"] = github_cmd_env.split()
+
+    # 全MCPサーバーの環境変数を上書き
+    for server in config.get("mcp_servers", []):
+        server_name = server.get("mcp_server_name", "unknown")
+        logger.debug("MCP Server: %s, command: %s", server_name, server.get("command"))
+        
+        if "env" not in server:
+            continue
+        
+        # 環境変数の上書き処理（空文字列のキーは削除）
+        keys_to_remove = []
+        for key in list(server["env"].keys()):
+            env_value = os.environ.get(key)
+            if env_value is not None and env_value != "":
+                # 環境変数が設定されている場合は上書き
+                value_display = f"{env_value[:20]}..." if len(env_value) > 20 else env_value
+                logger.debug("  %s: %s=%s", server_name, key, value_display)
+                server["env"][key] = env_value
+            elif server["env"][key] == "":
+                # config.yamlで空文字列の場合は削除対象
+                logger.debug("  %s: %s=<not set, removing>", server_name, key)
+                keys_to_remove.append(key)
+            else:
+                # config.yamlに値がある場合はそのまま
+                logger.debug("  %s: %s=<using config value>", server_name, key)
+        
+        # 空文字列のキーを削除
+        for key in keys_to_remove:
+            del server["env"][key]
 
 
 def _override_rabbitmq_config(config: dict[str, Any]) -> None:
@@ -330,35 +365,34 @@ def produce_tasks(
         logger: ログ出力用のロガー
 
     """
-    import uuid
-    from pause_resume_manager import PauseResumeManager
-    
     # タスクゲッターのファクトリーメソッドでインスタンス生成
     task_getter = TaskGetter.factory(config, mcp_clients, task_source)
 
     # 一時停止タスクの検出と再投入
     pause_manager = PauseResumeManager(config)
     paused_tasks = pause_manager.get_paused_tasks()
-    
+
     paused_count = 0
     for task_state in paused_tasks:
         # Validate task still exists on GitHub/GitLab
         try:
             task_dict_temp = task_state["task_key"]
             task = task_getter.from_task_key(task_dict_temp)
-            
+
             if task is None:
-                logger.warning("一時停止タスクが見つかりません（削除済み）: %s", task_state.get("uuid"))
+                logger.warning("一時停止タスクが見つかりません(削除済み): %s", task_state.get("uuid"))
                 continue
-            
+
             # Prepare task dictionary for resuming
             task_dict = pause_manager.prepare_resume_task_dict(task_state)
             task_queue.put(task_dict)
             paused_count += 1
             logger.info("一時停止タスクをキューに再投入しました: %s", task_state.get("uuid"))
-        except Exception as e:
-            logger.exception("一時停止タスクの再投入エラー: %s", e)
-    
+        except Exception:
+            logger.exception(
+                "一時停止タスクの再投入エラー: uuid=%s", task_state.get("uuid")
+            )
+
     if paused_count > 0:
         logger.info("%d件の一時停止タスクをキューに再投入しました", paused_count)
 
@@ -439,6 +473,243 @@ def consume_tasks(
             task.comment(f"処理中にエラーが発生しました: {e}")
 
 
+def update_healthcheck_file(healthcheck_dir: Path, service_name: str) -> None:
+    """ヘルスチェックファイルを更新する.
+
+    Args:
+        healthcheck_dir: ヘルスチェックディレクトリ
+        service_name: サービス名 (producer または consumer)
+
+    """
+    # ディレクトリを作成
+    healthcheck_dir.mkdir(parents=True, exist_ok=True)
+    # ヘルスチェックファイルを更新
+    healthcheck_file = healthcheck_dir / f"{service_name}.health"
+    healthcheck_file.write_text(datetime.now(timezone.utc).isoformat())
+
+
+def wait_with_signal_check(
+    wait_seconds: int,
+    pause_manager: PauseResumeManager,
+    logger: logging.Logger,
+) -> bool:
+    """停止シグナルをチェックしながら指定時間待機する.
+
+    Args:
+        wait_seconds: 待機時間(秒)
+        pause_manager: PauseResumeManagerインスタンス
+        logger: ロガー
+
+    Returns:
+        True: 待機完了、False: 停止シグナル検出
+
+    """
+    elapsed = 0
+    while elapsed < wait_seconds:
+        # 停止シグナルをチェック
+        if pause_manager.check_pause_signal():
+            logger.info("停止シグナルを検出しました")
+            return False
+        # 1秒待機
+        time.sleep(1)
+        elapsed += 1
+    return True
+
+
+def run_producer_continuous(
+    config: dict[str, Any],
+    mcp_clients: dict[str, MCPToolClient],
+    task_source: str,
+    task_queue: RabbitMQTaskQueue | InMemoryTaskQueue,
+    logger: logging.Logger,
+) -> None:
+    """Producer継続動作モードを実行する.
+
+    タスク取得を継続的に実行し、指定間隔で待機します。
+    停止シグナルを検出するとgracefulに終了します。
+
+    Args:
+        config: アプリケーション設定辞書
+        mcp_clients: MCPクライアントの辞書
+        task_source: タスクソース
+        task_queue: タスクキューオブジェクト
+        logger: ロガー
+
+    """
+    # 継続動作モード設定を取得
+    continuous_config = config.get("continuous", {})
+    producer_config = continuous_config.get("producer", {})
+    interval_minutes = producer_config.get("interval_minutes", 1)
+    delay_first_run = producer_config.get("delay_first_run", False)
+    interval_seconds = interval_minutes * 60
+
+    # ヘルスチェック設定
+    healthcheck_config = continuous_config.get("healthcheck", {})
+    healthcheck_dir = Path(healthcheck_config.get("dir", "healthcheck"))
+    healthcheck_interval = healthcheck_config.get("update_interval_seconds", 60)
+
+    # PauseResumeManager初期化
+    pause_manager = PauseResumeManager(config)
+
+    logger.info("継続動作モードで起動しました(Producer)")
+    logger.info("タスク取得間隔: %d分", interval_minutes)
+
+    loop_count = 0
+    last_healthcheck = 0.0
+
+    # 初回実行を遅延させる場合
+    if delay_first_run:
+        logger.info("初回実行を%d分遅延します", interval_minutes)
+        if not wait_with_signal_check(interval_seconds, pause_manager, logger):
+            logger.info("継続動作モードを終了しました(Producer)")
+            return
+
+    lock_path = Path(tempfile.gettempdir()) / "produce_tasks.lock"
+
+    while True:
+        loop_count += 1
+
+        # ヘルスチェックファイル更新
+        current_time = time.time()
+        if current_time - last_healthcheck >= healthcheck_interval:
+            update_healthcheck_file(healthcheck_dir, "producer")
+            last_healthcheck = current_time
+
+        # 停止シグナルをチェック
+        if pause_manager.check_pause_signal():
+            logger.info("停止シグナルを検出しました")
+            break
+
+        logger.info("タスク取得処理を開始します(ループ回数: %d)", loop_count)
+
+        # タスク取得処理(ファイルロック付き)
+        try:
+            with FileLock(str(lock_path)):
+                produce_tasks(config, mcp_clients, task_source, task_queue, logger)
+        except Exception:
+            logger.exception("タスク取得処理中にエラーが発生しました")
+
+        logger.info("次のタスク取得まで%d分待機します", interval_minutes)
+
+        # 指定時間待機(シグナルチェック付き)
+        if not wait_with_signal_check(interval_seconds, pause_manager, logger):
+            break
+
+    logger.info("継続動作モードを終了しました(Producer)")
+
+
+def run_consumer_continuous(
+    task_queue: RabbitMQTaskQueue | InMemoryTaskQueue,
+    handler: TaskHandler,
+    logger: logging.Logger,
+    task_config: dict[str, Any],
+) -> None:
+    """Consumer継続動作モードを実行する.
+
+    キューからタスクを継続的に取得して処理します。
+    停止シグナルを検出するとgracefulに終了します。
+
+    Args:
+        task_queue: タスクキューオブジェクト
+        handler: タスク処理ハンドラー
+        logger: ロガー
+        task_config: タスク設定情報
+
+    """
+    # 設定を取得
+    config = task_config["config"]
+    mcp_clients = task_config["mcp_clients"]
+    task_source = task_config["task_source"]
+
+    # 継続動作モード設定を取得
+    continuous_config = config.get("continuous", {})
+    consumer_config = continuous_config.get("consumer", {})
+    queue_timeout = consumer_config.get("queue_timeout_seconds", 30)
+    min_interval = consumer_config.get("min_interval_seconds", 0)
+
+    # ヘルスチェック設定
+    healthcheck_config = continuous_config.get("healthcheck", {})
+    healthcheck_dir = Path(healthcheck_config.get("dir", "healthcheck"))
+    healthcheck_interval = healthcheck_config.get("update_interval_seconds", 60)
+
+    # PauseResumeManager初期化
+    pause_manager = PauseResumeManager(config)
+
+    # タスクゲッター初期化
+    task_getter = TaskGetter.factory(config, mcp_clients, task_source)
+
+    logger.info("継続動作モードで起動しました(Consumer)")
+    logger.info("キュー取得タイムアウト: %d秒", queue_timeout)
+
+    loop_count = 0
+    last_healthcheck = 0.0
+
+    while True:
+        # ヘルスチェックファイル更新
+        current_time = time.time()
+        if current_time - last_healthcheck >= healthcheck_interval:
+            update_healthcheck_file(healthcheck_dir, "consumer")
+            last_healthcheck = current_time
+
+        # 停止シグナルをチェック
+        if pause_manager.check_pause_signal():
+            logger.info("停止シグナルを検出しました")
+            break
+
+        loop_count += 1
+        logger.debug("キューからタスク取得を試行します(ループ回数: %d)", loop_count)
+
+        # タイムアウト付きでキューからタスク取得(シグナルチェック付き)
+        task_key_dict = task_queue.get_with_signal_check(
+            timeout=queue_timeout,
+            signal_checker=pause_manager.check_pause_signal,
+            poll_interval=1.0,
+        )
+
+        if task_key_dict is None:
+            # タイムアウトまたはシグナル検出時
+            if pause_manager.check_pause_signal():
+                logger.info("停止シグナルを検出しました")
+                break
+            # タイムアウトの場合は継続
+            continue
+
+        # TaskGetterのfrom_task_keyメソッドでTaskインスタンスを生成
+        task = task_getter.from_task_key(task_key_dict)
+        if task is None:
+            logger.error("Unknown or invalid task key: %s", task_key_dict)
+            continue
+
+        # UUIDとユーザー情報をタスクに設定
+        task.uuid = task_key_dict.get("uuid")
+        task.user = task_key_dict.get("user")
+
+        # Check if this is a resumed task
+        task.is_resumed = task_key_dict.get("is_resumed", False)
+
+        # タスクの状態確認(再開タスクの場合はスキップ)
+        if not task.is_resumed:
+            if not hasattr(task, "check") or not task.check():
+                logger.info("スキップ: processing_labelが付与されていないタスク %s", task_key_dict)
+                continue
+        else:
+            logger.info("再開タスクを処理します: %s", task_key_dict.get("uuid"))
+
+        # タスクの処理実行
+        try:
+            handler.handle(task)
+        except Exception as e:
+            logger.exception("Task処理中にエラー")
+            # エラーが発生した場合はタスクにコメントを追加
+            task.comment(f"処理中にエラーが発生しました: {e}")
+
+        # 最小待機時間(レート制限用)
+        if min_interval > 0:
+            time.sleep(min_interval)
+
+    logger.info("継続動作モードを終了しました(Consumer)")
+
+
 def main() -> None:
     """メイン関数.
 
@@ -455,6 +726,11 @@ def main() -> None:
         choices=["producer", "consumer"],
         help="producer: タスク取得のみ, consumer: キューから実行のみ",
     )
+    parser.add_argument(
+        "--continuous",
+        action="store_true",
+        help="継続動作モードを有効化(docker-compose用)",
+    )
     args = parser.parse_args()
 
     # 標準出力・標準エラー出力のライン バッファリング設定
@@ -469,9 +745,15 @@ def main() -> None:
     task_source = os.environ.get("TASK_SOURCE", "github")
     logger.info("TASK_SOURCE: %s", task_source)
 
-    # 設定ファイルの読み込み
-    config_file = "config.yaml"
+    # 設定ファイルの読み込み (環境変数で指定可能、デフォルトはconfig.yaml)
+    config_file = os.environ.get("CONFIG_FILE", "config.yaml")
+    logger.info("設定ファイル: %s", config_file)
     config = load_config(config_file)
+
+    # 継続動作モードの判定(コマンドラインオプション優先)
+    continuous_mode = args.continuous or config.get("continuous", {}).get("enabled", False)
+    if continuous_mode:
+        logger.info("継続動作モード: 有効")
 
     # MCPサーバークライアントの初期化
     mcp_clients: dict[str, MCPToolClient] = {}
@@ -518,9 +800,13 @@ def main() -> None:
     # 実行モードに応じた処理の分岐
     lock_path = Path(tempfile.gettempdir()) / "produce_tasks.lock"
     if args.mode == "producer":
-        # プロデューサーモード
-        with FileLock(str(lock_path)):
-            produce_tasks(config, mcp_clients, task_source, task_queue, logger)
+        if continuous_mode:
+            # Producer継続動作モード
+            run_producer_continuous(config, mcp_clients, task_source, task_queue, logger)
+        else:
+            # プロデューサーモード(単発実行)
+            with FileLock(str(lock_path)):
+                produce_tasks(config, mcp_clients, task_source, task_queue, logger)
         return
     if args.mode == "consumer":
         # コンシューマーモード
@@ -529,9 +815,14 @@ def main() -> None:
             "config": config,
             "task_source": task_source,
         }
-        consume_tasks(task_queue, handler, logger, task_config)
+        if continuous_mode:
+            # Consumer継続動作モード
+            run_consumer_continuous(task_queue, handler, logger, task_config)
+        else:
+            # 単発実行
+            consume_tasks(task_queue, handler, logger, task_config)
     else:
-        # デフォルトモード
+        # デフォルトモード(producer + consumer)
         with FileLock(str(lock_path)):
             produce_tasks(config, mcp_clients, task_source, task_queue, logger)
         task_config = {

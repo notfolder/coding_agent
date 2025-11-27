@@ -7,6 +7,7 @@ planning_history/*.jsonl
 *.pyc
 *.log
 *.log.*
+*.health
 github-mcp-server.cmd
 __pycache__/
 .pytest_cache/

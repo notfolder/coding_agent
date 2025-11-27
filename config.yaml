@@ -11,18 +11,21 @@ mcp_servers:
       - "npx"
       - "@zereight/mcp-gitlab"
       - "stdio"
+    env:
+      GITLAB_PERSONAL_ACCESS_TOKEN: ""
+      GITLAB_API_URL: ""
 
-  - mcp_server_name: "googlesearch"
-    command:
-      - "npx"
-      - "-y"
-      - "@adenot/mcp-google-search"
+  # - mcp_server_name: "googlesearch"
+  #   command:
+  #     - "npx"
+  #     - "-y"
+  #     - "@adenot/mcp-google-search"
 
-  - mcp_server_name: "webfetch"
-    command:
-      - "python"
-      - "-m"
-      - "mcp_server_fetch"
+  # - mcp_server_name: "webfetch"
+  #   command:
+  #     - "python"
+  #     - "-m"
+  #     - "mcp_server_fetch"
 
 # APIサーバー設定
 api_server:
@@ -199,3 +202,33 @@ rabbitmq:
   user: guest
   password: guest
   queue: coding_agent_tasks
+
+# 継続動作モードの設定
+# docker-composeでproducerとconsumerを継続的に動作させる場合に使用
+continuous:
+  # 継続動作モードの有効化(デフォルト: false)
+  # 注: この設定よりコマンドラインオプション --continuous が優先される
+  enabled: false
+
+  producer:
+    # タスク取得間隔(分)
+    interval_minutes: 1
+
+    # 起動時の初回実行を遅延させるか(デフォルト: false)
+    # trueの場合、起動直後にinterval_minutes待機してから最初のタスク取得を行う
+    delay_first_run: false
+
+  consumer:
+    # キュー取得タイムアウト(秒)
+    queue_timeout_seconds: 30
+
+    # タスク処理間の最小待機時間(秒、デフォルト: 0)
+    # レート制限などが必要な場合に設定
+    min_interval_seconds: 0
+
+  # ヘルスチェック設定
+  healthcheck:
+    # ヘルスチェックディレクトリ
+    dir: "healthcheck"
+    # ヘルスチェック更新間隔(秒)
+    update_interval_seconds: 60
