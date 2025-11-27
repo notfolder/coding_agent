@@ -24,6 +24,45 @@ mcp_servers:
       - "-m"
       - "mcp_server_fetch"
 
+# データベース設定（SQLAlchemy）
+database:
+  # 接続URL
+  # SQLite: sqlite:///./data/users.db
+  # PostgreSQL: postgresql://user:password@localhost/dbname
+  # MySQL: mysql+pymysql://user:password@localhost/dbname
+  url: "sqlite:///./data/users.db"
+  
+  # SQLログ出力
+  echo: false
+  
+  # コネクションプール設定（PostgreSQL/MySQL用）
+  pool_size: 5
+  max_overflow: 10
+
+# Active Directory認証設定
+active_directory:
+  server:
+    host: "ad.example.com"
+    port: 636
+    use_ssl: true
+  bind:
+    dn: "CN=service_account,OU=Service Accounts,DC=example,DC=com"
+    password_env: "AD_BIND_PASSWORD"
+  user_search:
+    base_dn: "OU=Users,DC=example,DC=com"
+    filter: "(sAMAccountName={username})"
+    attributes:
+      uid: "sAMAccountName"
+      email: "userPrincipalName"
+      display_name: "displayName"
+  timeout:
+    connect: 5
+    operation: 10
+
+# 暗号化設定
+encryption:
+  key_env: "ENCRYPTION_KEY"
+
 # APIサーバー設定
 api_server:
   api_key: "your-secret-api-key-here"

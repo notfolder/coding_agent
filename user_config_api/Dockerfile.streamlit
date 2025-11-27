@@ -21,9 +21,17 @@ COPY app/ ./app/
 COPY api/ ./api/
 COPY streamlit/ ./streamlit/
 
+# Streamlit設定をコピー
+RUN mkdir -p /app/.streamlit
+COPY streamlit/.streamlit/config.toml /app/.streamlit/config.toml
+
 # データディレクトリを作成
 RUN mkdir -p /app/data
 
-EXPOSE 8080
+# ページディレクトリをコピー（Streamlitのマルチページ用）
+RUN mkdir -p /app/pages
+COPY streamlit/pages/ /app/pages/
 
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]
+EXPOSE 8501
+
+CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
