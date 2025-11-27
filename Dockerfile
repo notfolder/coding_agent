@@ -24,6 +24,11 @@ FROM condaforge/miniforge3
 ENV PYTHONUNBUFFERED=1
 RUN mkdir -p /logs
 
+# Node.js, npm, gitインストール（conda環境切り替え前に実行）
+RUN apt-get update --allow-insecure-repositories && \
+    apt-get install -y --allow-unauthenticated nodejs npm git && \
+    rm -rf /var/lib/apt/lists/*
+
 # Python依存パッケージのインストール
 COPY condaenv.yaml /tmp/condaenv.yaml
 RUN conda env create -f /tmp/condaenv.yaml
@@ -34,10 +39,6 @@ WORKDIR /app
 
 # コードコピー
 COPY . /app
-
-# Node.js, npm, gitインストール
-RUN apt-get update && \
-    apt-get install -y nodejs npm git
 
 # グローバルにmcp-gitlabをインストール
 RUN npm install -g @zereight/mcp-gitlab@latest

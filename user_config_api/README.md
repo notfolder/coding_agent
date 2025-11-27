@@ -1,28 +1,69 @@
 # User Config API
 
-ユーザー設定API（モックアップ版）
+ユーザー設定API - データベース連携版
 
 ## 概要
 
-このAPIサーバーは、`config.yaml`からLLM設定を読み込み、REST API経由で設定を提供するモックアップサーバーです。将来的なマルチユーザー対応に向けた設計となっています。
+このAPIサーバーは、SQLAlchemyを使用してデータベースからユーザー固有のLLM設定を提供します。
+また、Streamlit管理画面を通じてユーザー管理と設定変更が可能です。
 
 ## 機能
 
-- **設定の一元管理**: `config.yaml`から設定を読み込み、APIで提供
-- **Bearer トークン認証**: APIキーによる認証機能
-- **Docker対応**: Docker Composeで簡単にデプロイ可能
-- **環境変数サポート**: APIキーを環境変数で上書き可能
+- **データベースによるユーザー設定の永続化**: SQLiteを初期実装として採用（PostgreSQL/MySQL等に移行可能）
+- **管理者画面（Streamlit）**: ユーザーの追加・編集・削除機能
+- **Active Directory認証**: ADサーバーと連携した認証
+- **REST API**: コーディングエージェント用の設定取得API
+- **暗号化**: APIキー等の機密情報をAES-256-GCMで暗号化保存
 
 ## ディレクトリ構成
 
 ```
 user_config_api/
-├── server.py          # FastAPIサーバー本体
-├── config.yaml        # LLM設定ファイル（メインのconfig.yamlのコピー）
-├── requirements.txt   # Python依存関係
-├── Dockerfile         # コンテナイメージ
-├── TESTING.md         # 手動テストガイド
-└── README.md          # このファイル
+├── server.py              # FastAPIサーバー（APIエントリポイント）
+├── streamlit_app.py       # Streamlitアプリ（管理画面エントリポイント）
+├── config.yaml            # 設定ファイル
+├── requirements.txt       # Python依存関係
+├── Dockerfile             # API用Dockerイメージ
+├── Dockerfile.streamlit   # Streamlit用Dockerイメージ
+├── data/                  # データディレクトリ
+│   └── users.db           # SQLiteデータベース
+├── app/                   # 共通アプリケーションコード
+│   ├── __init__.py
+│   ├── config.py          # 設定読み込み
+│   ├── database.py        # SQLAlchemyセッション管理
+│   ├── models/            # SQLAlchemyモデル
+│   │   ├── base.py
+│   │   ├── user.py
+│   │   └── user_config.py
+│   ├── services/          # ビジネスロジック
+│   │   ├── auth_service.py
+│   │   └── user_service.py
+│   ├── auth/              # 認証関連
+│   │   └── ad_client.py
+│   ├── utils/             # ユーティリティ
+│   │   └── encryption.py
+│   └── commands/          # コマンドラインツール
+│       └── create_admin.py
+├── api/                   # FastAPI関連
+│   ├── dependencies.py
+│   └── routers/
+│       └── config.py
+├── streamlit_custom/      # Streamlit管理画面
+│   ├── pages/
+│   │   ├── 01_dashboard.py
+│   │   ├── 02_user_management.py
+│   │   └── 03_personal_settings.py
+│   ├── components/
+│   │   ├── auth.py
+│   │   ├── user_form.py
+│   │   └── data_table.py
+│   └── utils/
+│       └── session.py
+└── tests/                 # テスト
+    └── unit/
+        ├── test_encryption.py
+        ├── test_user_service.py
+        └── test_auth_service.py
 ```
 
 ## セットアップ
@@ -35,9 +76,19 @@ user_config_api/
    pip install -r requirements.txt
    ```
 
-2. サーバーの起動:
+2. FastAPIサーバーの起動:
    ```bash
-   uvicorn server:app --host 0.0.0.0 --port 8080
+   uvicorn server:app --host 0.0.0.0 --port 8080 --reload
+   ```
+
+3. Streamlit管理画面の起動（別ターミナル）:
+   ```bash
+   streamlit run streamlit_app.py --server.port 8501
+   ```
+
+4. 初期管理者の作成:
+   ```bash
+   python -m app.commands.create_admin --username admin --ldap-uid admin --ldap-email admin@example.com
    ```
 
 ### Docker Composeで実行
@@ -45,7 +96,11 @@ user_config_api/
 メインディレクトリから:
 
 ```bash
-docker-compose up --build user-config-api
+# API + Streamlit管理画面を起動
+docker-compose up --build user-config-api user-config-web
+
+# テスト用LDAP環境も起動する場合
+docker-compose --profile ldap up --build
 ```
 
 ## API仕様
@@ -72,7 +127,9 @@ GET /config/{platform}/{username}
 ```
 
 - `platform`: `github` または `gitlab`
-- `username`: ユーザー名（現在はモックなので無視される）
+- `username`: ユーザー名
+
+ユーザー固有の設定がある場合はそれを、ない場合はデフォルト設定を返します。
 
 リクエスト例:
 ```bash
@@ -112,47 +169,38 @@ curl -H "Authorization: Bearer your-secret-api-key-here" \
 
 ## 環境変数
 
-| 変数名 | 説明 | デフォルト値 |
-|-------|------|------------|
-| `API_SERVER_KEY` | APIサーバーの認証キー | config.yamlの値 |
+| 変数名 | 説明 | 必須 |
+|-------|------|------|
+| `AD_BIND_PASSWORD` | Active Directoryサービスアカウントのパスワード | 本番環境 |
+| `ENCRYPTION_KEY` | データ暗号化キー（32バイト） | 本番環境 |
+| `API_SERVER_KEY` | コーディングエージェント用APIキー | Yes |
+| `DATABASE_URL` | データベースURL | No (デフォルト: sqlite:///./data/users.db) |
+| `USE_MOCK_AD` | モックAD認証を使用（true/false） | No (デフォルト: false) |
 
-## 使用方法（main.pyとの連携）
+## アクセスURL
 
-main.pyでAPI経由の設定読み込みを有効にするには、以下の環境変数を設定します:
+| サービス | URL | 説明 |
+|---------|-----|------|
+| Streamlit管理画面 | http://localhost:8501 | ブラウザで管理操作 |
+| FastAPI REST API | http://localhost:8080 | コーディングエージェント用API |
+| API ドキュメント | http://localhost:8080/docs | Swagger UI |
+| LDAP Account Manager | http://localhost:8090 | テスト用LDAP管理（--profile ldap使用時） |
+
+## テスト実行
 
 ```bash
-# API経由の設定読み込みを有効化
-export USE_USER_CONFIG_API=true
-
-# APIサーバーのURL
-export USER_CONFIG_API_URL=http://user-config-api:8080
-
-# APIサーバーの認証キー
-export USER_CONFIG_API_KEY=your-secret-api-key-here
+cd user_config_api
+python -m pytest tests/unit/ -v
 ```
-
-詳細は`sample_api.env`を参照してください。
 
 ## セキュリティ
 
-- Docker内部ネットワークでの使用を想定
-- 本番環境では、より強固な認証機構（JWT等）の導入を推奨
-- APIキーは環境変数で管理し、ソースコードにコミットしない
-
-## トラブルシューティング
-
-### サーバーが起動しない
-
-- `config.yaml`が存在するか確認
-- ポート8080が既に使用されていないか確認
-- 依存関係が正しくインストールされているか確認
-
-### 認証エラー
-
-- APIキーが正しく設定されているか確認
-- Authorizationヘッダーの形式が正しいか確認（`Bearer {token}`）
+- APIキー等の機密データはAES-256-GCMで暗号化して保存
+- 暗号化キーは環境変数から読み込み
+- 本番環境ではHTTPS（TLS 1.2以上）を必須
+- Active Directory認証でユーザー管理
 
 ## 参考資料
 
+- [USER_CONFIG_WEB_SPECIFICATION.md](../USER_CONFIG_WEB_SPECIFICATION.md) - 詳細仕様書
 - [TESTING.md](TESTING.md) - 手動テストガイド
-- [user_management_api_spec.md](../user_management_api_spec.md) - API仕様書

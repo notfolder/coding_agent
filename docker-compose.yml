@@ -1,14 +1,88 @@
 version: '3.6'
 services:
+  # FastAPI（REST API）サーバー
   user-config-api:
-    build: ./user_config_api
+    build:
+      context: ./user_config_api
+      dockerfile: Dockerfile
     container_name: user-config-api
     # Docker内部ネットワークのみで使用(外部公開不要)
     # テスト用に外部アクセスが必要な場合のみ、以下のコメントを外す
     ports:
       - "8081:8080"
     environment:
-      API_SERVER_KEY: ${API_SERVER_KEY:-your-secret-api-key-here}
+      - AD_BIND_PASSWORD=${AD_BIND_PASSWORD:-admin_password}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      - API_SERVER_KEY=${API_SERVER_KEY:-your-secret-api-key-here}
+      - DATABASE_URL=sqlite:///./data/users.db
+      - USE_MOCK_AD=${USE_MOCK_AD:-false}
+    volumes:
+      - user-config-data:/app/data
+    networks:
+      - coding-agent-network
+
+  # Streamlit管理画面サーバー
+  user-config-web:
+    build:
+      context: ./user_config_api
+      dockerfile: Dockerfile.streamlit
+    container_name: user-config-web
+    environment:
+      - AD_BIND_PASSWORD=${AD_BIND_PASSWORD:-admin_password}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      - DATABASE_URL=sqlite:///./data/users.db
+      - USE_MOCK_AD=${USE_MOCK_AD:-false}
+    volumes:
+      - user-config-data:/app/data
+    ports:
+      - "8501:8501"
+    networks:
+      - coding-agent-network
+    depends_on:
+      - user-config-api
+      - openldap
+
+  # テスト用OpenLDAPサーバー
+  openldap:
+    image: osixia/openldap:1.5.0
+    container_name: openldap
+    hostname: ldap.example.com
+    environment:
+      - LDAP_ORGANISATION=Example Inc
+      - LDAP_DOMAIN=example.com
+      - LDAP_ADMIN_PASSWORD=admin_password
+      - LDAP_CONFIG_PASSWORD=config_password
+      - LDAP_READONLY_USER=true
+      - LDAP_READONLY_USER_USERNAME=readonly
+      - LDAP_READONLY_USER_PASSWORD=readonly_password
+      - LDAP_TLS_VERIFY_CLIENT=never
+    volumes:
+      - openldap-data:/var/lib/ldap
+      - openldap-config:/etc/ldap/slapd.d
+    ports:
+      - "389:389"
+      - "636:636"
+    networks:
+      - coding-agent-network
+
+  # テスト用LDAP管理画面（LAM）
+  ldap-account-manager:
+    image: ldapaccountmanager/lam:stable
+    container_name: ldap-account-manager
+    environment:
+      - LDAP_DOMAIN=example.com
+      - LDAP_BASE_DN=dc=example,dc=com
+      - LDAP_USERS_DN=ou=people,dc=example,dc=com
+      - LDAP_GROUPS_DN=ou=groups,dc=example,dc=com
+      - LDAP_SERVER=ldap://openldap:389
+      - LAM_LANG=ja_JP
+      - LAM_PASSWORD=lam_password
+    ports:
+      - "8090:80"
+    networks:
+      - coding-agent-network
+    depends_on:
+      - openldap
 
   web:
     image: 'gitlab/gitlab-ce:18.5.3-ce.0'
@@ -22,6 +96,8 @@ services:
       - './gitlab/logs:/var/log/gitlab'
       - './gitlab/data:/var/opt/gitlab'
     shm_size: '256m'
+    networks:
+      - coding-agent-network
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost/-/health || exit 1"]
       interval: 30s
@@ -40,6 +116,8 @@ services:
       RABBITMQ_DEFAULT_PASS: guest
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - coding-agent-network
 
   # Producer サービス - タスクを継続的に取得してキューに追加
   coding-agent-producer:
@@ -53,6 +131,8 @@ services:
         condition: service_started
       web:
         condition: service_healthy
+    networks:
+      - coding-agent-network
     environment:
       # 必須環境変数
       - TASK_SOURCE=${TASK_SOURCE:-github}
@@ -103,6 +183,8 @@ services:
         condition: service_started
       web:
         condition: service_healthy
+    networks:
+      - coding-agent-network
     environment:
       # 必須環境変数
       - TASK_SOURCE=${TASK_SOURCE:-github}
@@ -148,3 +230,10 @@ services:
 
 volumes:
   rabbitmq_data:
+  user-config-data:
+  openldap-data:
+  openldap-config:
+
+networks:
+  coding-agent-network:
+    driver: bridge

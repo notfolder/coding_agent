@@ -1,3 +1,23 @@
-fastapi==0.104.1
-uvicorn==0.24.0
+# FastAPI関連
+fastapi==0.115.12
+uvicorn==0.34.0
+pydantic==2.10.6
 PyYAML==6.0.1
+
+# Streamlit関連
+streamlit==1.41.1
+
+# データベース（SQLAlchemy）
+sqlalchemy==2.0.36
+aiosqlite==0.19.0
+
+# 認証関連
+python-ldap==3.4.4
+
+# 暗号化
+cryptography==41.0.7
+
+# ユーティリティ
+pandas==2.2.3
+python-dotenv==1.0.0
+
