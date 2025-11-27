@@ -95,7 +95,7 @@ main.pyに`--continuous`オプションを追加します。
 
 **設定方法:**
 - 設定ファイル: `continuous.producer.interval_minutes`
-- デフォルト値: 5分
+- デフォルト値: 1分
 
 **設定例:**
 ```yaml
@@ -103,7 +103,7 @@ main.pyに`--continuous`オプションを追加します。
 continuous:
   producer:
     # タスク取得間隔（分）
-    interval_minutes: 5
+    interval_minutes: 1
 ```
 
 #### 3.2.3 待機処理の実装方針
@@ -230,7 +230,7 @@ continuous:
   
   producer:
     # タスク取得間隔（分）
-    interval_minutes: 5
+    interval_minutes: 1
     
     # 起動時の初回実行を遅延させるか（デフォルト: false）
     # trueの場合、起動直後にinterval_minutes待機してから最初のタスク取得を行う
@@ -332,7 +332,7 @@ services:
     # - 短時間タスクが多い場合: 60s〜120s に短縮可能
     # - 長時間タスクがある場合: 600s 以上に延長を推奨
     # max_llm_process_numの設定値と平均処理時間を考慮して調整してください。
-    stop_grace_period: 300s
+    stop_grace_period: 600s
 ```
 
 #### 3.6.2 Consumerのスケールアウト
@@ -373,7 +373,7 @@ services:
     # ... 他の設定 ...
     healthcheck:
       test: ["CMD", "python", "-c", "import os, time; f='/app/healthcheck/producer.health'; exit(0 if os.path.exists(f) and time.time() - os.path.getmtime(f) < 600 else 1)"]
-      interval: 60s
+      interval: 300s
       timeout: 10s
       retries: 3
       start_period: 30s
@@ -418,14 +418,14 @@ services:
 **起動時:**
 ```
 INFO - 継続動作モードで起動しました（Producer）
-INFO - タスク取得間隔: 5分
+INFO - タスク取得間隔: 1分
 ```
 
 **ループ実行時:**
 ```
 INFO - タスク取得処理を開始します（ループ回数: 10）
 INFO - 3件のタスクをキューに追加しました
-INFO - 次のタスク取得まで5分待機します
+INFO - 次のタスク取得まで1分待機します
 ```
 
 **シャットダウン時:**

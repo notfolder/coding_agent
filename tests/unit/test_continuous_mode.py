@@ -274,7 +274,7 @@ class TestContinuousModeConfig:
         assert "healthcheck" in continuous_config
 
         producer_config = continuous_config.get("producer", {})
-        assert producer_config.get("interval_minutes") == 5
+        assert producer_config.get("interval_minutes") == 1
         assert producer_config.get("delay_first_run") is False
 
         consumer_config = continuous_config.get("consumer", {})

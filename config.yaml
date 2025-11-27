@@ -11,18 +11,21 @@ mcp_servers:
       - "npx"
       - "@zereight/mcp-gitlab"
       - "stdio"
+    env:
+      GITLAB_PERSONAL_ACCESS_TOKEN: ""
+      GITLAB_API_URL: ""
 
-  - mcp_server_name: "googlesearch"
-    command:
-      - "npx"
-      - "-y"
-      - "@adenot/mcp-google-search"
+  # - mcp_server_name: "googlesearch"
+  #   command:
+  #     - "npx"
+  #     - "-y"
+  #     - "@adenot/mcp-google-search"
 
-  - mcp_server_name: "webfetch"
-    command:
-      - "python"
-      - "-m"
-      - "mcp_server_fetch"
+  # - mcp_server_name: "webfetch"
+  #   command:
+  #     - "python"
+  #     - "-m"
+  #     - "mcp_server_fetch"
 
 # APIサーバー設定
 api_server:
@@ -209,7 +212,7 @@ continuous:
 
   producer:
     # タスク取得間隔(分)
-    interval_minutes: 5
+    interval_minutes: 1
 
     # 起動時の初回実行を遅延させるか(デフォルト: false)
     # trueの場合、起動直後にinterval_minutes待機してから最初のタスク取得を行う

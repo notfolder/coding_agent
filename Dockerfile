@@ -35,14 +35,17 @@ WORKDIR /app
 # コードコピー
 COPY . /app
 
-# Node.js, npm, npxインストール
+# Node.js, npm, gitインストール
 RUN apt-get update && \
-    apt-get install -y nodejs npm git && \
-    npm install -g npx
+    apt-get install -y nodejs npm git
 
-RUN npm install @zereight/mcp-gitlab@latest
+# グローバルにmcp-gitlabをインストール
+RUN npm install -g @zereight/mcp-gitlab@latest
+
+# npxもグローバルにインストール（既存の場合は上書き）
+RUN npm install -g npx --force
 
 COPY --from=build /bin/github-mcp-server ./github-mcp-server.cmd
 
-# npxで@zereight/mcp-gitlabを起動し、main.pyも起動
-ENTRYPOINT ["stdbuf", "-oL", "conda", "run", "-n", "coding-agent", "python", "-u", "main.py"]
+# conda環境でPythonスクリプトを実行するためのエントリーポイント
+ENTRYPOINT ["conda", "run", "-n", "coding-agent", "--no-capture-output"]

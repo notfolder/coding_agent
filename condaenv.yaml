@@ -21,4 +21,5 @@ dependencies:
       - lmstudio
       - openai
       - ollama
+      - portalocker
       # - hashing-mcp-server

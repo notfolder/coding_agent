@@ -11,7 +11,7 @@ services:
       API_SERVER_KEY: ${API_SERVER_KEY:-your-secret-api-key-here}
 
   web:
-    image: 'gitlab/gitlab-ce:latest'
+    image: 'gitlab/gitlab-ce:18.5.3-ce.0'
     restart: always
     ports:
       - '8080:80'
@@ -22,6 +22,12 @@ services:
       - './gitlab/logs:/var/log/gitlab'
       - './gitlab/data:/var/opt/gitlab'
     shm_size: '256m'
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/-/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -41,13 +47,20 @@ services:
     container_name: coding-agent-producer
     command: ["python", "main.py", "--mode", "producer", "--continuous"]
     depends_on:
-      - rabbitmq
-      - user-config-api
+      rabbitmq:
+        condition: service_started
+      user-config-api:
+        condition: service_started
+      web:
+        condition: service_healthy
     environment:
       # 必須環境変数
       - TASK_SOURCE=${TASK_SOURCE:-github}
       - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN}
       - GITLAB_PERSONAL_ACCESS_TOKEN=${GITLAB_PERSONAL_ACCESS_TOKEN:-}
+      - GITLAB_API_URL=${GITLAB_API_URL:-https://gitlab.com/api/v4}
+      - GITLAB_BOT_NAME=${GITLAB_BOT_NAME:-bot}
+      - GITHUB_BOT_NAME=${GITHUB_BOT_NAME:-bot}
 
       # RabbitMQ設定
       - RABBITMQ_HOST=rabbitmq
@@ -70,10 +83,10 @@ services:
       - ./healthcheck:/app/healthcheck
     restart: unless-stopped
     # gracefulシャットダウンの猶予時間
-    stop_grace_period: 30s
+    stop_grace_period: 300s
     healthcheck:
       test: ["CMD", "python", "-c", "import os, time; f='/app/healthcheck/producer.health'; exit(0 if os.path.exists(f) and time.time() - os.path.getmtime(f) < 600 else 1)"]
-      interval: 60s
+      interval: 300s
       timeout: 10s
       retries: 3
       start_period: 30s
@@ -84,13 +97,20 @@ services:
     container_name: coding-agent-consumer
     command: ["python", "main.py", "--mode", "consumer", "--continuous"]
     depends_on:
-      - rabbitmq
-      - user-config-api
+      rabbitmq:
+        condition: service_started
+      user-config-api:
+        condition: service_started
+      web:
+        condition: service_healthy
     environment:
       # 必須環境変数
       - TASK_SOURCE=${TASK_SOURCE:-github}
       - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN}
       - GITLAB_PERSONAL_ACCESS_TOKEN=${GITLAB_PERSONAL_ACCESS_TOKEN:-}
+      - GITLAB_API_URL=${GITLAB_API_URL:-https://gitlab.com/api/v4}
+      - GITLAB_BOT_NAME=${GITLAB_BOT_NAME:-bot}
+      - GITHUB_BOT_NAME=${GITHUB_BOT_NAME:-bot}
 
       # RabbitMQ設定
       - RABBITMQ_HOST=rabbitmq
@@ -117,12 +137,11 @@ services:
     # 処理中のタスクを完了させるために十分な時間を確保する必要があります。
     # デフォルト: 300秒(5分)
     # - 短時間タスクが多い場合: 60s〜120s に短縮可能
-    # - 長時間タスクがある場合: 600s 以上に延長を推奨
     # max_llm_process_numの設定値と平均処理時間を考慮して調整してください。
     stop_grace_period: 300s
     healthcheck:
       test: ["CMD", "python", "-c", "import os, time; f='/app/healthcheck/consumer.health'; exit(0 if os.path.exists(f) and time.time() - os.path.getmtime(f) < 600 else 1)"]
-      interval: 60s
+      interval: 300s
       timeout: 10s
       retries: 3
       start_period: 30s

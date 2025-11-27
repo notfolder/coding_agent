@@ -263,6 +263,8 @@ def _override_openai_config(config: dict[str, Any]) -> None:
 
 def _override_mcp_config(config: dict[str, Any]) -> None:
     """MCP設定を環境変数で上書きする."""
+    logger = logging.getLogger(__name__)
+    
     # GitHub MCPコマンド設定の処理
     github_cmd_env = os.environ.get("GITHUB_MCP_COMMAND")
     if github_cmd_env:
@@ -270,6 +272,35 @@ def _override_mcp_config(config: dict[str, Any]) -> None:
             if server.get("mcp_server_name") == "github":
                 # スペース区切りで分割してコマンドリストを作成
                 server["command"] = github_cmd_env.split()
+
+    # 全MCPサーバーの環境変数を上書き
+    for server in config.get("mcp_servers", []):
+        server_name = server.get("mcp_server_name", "unknown")
+        logger.debug("MCP Server: %s, command: %s", server_name, server.get("command"))
+        
+        if "env" not in server:
+            continue
+        
+        # 環境変数の上書き処理（空文字列のキーは削除）
+        keys_to_remove = []
+        for key in list(server["env"].keys()):
+            env_value = os.environ.get(key)
+            if env_value is not None and env_value != "":
+                # 環境変数が設定されている場合は上書き
+                value_display = f"{env_value[:20]}..." if len(env_value) > 20 else env_value
+                logger.debug("  %s: %s=%s", server_name, key, value_display)
+                server["env"][key] = env_value
+            elif server["env"][key] == "":
+                # config.yamlで空文字列の場合は削除対象
+                logger.debug("  %s: %s=<not set, removing>", server_name, key)
+                keys_to_remove.append(key)
+            else:
+                # config.yamlに値がある場合はそのまま
+                logger.debug("  %s: %s=<using config value>", server_name, key)
+        
+        # 空文字列のキーを削除
+        for key in keys_to_remove:
+            del server["env"][key]
 
 
 def _override_rabbitmq_config(config: dict[str, Any]) -> None:
@@ -508,7 +539,7 @@ def run_producer_continuous(
     # 継続動作モード設定を取得
     continuous_config = config.get("continuous", {})
     producer_config = continuous_config.get("producer", {})
-    interval_minutes = producer_config.get("interval_minutes", 5)
+    interval_minutes = producer_config.get("interval_minutes", 1)
     delay_first_run = producer_config.get("delay_first_run", False)
     interval_seconds = interval_minutes * 60
 
@@ -714,8 +745,9 @@ def main() -> None:
     task_source = os.environ.get("TASK_SOURCE", "github")
     logger.info("TASK_SOURCE: %s", task_source)
 
-    # 設定ファイルの読み込み
-    config_file = "config.yaml"
+    # 設定ファイルの読み込み (環境変数で指定可能、デフォルトはconfig.yaml)
+    config_file = os.environ.get("CONFIG_FILE", "config.yaml")
+    logger.info("設定ファイル: %s", config_file)
     config = load_config(config_file)
 
     # 継続動作モードの判定(コマンドラインオプション優先)

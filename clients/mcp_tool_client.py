@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import threading
 from typing import TYPE_CHECKING, Any
@@ -58,9 +59,16 @@ class MCPToolClient:
 
     def _run_with_session(self, coro_fn: Callable[[ClientSession], Awaitable[object]]) -> object:
         async def wrapper() -> object:
+            logger = logging.getLogger(__name__)
+            server_name = self.server_config.get("mcp_server_name", "unknown")
             cmd = self.server_config["command"][0]
             args = self.server_config["command"][1:]
             env = self.server_config.get("env", {})
+            
+            logger.debug("Starting MCP server: %s", server_name)
+            logger.debug("  Command: %s %s", cmd, " ".join(args))
+            logger.debug("  Env keys: %s", list(env.keys()))
+            
             merged_env = dict(os.environ)
             merged_env.update(env)
             server_params = StdioServerParameters(command=cmd, args=args, env=merged_env)
@@ -74,6 +82,7 @@ class MCPToolClient:
                     InitializedNotification(method="notifications/initialized"),
                 )
                 await session.send_notification(notification)
+                logger.debug("MCP server initialized: %s", server_name)
                 return await coro_fn(session)
 
         return self._run_async(wrapper())
