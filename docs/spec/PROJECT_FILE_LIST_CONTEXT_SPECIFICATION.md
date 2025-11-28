@@ -81,12 +81,15 @@ flowchart TD
 GitHub MCPサーバーまたはGitLab MCPサーバーのファイル一覧取得機能を使用します。
 
 **GitHub MCPサーバーの場合:**
-- get_file_contentsツールを使用し、ルートディレクトリ（path="/"）を指定
-- 再帰的に取得するか、設定に応じて階層を制限
+- `get_file_contents`ツールを使用（本ツールはファイルまたはディレクトリの内容を取得可能）
+- ルートディレクトリ（path=""または"/"）を指定してディレクトリ一覧を取得
+- ディレクトリが返された場合は、設定に応じて再帰的にサブディレクトリを取得
+- 再帰取得時は階層制限（max_depth）を適用
 
 **GitLab MCPサーバーの場合:**
-- mr_changesツールまたはrepository_treeツールを使用
-- プロジェクトIDとパスを指定して取得
+- `get_repository_tree`ツールを使用（リポジトリツリーの取得専用ツール）
+- プロジェクトID、パス（ルート）、参照（デフォルトブランチ）を指定
+- 設定に応じて再帰的にサブディレクトリを取得
 
 #### 除外パターンの適用
 
@@ -180,7 +183,11 @@ sequenceDiagram
     TH->>TH: タスク処理開始
     TH->>FLC: load_file_list(task)
     FLC->>FLC: リポジトリ情報抽出
-    FLC->>MCP: get_file_contents(owner, repo, path="/")
+    alt GitHubの場合
+        FLC->>MCP: get_file_contents(owner, repo, path="")
+    else GitLabの場合
+        FLC->>MCP: get_repository_tree(project_id, path="", ref)
+    end
     MCP-->>FLC: ファイル一覧（JSON）
     FLC->>FLC: 除外パターン適用
     FLC->>FLC: 階層制限適用
@@ -195,6 +202,7 @@ sequenceDiagram
 #### 責務
 
 - リポジトリのファイル一覧を取得
+- プラットフォーム（GitHub/GitLab）に応じた適切なMCPツールの呼び出し
 - 除外パターンの適用
 - 階層制限の適用
 - 指定フォーマットへの変換
@@ -202,7 +210,7 @@ sequenceDiagram
 #### 主要メソッド
 
 - **load_file_list**: タスクオブジェクトを受け取り、整形済みファイル一覧文字列を返す
-- **fetch_repository_tree**: MCPクライアントを使用してファイルツリーを取得
+- **fetch_repository_tree**: MCPクライアントを使用してファイルツリーを取得（GitHub: get_file_contents、GitLab: get_repository_tree）
 - **apply_exclusion_patterns**: 除外パターンを適用
 - **apply_depth_limit**: 階層制限を適用
 - **format_tree**: 指定形式に変換
