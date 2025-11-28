@@ -12,6 +12,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from api.routers.config import router as config_router
+from api.routers.token_usage import router as token_usage_router
 from app.config import get_api_key, load_config
 from app.database import init_db
 from fastapi import FastAPI
@@ -56,6 +57,7 @@ app = FastAPI(
 
 # ルーターを追加
 app.include_router(config_router)
+app.include_router(token_usage_router, prefix="/api/v1")
 
 
 @app.get("/health")
