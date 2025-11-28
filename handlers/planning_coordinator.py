@@ -14,6 +14,9 @@ from typing import TYPE_CHECKING, Any
 from handlers.replan_decision import ReplanDecision, ReplanType, TargetPhase
 from handlers.replan_manager import ReplanManager
 
+# 共通の日付フォーマット定数
+DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+
 if TYPE_CHECKING:
     from clients.llm_base import LLMClient
     from clients.mcp_tool_client import MCPToolClient
@@ -813,7 +816,7 @@ Please reply to this comment with your answers."""
 **Reasoning**:
 {decision.reasoning}{issues_str}{actions_str}
 
-*{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*"""
+*{datetime.now().strftime(DATETIME_FORMAT)}*"""
 
         if hasattr(self.task, "comment"):
             self.task.comment(comment)
@@ -1010,7 +1013,7 @@ Maintain the same JSON format as before for action_plan.actions."""
         checklist_lines.append(
             f"*Progress: {self.action_counter}/{len(actions)} ({progress_pct}%) complete "
             f"| Revision: #{self.plan_revision_number} "
-            f"at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*"
+            f"at {datetime.now().strftime(DATETIME_FORMAT)}*"
         )
 
         checklist_content = "\n".join(checklist_lines)
@@ -1423,11 +1426,11 @@ Maintain the same JSON format as before for action_plan.actions."""
             if details:
                 comment_lines.append(details)
                 comment_lines.append("")
-            
+
             # Add timestamp
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            timestamp = datetime.now().strftime(DATETIME_FORMAT)
             comment_lines.append(f"*{timestamp}*")
-            
+
             comment_content = "\n".join(comment_lines)
             
             # Post comment to Issue/MR using Task.comment method
