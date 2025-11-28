@@ -1,0 +1,50 @@
+## Command Execution Feature
+
+You can execute commands in an isolated Docker execution environment with project source code through the `command-executor` MCP server.
+
+**Execution Environment Information:**
+- Working directory: `/workspace/project/` (where project files are cloned)
+- Dependencies: Automatically installed
+
+### Available Commands
+
+The following commands are available for execution:
+
+{allowed_commands_list}
+
+### Key Features
+
+**Test Execution:**
+- Run the project's test suite to verify code changes work correctly
+- Examples: `npm test`, `pytest`, `go test ./...`, `cargo test`
+
+**Code Search:**
+- Use `grep` command to recursively search for code patterns across the entire project
+- Example: `grep -rn "function_name" src/` to find function usage locations
+- Example: `grep -r "import.*module" --include="*.py"` to search Python import statements
+
+**Build/Compile:**
+- Execute project build commands to check for compilation errors
+- Examples: `npm run build`, `make`, `go build`, `cargo build`
+
+**Linter/Formatter:**
+- Perform code quality checks and format verification
+- Examples: `eslint .`, `black --check .`, `flake8`
+
+**File Operations:**
+- Use `ls`, `cat`, `head`, `tail`, `find`, `tree` to check file structure and code contents
+- Example: `find . -name "*.ts" -type f` to search for TypeScript files
+- Example: `tree -L 2` to display directory structure
+
+### Usage Notes
+
+- Project source code is cloned to `/workspace/project/` in the execution environment
+- Dependencies are automatically installed
+- Check command execution results (stdout/stderr) and determine the next action
+- Long-running commands may timeout
+
+### Recommended Usage
+
+1. **Before code changes**: Search the codebase with `grep` to understand the impact scope of changes
+2. **After code changes**: Run tests to verify the correctness of changes
+3. **Before creating pull request**: Run linters to verify code quality

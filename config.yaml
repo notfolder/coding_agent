@@ -284,3 +284,73 @@ continuous:
     dir: "healthcheck"
     # ヘルスチェック更新間隔(秒)
     update_interval_seconds: 60
+
+# Command Executor MCP Server連携設定
+command_executor:
+  # 機能の有効/無効（デフォルト: false）
+  # 環境変数 COMMAND_EXECUTOR_ENABLED で上書き可能
+  enabled: false
+  
+  # MCP Server設定
+  mcp_server:
+    # サーバー名
+    name: "command-executor"
+    # コマンド
+    command:
+      - "npx"
+      - "@sunwood-ai-labs/command-executor-mcp-server"
+  
+  # Docker実行環境設定
+  docker:
+    # ベースイメージ（環境変数 EXECUTOR_BASE_IMAGE で上書き可能）
+    base_image: "coding-agent-executor:latest"
+    
+    # リソース制限
+    resources:
+      # CPU制限（コア数）（環境変数 EXECUTOR_CPU_LIMIT で上書き可能）
+      cpu_limit: 2
+      # メモリ制限（環境変数 EXECUTOR_MEMORY_LIMIT で上書き可能）
+      memory_limit: "4g"
+      # ディスク制限
+      disk_limit: "10g"
+    
+    # ネットワーク設定
+    network:
+      # 外部ネットワークアクセスの許可
+      external_access: true
+      # ホワイトリストモード（external_accessがtrueの場合のみ有効）
+      whitelist_mode: false
+      # 許可ドメインリスト
+      allowed_domains: []
+  
+  # プロジェクトクローン設定
+  clone:
+    # 浅いクローンの使用
+    shallow: true
+    # 浅いクローンの深さ
+    depth: 1
+    # 依存関係の自動インストール
+    auto_install_deps: true
+  
+  # コマンド実行設定
+  execution:
+    # コマンド実行の最大時間（秒）（環境変数 EXECUTOR_TIMEOUT で上書き可能）
+    timeout_seconds: 1800
+    # 出力の最大サイズ（バイト）
+    max_output_size: 1048576
+  
+  # クリーンアップ設定
+  cleanup:
+    # 残存リソースのクリーンアップ間隔（時間）
+    interval_hours: 24
+    # 残存とみなす経過時間（時間）
+    stale_threshold_hours: 24
+  
+  # 許可コマンド設定
+  allowed_commands:
+    # デフォルト許可リストを使用するか
+    use_default: true
+    # 追加で許可するコマンド
+    additional: []
+    # デフォルトから除外するコマンド
+    exclude: []

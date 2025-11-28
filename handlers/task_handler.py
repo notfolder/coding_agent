@@ -643,6 +643,7 @@ class TaskHandler:
         MCPプロンプトを埋め込んで返します.
         プロジェクト固有のエージェントルールがある場合は末尾に追加します。
         プロジェクトファイル一覧がある場合は末尾に追加します。
+        Command Executor機能が有効な場合はその説明を追加します。
         
         Args:
             task_config: タスク固有の設定（Noneの場合はself.configを使用）
@@ -672,6 +673,11 @@ class TaskHandler:
         # プロンプトテンプレートのプレースホルダーを置換
         prompt = prompt.replace("{mcp_prompt}", mcp_prompt)
 
+        # Command Executor機能が有効な場合、その説明を追加
+        command_executor_prompt = self._load_command_executor_prompt(task_config)
+        if command_executor_prompt:
+            prompt = prompt + "\n" + command_executor_prompt
+
         # プロジェクト固有のエージェントルールを取得して追加
         project_rules = self._load_project_agent_rules(task_config, task)
         if project_rules:
@@ -683,6 +689,58 @@ class TaskHandler:
             prompt = prompt + "\n" + file_list_context
 
         return prompt
+
+    def _load_command_executor_prompt(
+        self,
+        task_config: dict[str, Any],
+    ) -> str:
+        """Command Executor機能のシステムプロンプトを読み込む.
+
+        Command Executor機能が有効な場合、プロンプトテンプレートを読み込み、
+        許可コマンドリストを埋め込んで返します。
+
+        Args:
+            task_config: タスク固有の設定
+
+        Returns:
+            Command Executorのシステムプロンプト文字列（無効な場合は空文字列）
+
+        """
+        import os
+        
+        from handlers.execution_environment_manager import ExecutionEnvironmentManager
+
+        # 環境変数による有効/無効チェック
+        env_enabled = os.environ.get("COMMAND_EXECUTOR_ENABLED", "").lower()
+        if env_enabled:
+            if env_enabled != "true":
+                return ""
+        else:
+            # 設定ファイルによる有効/無効チェック
+            executor_config = task_config.get("command_executor", {})
+            if not executor_config.get("enabled", False):
+                return ""
+
+        # プロンプトテンプレートを読み込む
+        prompt_path = Path("system_prompt_command_executor.txt")
+        if not prompt_path.exists():
+            self.logger.warning("Command Executorプロンプトファイルが見つかりません: %s", prompt_path)
+            return ""
+
+        try:
+            with prompt_path.open() as f:
+                prompt = f.read()
+
+            # 許可コマンドリストを取得して埋め込む
+            manager = ExecutionEnvironmentManager(task_config)
+            allowed_commands_text = manager.get_allowed_commands_text()
+            prompt = prompt.replace("{allowed_commands_list}", allowed_commands_text)
+
+            return prompt
+
+        except Exception as e:
+            self.logger.warning("Command Executorプロンプトの読み込みに失敗: %s", e)
+            return ""
 
     def _load_project_agent_rules(
         self,
