@@ -416,7 +416,7 @@ sequenceDiagram
 | pwd | カレントディレクトリ表示 | `pwd` |
 | cd | ディレクトリ移動 | `cd src/` |
 | mkdir | ディレクトリ作成 | `mkdir -p dir/subdir` |
-| rm | ファイル削除 | `rm file.txt`, `rm -rf dir/` |
+| rm | ファイル削除（単一ファイル） | `rm file.txt` |
 | cp | ファイルコピー | `cp src.txt dst.txt` |
 | mv | ファイル移動・リネーム | `mv old.txt new.txt` |
 | touch | ファイル作成・更新 | `touch newfile.txt` |
@@ -427,12 +427,12 @@ sequenceDiagram
 | wget | ファイルダウンロード | `wget https://example.com/file` |
 | tar | アーカイブ操作 | `tar -xzf archive.tar.gz` |
 | unzip | ZIP解凍 | `unzip archive.zip` |
-| jq | JSON処理 | `cat data.json \| jq '.key'` |
-| sed | テキスト置換 | `sed -i 's/old/new/g' file.txt` |
+| jq | JSON処理 | `cat data.json` パイプ `jq '.key'` |
+| sed | テキスト置換（標準出力） | `sed 's/old/new/g' file.txt` |
 | awk | テキスト処理 | `awk '{print $1}' file.txt` |
 | sort | ソート | `sort file.txt` |
 | uniq | 重複除去 | `uniq file.txt` |
-| xargs | 引数展開 | `find . -name "*.txt" \| xargs grep "pattern"` |
+| xargs | 引数展開 | `find . -name "*.txt"` パイプ `xargs grep "pattern"` |
 
 #### 6.3.7 禁止コマンドリスト
 
@@ -442,6 +442,7 @@ sequenceDiagram
 |---------|---------|
 | sudo | 特権昇格の防止 |
 | su | ユーザー切り替えの防止 |
+| rm -rf | 再帰的強制削除による誤削除の防止 |
 | chmod 777 | 過剰な権限付与の防止 |
 | chown | 所有者変更の防止 |
 | mount / umount | ファイルシステム操作の防止 |
@@ -512,6 +513,10 @@ LLMがCommand Executor MCP Serverの機能を適切に活用できるよう、�
 ## コマンド実行機能
 
 あなたは `command-executor` MCPサーバーを通じて、プロジェクトのソースコードがある独立したDocker実行環境でコマンドを実行できます。
+
+**実行環境情報:**
+- 作業ディレクトリ: `/workspace/project/`（プロジェクトファイルがクローンされた場所）
+- 依存関係: 自動的にインストール済み
 
 ### 利用可能な主要機能
 
