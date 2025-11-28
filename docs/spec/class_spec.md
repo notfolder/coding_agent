@@ -1,63 +1,186 @@
-# クラス設計・関係図（coding_agent プロジェクト）
+# クラス設計・関係図（coding_agentプロジェクト）
 
-## 概要
+## 1. 概要
+
 本プロジェクトは、GitHub/GitLabのMCPサーバーと連携し、タスク（Issue/PR/MR）をLLMで処理するエージェントです。
 
 ---
 
-## クラス一覧・継承/保合/呼び出し関係
+## 2. クラス一覧
 
-### [抽象基底クラス]
-- TaskKey (handlers/task_key.py)
-    - GitHubIssueTaskKey
-    - GitHubPullRequestTaskKey
-    - GitLabIssueTaskKey
-    - GitLabMergeRequestTaskKey
-- Task (handlers/task.py)
-    - TaskGitHubIssue (handlers/task_getter_github.py)
-    - TaskGitHubPullRequest (handlers/task_getter_github.py)
-    - TaskGitLabIssue (handlers/task_getter_gitlab.py)
-    - TaskGitLabMergeRequest (handlers/task_getter_gitlab.py)
-- TaskGetter (handlers/task_getter.py)
-    - TaskGetterFromGitHub (handlers/task_getter_github.py)
-    - TaskGetterFromGitLab (handlers/task_getter_gitlab.py)
-- TaskFactory (handlers/task_factory.py)
-    - GitHubTaskFactory
-    - GitLabTaskFactory
-- TaskQueue (queueing.py)
-    - InMemoryTaskQueue
+### 2.1 抽象基底クラス
 
-### [主要クラス]
-- TaskHandler (handlers/task_handler.py)
-- MCPToolClient (clients/mcp_tool_client.py)
-- GithubClient (clients/github_client.py)
-- GitlabClient (clients/gitlab_client.py)
-- LLMクライアント群 (clients/lm_client.py, openai_client.py, lmstudio_client.py, ollama_client.py)
-- FileLock (filelock_util.py)
+#### TaskKey（handlers/task_key.py）
 
----
+タスクを一意に識別するためのキークラスです。
 
-## 保合・呼び出し関係
-- main.py
-    - TaskGetter.factory で TaskGetterFromGitHub / TaskGetterFromGitLab を生成
-    - TaskGetter.get_task_list() で TaskKey のリストを生成
-    - TaskKey を InMemoryTaskQueue にput
-    - consume_tasks で TaskGetter.from_task_key(dict) で Taskインスタンス復元
-    - TaskHandler.handle(task) でタスク処理
-- TaskGitHubIssue/TaskGitHubPullRequest
-    - MCPToolClient, GithubClient を利用
-- TaskGitLabIssue/TaskGitLabMergeRequest
-    - MCPToolClient, GitlabClient を利用
-- TaskFactory
-    - TaskKey から Task を生成（from_task_keyの実装に近い役割）
+**サブクラス:**
+- GitHubIssueTaskKey
+- GitHubPullRequestTaskKey
+- GitLabIssueTaskKey
+- GitLabMergeRequestTaskKey
+
+#### Task（handlers/task.py）
+
+タスクを表現する抽象クラスです。
+
+**サブクラス:**
+- TaskGitHubIssue（handlers/task_getter_github.py）
+- TaskGitHubPullRequest（handlers/task_getter_github.py）
+- TaskGitLabIssue（handlers/task_getter_gitlab.py）
+- TaskGitLabMergeRequest（handlers/task_getter_gitlab.py）
+
+#### TaskGetter（handlers/task_getter.py）
+
+タスクを取得するための抽象クラスです。
+
+**サブクラス:**
+- TaskGetterFromGitHub（handlers/task_getter_github.py）
+- TaskGetterFromGitLab（handlers/task_getter_gitlab.py）
+
+#### TaskFactory（handlers/task_factory.py）
+
+タスクオブジェクトを生成するファクトリクラスです。
+
+**サブクラス:**
+- GitHubTaskFactory
+- GitLabTaskFactory
+
+#### TaskQueue（queueing.py）
+
+タスクキューの抽象クラスです。
+
+**サブクラス:**
 - InMemoryTaskQueue
-    - TaskKey(dict)をput/get
-- FileLock
-    - プロセス排他制御
+- RabbitMQTaskQueue
 
 ---
 
-## Mermaid クラス図
+### 2.2 主要クラス
+
+#### TaskHandler（handlers/task_handler.py）
+
+タスク処理のオーケストレーションを担当するクラスです。LLMクライアントとMCPクライアントを使用してタスクを処理します。
+
+#### MCPToolClient（clients/mcp_tool_client.py）
+
+MCPサーバーとの通信を担当するクライアントクラスです。設定ファイルで定義されたMCPサーバーを起動し、ツールの呼び出しを処理します。
+
+#### GithubClient（clients/github_client.py）
+
+GitHub API操作のためのクライアントクラスです。
+
+#### GitlabClient（clients/gitlab_client.py）
+
+GitLab API操作のためのクライアントクラスです。
+
+#### LLMクライアント群
+
+LLMとの通信を担当するクライアントクラス群です。
+
+- LLMClient（clients/llm_base.py）: 抽象基底クラス
+- OpenAIClient（clients/openai_client.py）: OpenAI API用
+- LMStudioClient（clients/lmstudio_client.py）: LM Studio用
+- OllamaClient（clients/ollama_client.py）: Ollama用
+
+#### FileLock（filelock_util.py）
+
+プロセス排他制御のためのファイルロッククラスです。
+
+---
+
+### 2.3 コンテキスト管理クラス
+
+#### TaskContextManager（context_storage/task_context_manager.py）
+
+タスクコンテキスト全体を管理するクラスです。
+
+#### MessageStore（context_storage/message_store.py）
+
+メッセージ履歴を管理するクラスです。
+
+#### SummaryStore（context_storage/summary_store.py）
+
+コンテキスト要約を管理するクラスです。
+
+#### ToolStore（context_storage/tool_store.py）
+
+ツール実行履歴を管理するクラスです。
+
+#### ContextCompressor（context_storage/context_compressor.py）
+
+コンテキスト圧縮を管理するクラスです。
+
+---
+
+### 2.4 追加機能クラス
+
+#### PauseResumeManager（pause_resume_manager.py）
+
+一時停止・再開機能を管理するクラスです。
+
+#### TaskStopManager（task_stop_manager.py）
+
+タスク停止機能を管理するクラスです。
+
+#### CommentDetectionManager（comment_detection_manager.py）
+
+新規コメント検知機能を管理するクラスです。
+
+#### PlanningCoordinator（handlers/planning_coordinator.py）
+
+計画実行モードのコーディネーターです。
+
+#### PlanningHistoryStore（handlers/planning_history_store.py）
+
+計画履歴を保存するストアクラスです。
+
+#### ProjectAgentRulesLoader（handlers/project_agent_rules_loader.py）
+
+プロジェクト固有のエージェントルールをロードするクラスです。
+
+---
+
+## 3. クラス関係
+
+### 3.1 保合・呼び出し関係
+
+#### main.py
+
+- TaskGetter.factoryでTaskGetterFromGitHub/TaskGetterFromGitLabを生成
+- TaskGetter.get_task_list()でTaskKeyのリストを生成
+- TaskKeyをInMemoryTaskQueueまたはRabbitMQTaskQueueにput
+- consume_tasksでTaskGetter.from_task_key(dict)でTaskインスタンスを復元
+- TaskHandler.handle(task)でタスク処理
+
+#### GitHub/GitLab Task
+
+- TaskGitHubIssue/TaskGitHubPullRequest: MCPToolClient、GithubClientを利用
+- TaskGitLabIssue/TaskGitLabMergeRequest: MCPToolClient、GitlabClientを利用
+
+#### TaskFactory
+
+- TaskKeyからTaskを生成（from_task_keyの実装に近い役割）
+
+#### TaskQueue
+
+- TaskKey（dict）をput/get
+
+#### TaskHandler
+
+- Taskオブジェクトを処理
+- LLMClientを使用してLLMと対話
+- MCPToolClientを使用してツールを実行
+- TaskContextManagerを使用してコンテキストを管理
+
+#### FileLock
+
+- プロセス排他制御
+
+---
+
+## 4. クラス図（Mermaid）
+
 ```mermaid
 classDiagram
     class TaskKey {
@@ -116,7 +239,9 @@ classDiagram
         +empty()
     }
     class InMemoryTaskQueue
+    class RabbitMQTaskQueue
     TaskQueue <|-- InMemoryTaskQueue
+    TaskQueue <|-- RabbitMQTaskQueue
 
     class TaskHandler
     class MCPToolClient
@@ -134,16 +259,25 @@ classDiagram
     TaskGitLabMergeRequest o-- GitlabClient
     TaskHandler o-- Task
     InMemoryTaskQueue o-- TaskKey
+    RabbitMQTaskQueue o-- TaskKey
     main o-- TaskGetter
-    main o-- InMemoryTaskQueue
+    main o-- TaskQueue
     main o-- TaskHandler
     main o-- FileLock
 ```
 
 ---
 
-## 補足
-- LLMクライアント群（OpenAI, LMStudio, Ollama等）はTaskHandler経由で利用される
+## 5. 補足
+
+- LLMクライアント群（OpenAI、LMStudio、Ollama等）はTaskHandler経由で利用される
 - main.pyは全体のオーケストレーションを担う
 - TaskKey/Task/TaskGetter/TaskFactory/TaskQueueは拡張性を重視し抽象クラス化
+- コンテキスト管理クラスはcontext_storageモジュールに集約
+- 追加機能（一時停止、停止、コメント検知）は独立したマネージャークラスで管理
 
+---
+
+**文書バージョン:** 2.0  
+**最終更新日:** 2024-11-28  
+**ステータス:** 実装済み
