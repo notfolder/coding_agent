@@ -97,7 +97,9 @@ class CommentDetectionManager:
             comments = self.task.get_comments()
 
             # コメントIDをセットに追加（文字列として管理）
-            self.last_comment_ids = {str(comment.get("id", "")) for comment in comments if comment.get("id")}
+            self.last_comment_ids = {
+                str(comment.get("id", "")) for comment in comments if comment.get("id") is not None
+            }
 
             # チェック時刻を記録
             self.last_check_time = datetime.now(timezone.utc)
@@ -129,9 +131,10 @@ class CommentDetectionManager:
             current_ids = set()
 
             for comment in current_comments:
-                comment_id = str(comment.get("id", ""))
-                if not comment_id:
+                comment_id_raw = comment.get("id")
+                if comment_id_raw is None:
                     continue
+                comment_id = str(comment_id_raw)
 
                 current_ids.add(comment_id)
 

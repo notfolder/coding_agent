@@ -97,10 +97,12 @@ class TestCommentDetectionManager(unittest.TestCase):
         from comment_detection_manager import CommentDetectionManager
 
         # Set up existing comments
-        self.task.set_comments([
-            {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
-            {"id": 2, "author": "user2", "body": "comment 2", "created_at": "2024-01-02T00:00:00Z"},
-        ])
+        self.task.set_comments(
+            [
+                {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
+                {"id": 2, "author": "user2", "body": "comment 2", "created_at": "2024-01-02T00:00:00Z"},
+            ]
+        )
 
         manager = CommentDetectionManager(self.task, self.config)
         manager.initialize()
@@ -113,18 +115,22 @@ class TestCommentDetectionManager(unittest.TestCase):
         from comment_detection_manager import CommentDetectionManager
 
         # Initialize with existing comments
-        self.task.set_comments([
-            {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
-        ])
+        self.task.set_comments(
+            [
+                {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
+            ]
+        )
 
         manager = CommentDetectionManager(self.task, self.config)
         manager.initialize()
 
         # Add new comment
-        self.task.set_comments([
-            {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
-            {"id": 2, "author": "user2", "body": "new comment", "created_at": "2024-01-02T00:00:00Z"},
-        ])
+        self.task.set_comments(
+            [
+                {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
+                {"id": 2, "author": "user2", "body": "new comment", "created_at": "2024-01-02T00:00:00Z"},
+            ]
+        )
 
         new_comments = manager.check_for_new_comments()
         self.assertEqual(len(new_comments), 1)
@@ -135,19 +141,23 @@ class TestCommentDetectionManager(unittest.TestCase):
         from comment_detection_manager import CommentDetectionManager
 
         # Initialize with existing comments
-        self.task.set_comments([
-            {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
-        ])
+        self.task.set_comments(
+            [
+                {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
+            ]
+        )
 
         manager = CommentDetectionManager(self.task, self.config)
         manager.initialize()
 
         # Add new comments including one from bot
-        self.task.set_comments([
-            {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
-            {"id": 2, "author": "coding-agent-bot", "body": "bot comment", "created_at": "2024-01-02T00:00:00Z"},
-            {"id": 3, "author": "user2", "body": "user comment", "created_at": "2024-01-03T00:00:00Z"},
-        ])
+        self.task.set_comments(
+            [
+                {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
+                {"id": 2, "author": "coding-agent-bot", "body": "bot comment", "created_at": "2024-01-02T00:00:00Z"},
+                {"id": 3, "author": "user2", "body": "user comment", "created_at": "2024-01-03T00:00:00Z"},
+            ]
+        )
 
         new_comments = manager.check_for_new_comments()
         self.assertEqual(len(new_comments), 1)
@@ -158,9 +168,11 @@ class TestCommentDetectionManager(unittest.TestCase):
         from comment_detection_manager import CommentDetectionManager
 
         # Initialize with existing comments
-        self.task.set_comments([
-            {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
-        ])
+        self.task.set_comments(
+            [
+                {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
+            ]
+        )
 
         manager = CommentDetectionManager(self.task, self.config)
         manager.initialize()
@@ -265,10 +277,12 @@ class TestCommentDetectionManager(unittest.TestCase):
         from comment_detection_manager import CommentDetectionManager
 
         # Initialize with existing comments
-        self.task.set_comments([
-            {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
-            {"id": 2, "author": "user2", "body": "comment 2", "created_at": "2024-01-02T00:00:00Z"},
-        ])
+        self.task.set_comments(
+            [
+                {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
+                {"id": 2, "author": "user2", "body": "comment 2", "created_at": "2024-01-02T00:00:00Z"},
+            ]
+        )
 
         manager = CommentDetectionManager(self.task, self.config)
         manager.initialize()
@@ -311,18 +325,22 @@ class TestCommentDetectionManager(unittest.TestCase):
         from comment_detection_manager import CommentDetectionManager
 
         # Initialize with comments
-        self.task.set_comments([
-            {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
-        ])
+        self.task.set_comments(
+            [
+                {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
+            ]
+        )
 
         manager1 = CommentDetectionManager(self.task, self.config)
         manager1.initialize()
 
         # Add new comment
-        self.task.set_comments([
-            {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
-            {"id": 2, "author": "user2", "body": "comment 2", "created_at": "2024-01-02T00:00:00Z"},
-        ])
+        self.task.set_comments(
+            [
+                {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
+                {"id": 2, "author": "user2", "body": "comment 2", "created_at": "2024-01-02T00:00:00Z"},
+            ]
+        )
 
         # Detect new comment
         new_comments = manager1.check_for_new_comments()
@@ -340,16 +358,43 @@ class TestCommentDetectionManager(unittest.TestCase):
         self.assertEqual(len(new_comments), 0)
 
         # Add another comment
-        self.task.set_comments([
-            {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
-            {"id": 2, "author": "user2", "body": "comment 2", "created_at": "2024-01-02T00:00:00Z"},
-            {"id": 3, "author": "user3", "body": "comment 3", "created_at": "2024-01-03T00:00:00Z"},
-        ])
+        self.task.set_comments(
+            [
+                {"id": 1, "author": "user1", "body": "comment 1", "created_at": "2024-01-01T00:00:00Z"},
+                {"id": 2, "author": "user2", "body": "comment 2", "created_at": "2024-01-02T00:00:00Z"},
+                {"id": 3, "author": "user3", "body": "comment 3", "created_at": "2024-01-03T00:00:00Z"},
+            ]
+        )
 
         # Should detect the new comment
         new_comments = manager2.check_for_new_comments()
         self.assertEqual(len(new_comments), 1)
         self.assertEqual(new_comments[0]["id"], 3)
+
+
+class MockGitLabTask:
+    """Mock GitLab task for testing."""
+
+    def __init__(self, task_key: Any, number: int = 1) -> None:
+        """Initialize mock GitLab task."""
+        self.uuid = "test-uuid-123"
+        self.user = "testuser"
+        self._task_key = task_key
+        self.number = number
+        self.is_resumed = False
+        self._comments: list[dict[str, Any]] = []
+
+    def get_task_key(self) -> Any:
+        """Get task key."""
+        return self._task_key
+
+    def get_comments(self) -> list[dict[str, Any]]:
+        """Get comments."""
+        return self._comments
+
+    def set_comments(self, comments: list[dict[str, Any]]) -> None:
+        """Set comments for testing."""
+        self._comments = comments
 
 
 class TestCommentDetectionManagerGitLab(unittest.TestCase):
@@ -361,11 +406,7 @@ class TestCommentDetectionManagerGitLab(unittest.TestCase):
 
         self.temp_dir = Path(tempfile.mkdtemp())
         self.task_key = GitLabIssueTaskKey(123, 456)
-        self.task = MockTask.__new__(MockTask)
-        self.task.uuid = "test-uuid-123"
-        self.task.user = "testuser"
-        self.task._task_key = self.task_key
-        self.task._comments = []
+        self.task = MockGitLabTask(self.task_key)
 
         # Config with GitLab bot_name set
         self.config = {
