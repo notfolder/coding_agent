@@ -145,6 +145,7 @@ sequenceDiagram
 |-------------|------|
 | handlers/file_list_context_loader.py | ファイル一覧取得・整形を担当するモジュール |
 | handlers/task_handler.py | 既存ファイル。FileListContextLoaderの呼び出しを追加 |
+| handlers/planning_coordinator.py | 既存ファイル。FileListContextLoaderの呼び出しを追加 |
 
 ### 6.2 FileListContextLoaderクラス
 
@@ -248,6 +249,26 @@ handlers/task_handler.py
 
 処理内容の追加：
 - メソッド冒頭で保持しているFileListContextLoaderインスタンスのload_file_listメソッドを呼び出してファイル一覧を取得
+- 取得したファイル一覧をシステムプロンプトの末尾に追加
+- システムプロンプト送信処理へ継続
+
+### 6.4 PlanningCoordinatorクラスの修正
+
+#### ファイルパス
+
+handlers/planning_coordinator.py
+
+#### 修正内容
+
+**コンストラクタの修正**
+
+処理内容の追加：
+- FileListContextLoaderのインスタンスを生成し、インスタンス変数として保持
+
+**_load_planning_system_promptメソッドの修正**
+
+処理内容の追加：
+- プロジェクト固有のエージェントルールを追加した後に、FileListContextLoaderインスタンスのload_file_listメソッドを呼び出してファイル一覧を取得
 - 取得したファイル一覧をシステムプロンプトの末尾に追加
 - システムプロンプト送信処理へ継続
 
