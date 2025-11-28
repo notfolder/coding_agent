@@ -931,6 +931,12 @@ class PlanningCoordinator:
                 planning_prompt = planning_prompt + "\n" + project_rules
                 self.logger.info("Added project-specific agent rules to planning prompt")
             
+            # プロジェクトファイル一覧を読み込み
+            file_list_context = self._load_file_list_context()
+            if file_list_context:
+                planning_prompt = planning_prompt + "\n" + file_list_context
+                self.logger.info("Added project file list to planning prompt")
+            
             # Send system prompt to LLM client
             if hasattr(self.llm_client, "send_system_prompt"):
                 self.llm_client.send_system_prompt(planning_prompt)
@@ -1167,4 +1173,23 @@ class PlanningCoordinator:
             self.logger.warning("プロジェクトルールの読み込みに失敗しました: %s", e)
 
         return ""
+
+    def _load_file_list_context(self) -> str:
+        """プロジェクトファイル一覧を読み込む.
+
+        Returns:
+            プロジェクトファイル一覧文字列
+
+        """
+        from handlers.file_list_context_loader import FileListContextLoader
+
+        try:
+            loader = FileListContextLoader(
+                config=self.config,
+                mcp_clients=self.mcp_clients,
+            )
+            return loader.load_file_list(self.task)
+        except Exception as e:
+            self.logger.warning("ファイル一覧の読み込みに失敗しました: %s", e)
+            return ""
 
