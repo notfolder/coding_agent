@@ -1,1463 +1,323 @@
-# ユーザーコンフィグWeb仕様書
+# ユーザー設定Web仕様書
 
 ## 1. 概要
 
 ### 1.1 目的
 
-本仕様書は、LLMへのAPIキーやシステムプロンプトをユーザーごとに上書きできる「ユーザーコンフィグWeb」の詳細設計を定義します。既存のuser_config_apiを拡張し、以下の機能を実現します。
+ユーザーごとにLLMのAPIキーやモデル設定を管理する機能を設計します。これにより、複数ユーザーが同一のコーディングエージェントを使用する際に、各ユーザーの設定を個別に管理できます。
 
 ### 1.2 主要機能
 
-1. **データベースによるユーザー設定の永続化**
-   - SQLAlchemyを使用してデータベースアクセスを抽象化
-   - SQLiteを初期実装として採用
-   - 将来的なデータベース変更（PostgreSQL、MySQL等）に対応可能
+- **REST API**: コーディングエージェントからの設定取得
+- **Streamlit管理画面**: ブラウザからの設定管理
+- **Active Directory認証**: 企業環境での認証連携
+- **データベース管理**: SQLAlchemyによる設定の永続化
 
-2. **管理者画面**
-   - ユーザーの追加・削除・編集機能
-   - ユーザー一覧表示
+---
 
-3. **Active Directory認証**
-   - Active Directoryサーバーと連携した認証
-   - GitHub/GitLabユーザー名との紐付け（ADメールアドレスの@以前をユーザー名として使用）
+## 2. システムアーキテクチャ
 
-### 1.3 技術スタック
+### 2.1 構成図
 
-**フロントエンド（管理画面）:**
-- **Streamlit**: Python製のWebアプリケーションフレームワーク
-  - シンプルなPythonコードでUIを構築可能
-  - 迅速なプロトタイピングと開発が可能
-  - セッション状態管理機能を内蔵
-
-**バックエンド（API）:**
-- **FastAPI**: 既存のuser_config_apiを拡張
-  - コーディングエージェントからの設定取得用API
-  - Streamlit管理画面からも呼び出し可能
-
-**データベース:**
-- **SQLAlchemy**: PythonのORMライブラリ
-  - データベース抽象化により将来のDB変更に対応
-  - SQLite（初期実装）からPostgreSQL/MySQL等への移行が容易
-
-### 1.4 システムアーキテクチャ概要
-
-```
-[管理者/ユーザー（ブラウザ）]
-            |
-    [Streamlit管理画面]
-            |
-[コーディングエージェント]  <-->  [FastAPI（REST API）]
-                                         |
-                              [Active Directory]    [データベース（SQLite）]
-```
-
-**2つのサーバー構成:**
-1. **Streamlit管理画面サーバー（ポート8501）**: ブラウザからの管理操作用
-2. **FastAPIサーバー（ポート8080）**: コーディングエージェント・API呼び出し用
-
-## 2. データベース設計
-
-### 2.1 設計方針
-
-SQLAlchemyを使用してデータベースアクセスを抽象化し、将来的にSQLite以外のデータベース（PostgreSQL、MySQLなど）への移行を容易にします。
-
-### 2.2 SQLAlchemyモデル定義
-
-SQLAlchemyのORMを使用してモデルを定義します。
-
-**Baseクラス:**
-```
-from sqlalchemy.orm import DeclarativeBase
-
-class Base(DeclarativeBase):
-    pass
-```
-
-**Userモデル:**
-```
-class User(Base):
-    __tablename__ = "users"
+```mermaid
+flowchart TD
+    subgraph External[外部システム]
+        AD[Active Directory]
+        GitHub[GitHub/GitLab]
+    end
     
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    username: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    ldap_uid: Mapped[str] = mapped_column(String(255), unique=True, nullable=True)
-    ldap_email: Mapped[str] = mapped_column(String(255), unique=True, nullable=True)
-    display_name: Mapped[str] = mapped_column(String(255), nullable=True)
-    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    subgraph UserConfigAPI[ユーザー設定API]
+        FastAPI[FastAPI Server<br/>ポート: 8080]
+        Streamlit[Streamlit App<br/>ポート: 8501]
+        DB[(SQLite/PostgreSQL)]
+    end
     
-    config: Mapped["UserConfig"] = relationship(back_populates="user", uselist=False)
-```
-
-**UserConfigモデル:**
-```
-class UserConfig(Base):
-    __tablename__ = "user_configs"
+    subgraph CodingAgent[コーディングエージェント]
+        Consumer[Consumer]
+    end
     
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, nullable=False)
-    llm_api_key: Mapped[str] = mapped_column(Text, nullable=True)  # 暗号化保存
-    llm_model: Mapped[str] = mapped_column(String(255), nullable=True)
-    additional_system_prompt: Mapped[str] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    User[ユーザー] -->|ブラウザ| Streamlit
+    Streamlit -->|認証| AD
+    Streamlit -->|CRUD| DB
+    Consumer -->|設定取得| FastAPI
+    FastAPI -->|読み取り| DB
+    Consumer -->|タスク処理| GitHub
+```
+
+### 2.2 サービス構成
+
+- **FastAPIサーバー（ポート8080）**: 設定取得API
+- **Streamlitサーバー（ポート8501）**: 管理画面
+- **データベース**: SQLite（開発）またはPostgreSQL（本番）
+
+---
+
+## 3. FastAPI サーバー
+
+### 3.1 エンドポイント
+
+#### 設定取得
+
+ユーザー名を指定して設定を取得します。
+
+- **メソッド**: GET
+- **パス**: /api/v1/config/{username}
+- **認証**: APIキー認証
+
+#### ヘルスチェック
+
+サーバーの状態を確認します。
+
+- **メソッド**: GET
+- **パス**: /health
+
+### 3.2 レスポンス形式
+
+設定取得APIは以下の情報を返します：
+
+- **llm_provider**: LLMプロバイダー
+- **openai_api_key**: OpenAI APIキー（暗号化解除済み）
+- **openai_model**: OpenAIモデル
+- **ollama_endpoint**: Ollamaエンドポイント
+- **ollama_model**: Ollamaモデル
+- **lmstudio_base_url**: LM StudioベースURL
+- **lmstudio_model**: LM Studioモデル
+
+---
+
+## 4. Streamlit 管理画面
+
+### 4.1 ページ構成
+
+```mermaid
+flowchart TD
+    A[ログイン] --> B{認証成功?}
+    B -->|Yes| C[ダッシュボード]
+    B -->|No| A
+    C --> D[ユーザー管理]
+    C --> E[個人設定]
+    D --> F[ユーザー一覧]
+    D --> G[ユーザー追加]
+    D --> H[ユーザー編集]
+    E --> I[プロファイル]
+    E --> J[LLM設定]
+    E --> K[API設定]
+```
+
+### 4.2 ダッシュボード
+
+システムの概要情報を表示します：
+
+- 登録ユーザー数
+- アクティブセッション数
+- システム状態
+
+### 4.3 ユーザー管理
+
+管理者がユーザーを管理する画面です：
+
+- ユーザー一覧表示
+- ユーザー追加
+- ユーザー編集
+- ユーザー削除
+
+### 4.4 個人設定
+
+ユーザーが自身の設定を管理する画面です：
+
+- プロファイル編集
+- LLM設定（プロバイダー、モデル選択）
+- APIキー設定（暗号化保存）
+
+---
+
+## 5. Active Directory 認証
+
+### 5.1 認証フロー
+
+```mermaid
+sequenceDiagram
+    participant User as ユーザー
+    participant Streamlit as Streamlit
+    participant Auth as AuthService
+    participant AD as Active Directory
+    participant DB as Database
+
+    User->>Streamlit: ログイン
+    Streamlit->>Auth: authenticate(username, password)
+    Auth->>AD: LDAP認証
+    AD-->>Auth: 認証結果
+    alt 認証成功
+        Auth->>DB: ユーザー情報取得/作成
+        Auth-->>Streamlit: セッショントークン
+        Streamlit-->>User: ログイン成功
+    else 認証失敗
+        Auth-->>Streamlit: エラー
+        Streamlit-->>User: ログイン失敗
+    end
+```
+
+### 5.2 設定項目
+
+config.yamlのad_authセクションで以下を設定します：
+
+- **enabled**: AD認証の有効/無効
+- **server**: ADサーバーアドレス
+- **domain**: ADドメイン
+- **base_dn**: ベースDN
+- **user_filter**: ユーザー検索フィルター
+
+---
+
+## 6. データベース
+
+### 6.1 テーブル構成
+
+```mermaid
+erDiagram
+    users {
+        int id PK
+        string username UK
+        string email
+        string display_name
+        bool is_admin
+        datetime created_at
+        datetime updated_at
+    }
     
-    user: Mapped["User"] = relationship(back_populates="config")
-```
-
-### 2.3 テーブル設計
-
-#### 2.3.1 usersテーブル
-
-ユーザーの基本情報を管理するテーブル。
-
-| カラム名 | データ型 | 制約 | 説明 |
-|---------|---------|------|------|
-| id | INTEGER | PRIMARY KEY, AUTOINCREMENT | ユーザーID |
-| username | VARCHAR(255) | NOT NULL, UNIQUE | GitHub/GitLabユーザー名 |
-| ldap_uid | VARCHAR(255) | UNIQUE | Active DirectoryのUID |
-| ldap_email | VARCHAR(255) | UNIQUE | Active Directoryのメールアドレス |
-| display_name | VARCHAR(255) | | 表示名 |
-| is_admin | BOOLEAN | NOT NULL, DEFAULT FALSE | 管理者フラグ |
-| is_active | BOOLEAN | NOT NULL, DEFAULT TRUE | 有効フラグ |
-| created_at | TIMESTAMP | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 作成日時 |
-| updated_at | TIMESTAMP | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 更新日時 |
-
-**インデックス:**
-- `idx_users_username` ON username
-- `idx_users_ldap_uid` ON ldap_uid
-- `idx_users_ldap_email` ON ldap_email
-
-#### 2.3.2 user_configsテーブル
-
-ユーザーごとのLLM設定を管理するテーブル。
-
-| カラム名 | データ型 | 制約 | 説明 |
-|---------|---------|------|------|
-| id | INTEGER | PRIMARY KEY, AUTOINCREMENT | 設定ID |
-| user_id | INTEGER | FOREIGN KEY(users.id), UNIQUE | ユーザーID |
-| llm_api_key | TEXT | | LLM APIキー（暗号化保存） |
-| llm_model | VARCHAR(255) | | LLMモデル名 |
-| additional_system_prompt | TEXT | | 追加のシステムプロンプト |
-| created_at | TIMESTAMP | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 作成日時 |
-| updated_at | TIMESTAMP | NOT NULL, DEFAULT CURRENT_TIMESTAMP | 更新日時 |
-
-**インデックス:**
-- `idx_user_configs_user_id` ON user_id
-
-### 2.4 データ暗号化
-
-#### 2.4.1 暗号化対象フィールド
-
-APIキーなどの機密情報は暗号化して保存します。
-
-**暗号化対象:**
-- `user_configs.llm_api_key`
-
-#### 2.4.2 暗号化方式
-
-- **アルゴリズム**: AES-256-GCM
-- **鍵管理**: 環境変数（`ENCRYPTION_KEY`）から読み込み
-
-### 2.5 SQLAlchemyセッション管理
-
-#### 2.5.1 データベース接続設定
-
-```
-# config.yamlの設定例
-database:
-  url: "sqlite:///./data/users.db"  # SQLite
-  # url: "postgresql://user:password@localhost/dbname"  # PostgreSQL
-  # url: "mysql+pymysql://user:password@localhost/dbname"  # MySQL
-  echo: false  # SQLログ出力
-```
-
-#### 2.5.2 セッションファクトリ
-
-```
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-engine = create_engine(database_url, echo=echo)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-```
-
-## 3. Active Directory認証設計
-
-### 3.1 設計方針
-
-Active Directory認証を使用してユーザーを認証し、認証されたユーザーのメールアドレスからGitHub/GitLabユーザー名を導出します。
-
-### 3.2 認証フロー
-
-```
-1. ユーザーがログイン画面でAD認証情報を入力
-   |
-2. Active Directoryサーバーに認証リクエストを送信
-   |
-3. AD認証が成功した場合:
-   a. ユーザーのメールアドレスとUIDを取得
-   b. メールアドレスの@以前をGitHub/GitLabユーザー名として抽出
-   c. データベースでユーザーを検索または新規作成
-   d. セッションを開始
-   |
-4. ログイン完了
-```
-
-### 3.3 Active Directory設定
-
-#### 3.3.1 config.yamlへの追加設定
-
-```yaml
-# Active Directory認証設定
-active_directory:
-  # ADサーバー設定
-  server:
-    host: "ad.example.com"
-    port: 636
-    use_ssl: true
-  
-  # バインド設定（サービスアカウント）
-  bind:
-    dn: "CN=service_account,OU=Service Accounts,DC=example,DC=com"
-    password_env: "AD_BIND_PASSWORD"
-  
-  # ユーザー検索設定
-  user_search:
-    base_dn: "OU=Users,DC=example,DC=com"
-    filter: "(sAMAccountName={username})"
+    user_configs {
+        int id PK
+        int user_id FK
+        string llm_provider
+        string openai_api_key
+        string openai_model
+        string ollama_endpoint
+        string ollama_model
+        string lmstudio_base_url
+        string lmstudio_model
+        datetime created_at
+        datetime updated_at
+    }
     
-    # 取得する属性
-    attributes:
-      uid: "sAMAccountName"
-      email: "userPrincipalName"
-      display_name: "displayName"
-  
-  # タイムアウト設定
-  timeout:
-    connect: 5
-    operation: 10
+    users ||--o| user_configs : has
 ```
 
-### 3.4 ユーザー名の導出ルール
+### 6.2 テーブル説明
 
-#### 3.4.1 基本ルール
+#### usersテーブル
 
-ADメールアドレスからGitHub/GitLabユーザー名を導出します。
+ユーザー情報を管理します：
 
-```
-ADメールアドレス: "taro.yamada@example.com"
-              |
-GitHub/GitLabユーザー名: "taro.yamada"
-```
+- **id**: 主キー
+- **username**: ユーザー名（一意）
+- **email**: メールアドレス
+- **display_name**: 表示名
+- **is_admin**: 管理者フラグ
+- **created_at**: 作成日時
+- **updated_at**: 更新日時
 
-#### 3.4.2 導出処理
+#### user_configsテーブル
 
-1. AD認証後、ユーザーのメールアドレス（userPrincipalName属性）を取得
-2. メールアドレスから`@`以前の部分を抽出
-3. 抽出した文字列をGitHub/GitLabユーザー名として使用
-4. データベースのusersテーブルでusernameとして保存
+ユーザーごとの設定を管理します：
 
-### 3.5 ADClientクラス設計
+- **id**: 主キー
+- **user_id**: ユーザーID（外部キー）
+- **llm_provider**: LLMプロバイダー
+- **openai_api_key**: OpenAI APIキー（暗号化）
+- **openai_model**: OpenAIモデル
+- **ollama_endpoint**: Ollamaエンドポイント
+- **ollama_model**: Ollamaモデル
+- **lmstudio_base_url**: LM StudioベースURL
+- **lmstudio_model**: LM Studioモデル
 
-#### 3.5.1 責務
+---
 
-- Active Directoryサーバーへの接続管理
-- ユーザー認証の実行
-- ユーザー属性の取得
+## 7. セキュリティ
 
-#### 3.5.2 主要メソッド
+### 7.1 APIキー暗号化
 
-```
-ADClient
-|-- __init__(config: dict)
-|   - AD設定を初期化
-|
-|-- authenticate(username: str, password: str) -> ADUser | None
-|   - ユーザーの認証を実行
-|   - 成功時: ADUserオブジェクトを返却
-|   - 失敗時: Noneを返却
-|
-|-- get_user_info(username: str) -> ADUser | None
-|   - ユーザー情報を取得（認証なし、サービスアカウントで検索）
-|
-+-- test_connection() -> bool
-    - AD接続テスト
-```
+APIキーはFernetを使用して暗号化して保存します。暗号化キーは環境変数または設定ファイルで管理します。
 
-#### 3.5.3 ADUserデータクラス
+### 7.2 セッション管理
 
-```
-ADUser
-|-- dn: str                    # 識別名
-|-- uid: str                   # sAMAccountName
-|-- email: str                 # メールアドレス
-|-- display_name: str          # 表示名
-+-- derived_username: str      # 導出されたGitHub/GitLabユーザー名
-```
+Streamlitのセッション管理機能を使用してユーザーセッションを管理します。セッションタイムアウトは設定可能です。
 
-### 3.6 セッション管理
+### 7.3 アクセス制御
 
-Streamlitの`st.session_state`を使用してセッション情報を管理します。
+- **FastAPI**: APIキー認証
+- **Streamlit**: Active Directory認証またはローカル認証
+- **管理機能**: 管理者ロールによるアクセス制御
 
-**セッション状態の構造:**
+---
 
-```
-st.session_state = {
-    "authenticated": bool,        # 認証済みフラグ
-    "user": {                     # ログインユーザー情報
-        "username": str,
-        "ldap_uid": str,
-        "ldap_email": str,
-        "display_name": str,
-        "is_admin": bool
-    },
-    "current_page": str,          # 現在のページ
-    "messages": list,             # フラッシュメッセージ
-}
-```
+## 8. 設定オプション
 
-## 4. 管理者画面設計
+### 8.1 config.yamlの設定項目
 
-### 4.1 機能一覧
+user_config_apiセクションで以下を設定します：
 
-#### 4.1.1 ユーザー管理
+- **enabled**: ユーザー設定API機能の有効/無効
+- **fastapi_port**: FastAPIサーバーポート（デフォルト: 8080）
+- **streamlit_port**: Streamlitサーバーポート（デフォルト: 8501）
+- **database_url**: データベース接続URL
+- **encryption_key**: APIキー暗号化キー
 
-| 機能 | 説明 | 権限 |
-|------|------|------|
-| ユーザー一覧表示 | 登録済みユーザーの一覧を表示 | 管理者 |
-| ユーザー追加 | 新規ユーザーを手動で追加 | 管理者 |
-| ユーザー編集 | ユーザー情報の編集（管理者フラグ、有効フラグ等） | 管理者 |
-| ユーザー削除 | ユーザーの削除（論理削除） | 管理者 |
+---
 
-#### 4.1.2 個人設定
+## 9. Docker Compose設定
 
-| 機能 | 説明 | 権限 |
-|------|------|------|
-| モデル設定 | 使用するLLMモデル名を入力・変更 | 本人 |
+### 9.1 サービス定義
 
-### 4.2 画面遷移
+docker-compose.ymlに以下のサービスを追加します：
 
-```
-[ログイン画面]
-      | AD認証
-[ダッシュボード]
-      |
-  |-- [ユーザー管理]（管理者のみ）
-  |      |-- [ユーザー一覧]
-  |      |      |-- [ユーザー追加]
-  |      |      |-- [ユーザー編集]
-  |      |      +-- [ユーザー削除確認]
-  |
-  +-- [個人設定]（一般ユーザー）
-         +-- [モデル設定]
+#### user-config-api
+
+- **イメージ**: プロジェクトのDockerfile
+- **コマンド**: uvicornでFastAPIサーバーを起動
+- **ポート**: 8080
+- **ボリューム**: データベースファイル
+
+#### user-config-web
+
+- **イメージ**: プロジェクトのDockerfile
+- **コマンド**: streamlit runでStreamlitアプリを起動
+- **ポート**: 8501
+- **ボリューム**: データベースファイル
+
+---
+
+## 10. コーディングエージェントとの連携
+
+### 10.1 設定取得フロー
+
+```mermaid
+sequenceDiagram
+    participant Consumer as Consumer
+    participant API as FastAPI
+    participant DB as Database
+    participant LLM as LLMClient
+
+    Consumer->>Consumer: タスク取得（ユーザー情報含む）
+    Consumer->>API: GET /api/v1/config/{username}
+    API->>DB: 設定取得
+    DB-->>API: 設定データ
+    API-->>Consumer: 設定（APIキー復号化済み）
+    Consumer->>LLM: 設定を適用してLLMクライアント初期化
 ```
 
-### 4.3 Streamlit管理画面設計
+### 10.2 フォールバック
 
-#### 4.3.1 ディレクトリ構成
+ユーザー設定が取得できない場合は、config.yamlのデフォルト設定を使用します。
 
-```
-user_config_api/
-|-- streamlit_app/           # Streamlit管理画面
-|   |-- app.py               # メインエントリポイント
-|   |-- pages/               # マルチページ構成
-|   |   |-- 01_dashboard.py
-|   |   |-- 02_user_management.py
-|   |   +-- 03_personal_settings.py
-|   |-- components/          # 再利用可能なUIコンポーネント
-|   |   |-- __init__.py
-|   |   |-- auth.py          # 認証コンポーネント
-|   |   |-- user_form.py     # ユーザーフォーム
-|   |   +-- data_table.py    # データテーブル
-|   |-- utils/               # ユーティリティ
-|   |   |-- __init__.py
-|   |   +-- session.py       # セッション管理
-|   +-- .streamlit/          # Streamlit設定
-|       +-- config.toml
-|-- server.py                # FastAPIサーバー
-+-- ...
-```
+---
 
-#### 4.3.2 画面設計詳細
+## 11. 関連ドキュメント
 
-##### ログイン画面（app.py）
-
-```
-+----------------------------------------------------------+
-|                                                          |
-|              ユーザーコンフィグ管理                       |
-|                                                          |
-|     +------------------------------------------+         |
-|     | ユーザー名                               |         |
-|     | [                                      ] |         |
-|     +------------------------------------------+         |
-|                                                          |
-|     +------------------------------------------+         |
-|     | パスワード                               |         |
-|     | [                                      ] |         |
-|     +------------------------------------------+         |
-|                                                          |
-|              [ ログイン ]                                |
-|                                                          |
-+----------------------------------------------------------+
-```
-
-**処理フロー:**
-1. ユーザー名とパスワードを入力
-2. AD認証を実行（ADClientを呼び出し）
-3. 認証成功時: セッション状態にユーザー情報を保存し、ダッシュボードへ遷移
-4. 認証失敗時: エラーメッセージを表示
-
-##### ダッシュボード（01_dashboard.py）
-
-```
-+----------------------------------------------------------+
-| ダッシュボード                         [ログアウト]       |
-+----------------------------------------------------------+
-|                                                          |
-|  ようこそ、山田太郎 さん                                 |
-|                                                          |
-|  +---------------+  +---------------+                    |
-|  | ユーザー      |  | 設定済        |                    |
-|  |    数: 42     |  |    数: 38     |                    |
-|  +---------------+  +---------------+                    |
-|                                                          |
-+----------------------------------------------------------+
-```
-
-##### ユーザー管理（02_user_management.py）
-
-```
-+----------------------------------------------------------+
-| ユーザー管理                           [ログアウト]       |
-+----------------------------------------------------------+
-|                                                          |
-|  [+ ユーザー追加]                                        |
-|                                                          |
-|  検索: [________________] [アクティブのみ]               |
-|                                                          |
-|  +------------------------------------------------------+|
-|  | ユーザー名    | 表示名    | 管理者 | 状態  | 操作    ||
-|  +---------------+-----------+--------+-------+---------+|
-|  | taro.yamada   | 山田太郎  | Yes    | 有効  | 編集 削除||
-|  | hanako.suzuki | 鈴木花子  |        | 有効  | 編集 削除||
-|  | jiro.tanaka   | 田中次郎  |        | 無効  | 編集 削除||
-|  +------------------------------------------------------+|
-|                                                          |
-|  < 1 / 5 >                                               |
-|                                                          |
-+----------------------------------------------------------+
-```
-
-**ユーザー追加/編集ダイアログ:**
-
-```
-+----------------------------------------------------------+
-| ユーザー追加                                    [X]       |
-+----------------------------------------------------------+
-|                                                          |
-|  ユーザー名（GitHub/GitLab）                             |
-|  [_______________________]                               |
-|                                                          |
-|  AD UID                                                  |
-|  [_______________________]                               |
-|                                                          |
-|  ADメールアドレス                                        |
-|  [_______________________]                               |
-|                                                          |
-|  表示名                                                  |
-|  [_______________________]                               |
-|                                                          |
-|  [ ] 管理者権限を付与                                    |
-|  [x] アクティブ                                          |
-|                                                          |
-|              [キャンセル] [保存]                         |
-|                                                          |
-+----------------------------------------------------------+
-```
-
-##### 個人設定（03_personal_settings.py）
-
-```
-+----------------------------------------------------------+
-| 個人設定                               [ログアウト]       |
-+----------------------------------------------------------+
-|                                                          |
-|  ユーザー: taro.yamada                                   |
-|  メール: taro.yamada@example.com                         |
-|  権限: 一般ユーザー                                      |
-|                                                          |
-|  --- モデル設定 ---                                      |
-|                                                          |
-|  LLMモデル名                                             |
-|  [gpt-4o                                    ]            |
-|  ※ 使用するLLMモデル名を入力してください                 |
-|                                                          |
-|              [デフォルトに戻す] [保存]                    |
-|                                                          |
-+----------------------------------------------------------+
-```
-
-#### 4.3.3 Streamlitセッション管理
-
-**認証チェック処理:**
-
-各ページの先頭で認証状態をチェックし、未認証の場合はログイン画面にリダイレクトします。
-
-```
-処理フロー:
-1. st.session_state.authenticatedをチェック
-2. Falseの場合: ログイン画面を表示
-3. Trueの場合: ページコンテンツを表示
-```
-
-#### 4.3.4 Streamlit設定（.streamlit/config.toml）
-
-```toml
-[server]
-port = 8501
-headless = true
-enableCORS = false
-enableXsrfProtection = true
-
-[browser]
-gatherUsageStats = false
-
-[theme]
-primaryColor = "#1f77b4"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f0f2f6"
-textColor = "#262730"
-font = "sans serif"
-
-[client]
-showErrorDetails = false
-toolbarMode = "minimal"
-```
-
-#### 4.3.5 コンポーネント設計
-
-##### 認証コンポーネント（components/auth.py）
-
-**責務:**
-- ログインフォームの表示
-- AD認証の実行
-- セッション状態の更新
-- ログアウト処理
-
-**主要関数:**
-
-```
-show_login_form()
-    - ログインフォームを表示
-    - 入力値のバリデーション
-
-authenticate_user(username: str, password: str) -> bool
-    - ADClientを使用してユーザーを認証
-    - 成功時: セッション状態を更新しTrueを返す
-    - 失敗時: エラーメッセージを表示しFalseを返す
-
-check_authentication() -> bool
-    - 現在の認証状態をチェック
-
-logout()
-    - セッション状態をクリア
-    - ログイン画面にリダイレクト
-
-require_admin() -> bool
-    - 管理者権限をチェック
-    - 権限がない場合はエラーメッセージを表示
-```
-
-##### ユーザーフォームコンポーネント（components/user_form.py）
-
-**責務:**
-- ユーザー追加/編集フォームの表示
-- 入力値のバリデーション
-
-**主要関数:**
-
-```
-show_user_form(user: User | None = None) -> User | None
-    - ユーザー追加/編集フォームを表示
-    - user引数がNoneの場合は新規作成モード
-    - user引数がある場合は編集モード
-    - フォーム送信時にUserオブジェクトを返す
-
-validate_username(username: str) -> tuple[bool, str]
-    - ユーザー名のバリデーション
-    - (有効かどうか, エラーメッセージ)を返す
-
-show_delete_confirmation(user: User) -> bool
-    - 削除確認ダイアログを表示
-    - 確認された場合Trueを返す
-```
-
-##### データテーブルコンポーネント（components/data_table.py）
-
-**責務:**
-- ページネーション付きデータテーブルの表示
-- ソート・フィルタ機能
-- 行アクション（編集・削除ボタン）
-
-**主要関数:**
-
-```
-show_data_table(
-    data: list[dict],
-    columns: list[str],
-    page: int = 1,
-    per_page: int = 20,
-    sortable: bool = True,
-    actions: list[str] = ["edit", "delete"]
-) -> tuple[int, str, Any]
-    - データテーブルを表示
-    - (選択された行インデックス, アクション種別, 行データ)を返す
-
-show_pagination(total: int, page: int, per_page: int) -> int
-    - ページネーションコントロールを表示
-    - 選択されたページ番号を返す
-
-show_search_filter(placeholder: str = "検索...") -> str
-    - 検索フィルタを表示
-    - 入力された検索文字列を返す
-```
-
-### 4.4 API仕様（コーディングエージェント用）
-
-既存の`/config/{platform}/{username}`エンドポイントは維持し、データベースから設定を取得するように拡張します。
-
-```
-GET /config/{platform}/{username}
-Authorization: Bearer {api_key}
-
-処理フロー:
-1. APIキーの検証
-2. データベースからユーザー設定を取得
-3. ユーザー設定がない場合はデフォルト設定（config.yaml）を返却
-4. ユーザー設定がある場合はデフォルト設定とマージして返却
-
-Response:
-{
-  "status": "success",
-  "data": {
-    "llm": {
-      "provider": "openai",
-      "function_calling": true,
-      "openai": {
-        "api_key": "sk-...",
-        "base_url": "https://api.openai.com/v1",
-        "model": "gpt-4o",
-        "max_token": 40960
-      }
-    },
-    "system_prompt": "...",
-    "max_llm_process_num": 1000
-  }
-}
-```
-
-## 5. アーキテクチャ設計
-
-### 5.1 全体構成
-
-```
-user_config_api/
-|-- server.py                # FastAPIサーバー（APIエントリポイント）
-|-- streamlit_app.py         # Streamlitアプリ（管理画面エントリポイント）
-|-- config.yaml              # 設定ファイル
-|-- requirements.txt         # Python依存関係
-|-- Dockerfile               # Dockerイメージ（API + Streamlit）
-|-- Dockerfile.streamlit     # Streamlit専用Dockerイメージ
-|-- docker-compose.yml       # Docker Compose設定
-|-- data/                    # データディレクトリ
-|   +-- users.db             # SQLiteデータベース
-|-- app/                     # 共通アプリケーションコード
-|   |-- __init__.py
-|   |-- config.py            # 設定読み込み
-|   |-- database.py          # SQLAlchemyセッション管理
-|   |-- models/              # SQLAlchemyモデル
-|   |   |-- __init__.py
-|   |   |-- user.py
-|   |   +-- user_config.py
-|   |-- services/            # ビジネスロジック
-|   |   |-- __init__.py
-|   |   |-- auth_service.py
-|   |   +-- user_service.py
-|   |-- auth/                # 認証関連
-|   |   |-- __init__.py
-|   |   +-- ad_client.py
-|   +-- utils/               # ユーティリティ
-|       |-- __init__.py
-|       +-- encryption.py    # 暗号化ユーティリティ
-|-- api/                     # FastAPI関連
-|   |-- __init__.py
-|   |-- dependencies.py      # 依存関係注入
-|   +-- routers/             # APIルーター
-|       |-- __init__.py
-|       +-- config.py        # 既存API互換
-|-- streamlit_custom/        # Streamlit管理画面
-|   |-- __init__.py
-|   |-- pages/               # マルチページ構成
-|   |   |-- 01_dashboard.py
-|   |   |-- 02_user_management.py
-|   |   +-- 03_personal_settings.py
-|   |-- components/          # 再利用可能なUIコンポーネント
-|   |   |-- __init__.py
-|   |   |-- auth.py          # 認証コンポーネント
-|   |   |-- user_form.py     # ユーザーフォーム
-|   |   +-- data_table.py    # データテーブル
-|   |-- utils/               # Streamlit用ユーティリティ
-|   |   |-- __init__.py
-|   |   +-- session.py       # セッション管理
-|   +-- .streamlit/          # Streamlit設定
-|       +-- config.toml
-+-- tests/                   # テスト
-    |-- __init__.py
-    +-- unit/
-        |-- test_auth_service.py
-        +-- test_user_service.py
-```
-
-### 5.2 レイヤー構成
-
-```
-+----------------------------------------------------------+
-|                   プレゼンテーション層                    |
-|  +--------------------+    +--------------------+        |
-|  | Streamlit管理画面  |    |   FastAPI REST     |        |
-|  |   (ポート8501)     |    |    (ポート8080)    |        |
-|  +---------+----------+    +---------+----------+        |
-+------------|--------------------------|-------------------+
-             |                          |
-             v                          v
-+----------------------------------------------------------+
-|                   サービス層（共有）                      |
-|  +--------------+ +---------------+                      |
-|  | AuthService  | | UserService   |                      |
-|  +--------------+ +---------------+                      |
-+----------------------------+-----------------------------+
-                             |
-                             v
-+----------------------------------------------------------+
-|                   データアクセス層                        |
-|  +--------------------------------------------------+   |
-|  |              SQLAlchemy ORM                       |   |
-|  +--------------------------------------------------+   |
-+----------------------------+-----------------------------+
-                             |
-                             v
-+----------------------------------------------------------+
-|                   データベース層                          |
-|  +--------------------------------------------------+   |
-|  |            SQLite / PostgreSQL / MySQL            |   |
-|  +--------------------------------------------------+   |
-+----------------------------------------------------------+
-```
-
-### 5.3 Streamlitとサービス層の連携
-
-Streamlit管理画面は、サービス層を直接呼び出してデータベース操作を行います。
-FastAPIを経由せず、Pythonコードを直接呼び出すことで効率的に処理できます。
-
-```
-Streamlit管理画面
-        |
-        |-- 認証 ------> AuthService ------> ADClient
-        |                    |
-        |                    +------> SQLAlchemy Session
-        |
-        +-- ユーザー管理 --> UserService --> SQLAlchemy Session
-```
-
-### 5.4 SQLAlchemy設定
-
-#### 5.4.1 config.yamlの拡張
-
-```yaml
-# データベース設定（SQLAlchemy）
-database:
-  # 接続URL
-  # SQLite: sqlite:///./data/users.db
-  # PostgreSQL: postgresql://user:password@localhost/dbname
-  # MySQL: mysql+pymysql://user:password@localhost/dbname
-  url: "sqlite:///./data/users.db"
-  
-  # SQLログ出力
-  echo: false
-  
-  # コネクションプール設定（PostgreSQL/MySQL用）
-  pool_size: 5
-  max_overflow: 10
-
-# Active Directory認証設定
-active_directory:
-  server:
-    host: "ad.example.com"
-    port: 636
-    use_ssl: true
-  bind:
-    dn: "CN=service_account,OU=Service Accounts,DC=example,DC=com"
-    password_env: "AD_BIND_PASSWORD"
-  user_search:
-    base_dn: "OU=Users,DC=example,DC=com"
-    filter: "(sAMAccountName={username})"
-    attributes:
-      uid: "sAMAccountName"
-      email: "userPrincipalName"
-      display_name: "displayName"
-  timeout:
-    connect: 5
-    operation: 10
-
-# 暗号化設定
-encryption:
-  key_env: "ENCRYPTION_KEY"
-
-# APIサーバー設定（既存）
-api_server:
-  api_key: "your-secret-api-key-here"
-
-# LLM設定（デフォルト）
-llm:
-  provider: "openai"
-  function_calling: true
-  openai:
-    base_url: "https://api.openai.com/v1"
-    api_key: "OPENAI_API_KEY"
-    model: "gpt-4o"
-    max_token: 40960
-```
-
-## 6. セキュリティ仕様
-
-### 6.1 認証・認可
-
-#### 6.1.1 認証方式
-
-| 認証方式 | 用途 | 説明 |
-|---------|------|------|
-| AD認証 | 管理画面ログイン | Active Directoryサーバーによるユーザー認証 |
-| APIキー | コーディングエージェント | 既存の固定APIキー認証を維持 |
-
-#### 6.1.2 認可（権限管理）
-
-| ロール | 権限 |
-|--------|------|
-| 管理者（is_admin=true） | 全ユーザーの管理 |
-| 一般ユーザー | 自分のモデル設定の変更のみ |
-
-### 6.2 データ保護
-
-#### 6.2.1 通信の暗号化
-
-- 本番環境ではHTTPS（TLS 1.2以上）を必須とする
-- Docker内部ネットワークでの通信はHTTPを許容
-
-#### 6.2.2 機密データの暗号化
-
-- APIキー等の機密データはAES-256-GCMで暗号化して保存
-- 暗号化キーは環境変数から読み込み
-
-### 6.3 セキュリティヘッダー
-
-```
-X-Content-Type-Options: nosniff
-X-Frame-Options: DENY
-X-XSS-Protection: 1; mode=block
-Content-Security-Policy: default-src 'self'
-Strict-Transport-Security: max-age=31536000; includeSubDomains
-```
-
-## 7. デプロイメント
-
-### 7.1 Docker構成
-
-#### 7.1.1 Dockerfile.api（API専用）
-
-```dockerfile
-FROM python:3.13-slim
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-RUN mkdir -p /app/data
-
-EXPOSE 8080
-
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]
-```
-
-#### 7.1.2 Dockerfile.streamlit（Streamlit専用）
-
-```dockerfile
-FROM python:3.13-slim
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-EXPOSE 8501
-
-CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
-```
-
-#### 7.1.3 docker-compose.yml
-
-```yaml
-version: '3.8'
-
-services:
-  # FastAPI（REST API）サーバー
-  user-config-api:
-    build:
-      context: ./user_config_api
-      dockerfile: Dockerfile
-    container_name: user-config-api
-    environment:
-      - AD_BIND_PASSWORD=${AD_BIND_PASSWORD:-admin_password}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
-      - API_SERVER_KEY=${API_SERVER_KEY:-your-secret-api-key-here}
-      - DATABASE_URL=sqlite:///./data/users.db
-      - USE_MOCK_AD=${USE_MOCK_AD:-false}
-    volumes:
-      - user-config-data:/app/data
-    ports:
-      - "8081:8080"
-    networks:
-      - coding-agent-network
-
-  # Streamlit管理画面サーバー
-  user-config-web:
-    build:
-      context: ./user_config_api
-      dockerfile: Dockerfile.streamlit
-    container_name: user-config-web
-    environment:
-      - AD_BIND_PASSWORD=${AD_BIND_PASSWORD:-admin_password}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
-      - DATABASE_URL=sqlite:///./data/users.db
-      - USE_MOCK_AD=${USE_MOCK_AD:-false}
-    volumes:
-      - user-config-data:/app/data
-    ports:
-      - "8501:8501"
-    networks:
-      - coding-agent-network
-    depends_on:
-      - user-config-api
-      - openldap
-
-  # テスト用OpenLDAPサーバー
-  openldap:
-    image: osixia/openldap:1.5.0
-    container_name: openldap
-    hostname: ldap.example.com
-    environment:
-      - LDAP_ORGANISATION=Example Inc
-      - LDAP_DOMAIN=example.com
-      - LDAP_ADMIN_PASSWORD=admin_password
-      - LDAP_CONFIG_PASSWORD=config_password
-      - LDAP_READONLY_USER=true
-      - LDAP_READONLY_USER_USERNAME=readonly
-      - LDAP_READONLY_USER_PASSWORD=readonly_password
-      - LDAP_TLS_VERIFY_CLIENT=never
-    volumes:
-      - openldap-data:/var/lib/ldap
-      - openldap-config:/etc/ldap/slapd.d
-    ports:
-      - "389:389"
-      - "636:636"
-    networks:
-      - coding-agent-network
-
-  # テスト用LDAP管理画面（LAM）
-  ldap-account-manager:
-    image: ldapaccountmanager/lam:stable
-    container_name: ldap-account-manager
-    environment:
-      - LDAP_DOMAIN=example.com
-      - LDAP_BASE_DN=dc=example,dc=com
-      - LDAP_USERS_DN=ou=people,dc=example,dc=com
-      - LDAP_GROUPS_DN=ou=groups,dc=example,dc=com
-      - LDAP_SERVER=ldap://openldap:389
-      - LAM_LANG=ja_JP
-      - LAM_PASSWORD=lam_password
-    ports:
-      - "8090:80"
-    networks:
-      - coding-agent-network
-    depends_on:
-      - openldap
-
-volumes:
-  user-config-data:
-  openldap-data:
-  openldap-config:
-
-networks:
-  coding-agent-network:
-    driver: bridge
-```
-
-#### 7.1.4 requirements.txt
-
-```
-# FastAPI関連
-fastapi==0.104.1
-uvicorn==0.24.0
-pydantic==2.5.0
-
-# Streamlit関連
-streamlit==1.29.0
-
-# データベース（SQLAlchemy）
-sqlalchemy==2.0.23
-aiosqlite==0.19.0
-
-# 認証関連
-python-ldap==3.4.4
-bcrypt==4.1.1
-
-# 暗号化
-cryptography==41.0.7
-
-# 設定
-PyYAML==6.0.1
-python-dotenv==1.0.0
-
-# ユーティリティ
-pandas==2.1.3
-```
-
-### 7.2 環境変数
-
-| 環境変数 | 説明 | 必須 |
-|---------|------|------|
-| AD_BIND_PASSWORD | Active Directoryサービスアカウントのパスワード | Yes |
-| ENCRYPTION_KEY | データ暗号化キー（32バイト） | Yes |
-| API_SERVER_KEY | コーディングエージェント用APIキー | Yes |
-| DATABASE_URL | データベースURL（デフォルト: sqlite:///./data/users.db） | No |
-| STREAMLIT_SERVER_PORT | Streamlitポート（デフォルト: 8501） | No |
-
-### 7.3 初期セットアップ
-
-#### 7.3.1 初期管理者の作成
-
-```bash
-# コンテナ内で実行
-docker-compose exec user-config-web python -m app.commands.create_admin \
-  --username admin \
-  --ldap-uid admin \
-  --ldap-email admin@example.com
-
-# または環境変数で初期管理者を指定
-INITIAL_ADMIN_USERNAME=admin
-INITIAL_ADMIN_LDAP_UID=admin
-INITIAL_ADMIN_LDAP_EMAIL=admin@example.com
-```
-
-#### 7.3.2 データベース初期化
-
-SQLAlchemyのマイグレーション機能を使用してデータベースを初期化します。
-
-```bash
-# テーブル作成
-docker-compose exec user-config-api python -c "from app.database import engine, Base; Base.metadata.create_all(engine)"
-```
-
-### 7.4 起動方法
-
-#### 7.4.1 Docker Composeで起動
-
-```bash
-# サービスの起動
-docker-compose up -d
-
-# ログの確認
-docker-compose logs -f
-
-# サービスの停止
-docker-compose down
-```
-
-#### 7.4.2 ローカル開発環境での起動
-
-```bash
-# 仮想環境の作成と有効化
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 依存関係のインストール
-pip install -r requirements.txt
-
-# FastAPIサーバーの起動（ターミナル1）
-uvicorn server:app --host 0.0.0.0 --port 8080 --reload
-
-# Streamlitサーバーの起動（ターミナル2）
-streamlit run streamlit_app.py --server.port 8501
-
-# アクセス
-# - API: http://localhost:8080
-# - 管理画面: http://localhost:8501
-```
-
-### 7.5 テスト用LDAP環境
-
-#### 7.5.1 OpenLDAPの概要
-
-docker-compose.ymlに含まれるOpenLDAPサーバーをテスト用ADサーバーとして使用します。
-
-**初期設定:**
-- ドメイン: example.com
-- Base DN: dc=example,dc=com
-- 管理者DN: cn=admin,dc=example,dc=com
-- 管理者パスワード: admin_password
-- 読み取り専用ユーザー: readonly / readonly_password
-
-**ポート:**
-- 389: LDAP（非暗号化）
-- 636: LDAPS（SSL/TLS）
-
-**OpenLDAP環境変数の説明:**
-
-| 環境変数 | 値 | 説明 |
-|---------|-----|------|
-| LDAP_ORGANISATION | Example Inc | 組織名 |
-| LDAP_DOMAIN | example.com | 組織のドメイン |
-| LDAP_ADMIN_PASSWORD | admin_password | 管理者パスワード |
-| LDAP_CONFIG_PASSWORD | config_password | 設定用パスワード |
-| LDAP_READONLY_USER | true | 読み取り専用ユーザーの有効化 |
-| LDAP_READONLY_USER_USERNAME | readonly | 読み取り専用ユーザー名 |
-| LDAP_READONLY_USER_PASSWORD | readonly_password | 読み取り専用ユーザーパスワード |
-| LDAP_TLS_VERIFY_CLIENT | never | SSLクライアント認証の無効化 |
-
-#### 7.5.2 LDAP Account Manager (LAM)
-
-WebベースのLDAP管理ツールでテストユーザーを作成できます。
-
-**アクセス:**
-- URL: http://localhost:8090
-- 初期設定パスワード: lam_password
-- 管理者DN: cn=admin,dc=example,dc=com
-- 管理者パスワード: admin_password
-
-**LAM環境変数の説明:**
-
-| 環境変数 | 値 | 説明 |
-|---------|-----|------|
-| LDAP_DOMAIN | example.com | 組織のドメイン（OpenLDAPと一致） |
-| LDAP_BASE_DN | dc=example,dc=com | LDAPルートDN |
-| LDAP_USERS_DN | ou=people,dc=example,dc=com | ユーザーOU |
-| LDAP_GROUPS_DN | ou=groups,dc=example,dc=com | グループOU |
-| LDAP_SERVER | ldap://openldap:389 | LDAPサーバー接続先 |
-| LAM_LANG | ja_JP | 日本語UI |
-| LAM_PASSWORD | lam_password | LAM初期設定パスワード |
-
-#### 7.5.3 初回起動とLAM初期設定
-
-**1. サービスの起動**
-
-```bash
-# Docker Composeでサービスを起動
-docker compose up -d user-config-api user-config-web openldap ldap-account-manager
-
-# サービスの状態を確認
-docker compose ps
-
-# ログを確認
-docker compose logs -f openldap
-docker compose logs -f ldap-account-manager
-```
-
-**2. LAM管理画面へのアクセス**
-
-ブラウザで http://localhost:8090 にアクセスします。
-
-**3. LAM初期設定**
-
-右上の「LAM構成設定」→「サーバープロファイルの編集」を開きます。
-
-- パスワード: `lam_password`（docker-compose.ymlで設定）
-
-**設定項目:**
-
-a) **一般設定タブ**
-- タイムゾーン: `Asia/Tokyo` に変更
-
-b) **アカウントタイプタブ**
-- ユーザーのOU: `ou=people,dc=example,dc=com`
-- グループのOU: `ou=groups,dc=example,dc=com`
-
-c) **モジュールタブ**（Linux認証用の推奨設定）
-- **ユーザーモジュール**:
-  - 削除: `shadow`（shadowアカウント）
-  - 追加: `SSH公開鍵`（SSH鍵認証用）
-  
-設定を保存します。
-
-#### 7.5.4 テストユーザーの作成
-
-**1. LAMにログイン**
-
-- ユーザーDN: `cn=admin,dc=example,dc=com`
-- パスワード: `admin_password`
-
-**2. グループの作成**
-
-「グループ」タブ → 「新しいグループ」
-
-- グループ名: `testuser`
-- GID番号: 自動割り当て
-
-保存します。
-
-**3. ユーザーの作成**
-
-「ユーザー」タブ → 「新しいユーザー」
-
-**個人情報タブ:**
-- RDN識別子: `uid`
-- 姓: `Test`
-- 名: `User`
-
-**UNIXタブ:**
-- ユーザー名: `testuser`
-- Common name: `Test User`
-- プライマリグループ: `testuser`
-- UID番号: 自動割り当て
-- ホームディレクトリ: `/home/testuser`
-- ログインシェル: `/bin/bash`
-
-**パスワード設定:**
-- 「パスワード設定」を選択
-- パスワード: `testpass`（任意）
-- パスワード確認: `testpass`
-
-**SSH公開鍵タブ:**（オプション）
-- 「SSH公開鍵拡張を追加」を選択
-- SSH公開鍵を入力（`ssh-rsa AAAA...` 形式）
-
-設定を保存します。
-
-#### 7.5.5 テストユーザーのメールアドレス設定
-
-GitHub/GitLabユーザー名の自動導出を確認するため、メールアドレスを設定します。
-
-**1. ユーザーの編集**
-
-「ユーザー」タブで作成したユーザー（`testuser`）を選択し、編集モードに入ります。
-
-**2. 連絡先情報の追加**
-
-「個人情報」タブで以下を設定:
-- メール: `testuser@example.com`
-
-または
-
-「属性」タブで直接追加:
-- 属性名: `userPrincipalName`
-- 値: `testuser@example.com`
-
-保存します。
-
-#### 7.5.6 config.yamlの設定
-
-テスト用LDAP環境に接続するため、`user_config_api/config.yaml`のAD設定を更新します:
-
-```yaml
-active_directory:
-  server:
-    host: "openldap"  # Docker内部ネットワーク名
-    # host: "localhost"  # ローカル開発時
-    port: 389  # 非暗号化LDAP（テスト用）
-    use_ssl: false  # テスト環境ではfalse
-  bind:
-    dn: "cn=admin,dc=example,dc=com"
-    password_env: "AD_BIND_PASSWORD"  # admin_password
-  user_search:
-    base_dn: "ou=people,dc=example,dc=com"
-    filter: "(uid={username})"  # sAMAccountNameではなくuid
-    attributes:
-      uid: "uid"
-      email: "userPrincipalName"
-      display_name: "cn"
-  timeout:
-    connect: 5
-    operation: 10
-```
-
-**環境変数の設定（.env）:**
-
-```bash
-# LDAP認証
-AD_BIND_PASSWORD=admin_password
-USE_MOCK_AD=false  # 実際のLDAP接続を使用
-
-# 暗号化キー
-ENCRYPTION_KEY=dev-encryption-key-32-bytes!!
-
-# APIキー
-API_SERVER_KEY=your-secret-api-key-here
-```
-
-#### 7.5.7 動作確認
-
-**1. Streamlit管理画面でのログイン**
-
-http://localhost:8501 にアクセス
-
-- ユーザー名: `testuser`
-- パスワード: `testpass`
-
-ログインに成功すると:
-- ダッシュボードが表示される
-- ユーザー情報が自動的にデータベースに登録される
-- GitHub/GitLabユーザー名: `testuser`（メールの@以前）
-
-**2. LDAPコマンドラインでの確認**（オプション）
-
-```bash
-# ユーザー検索
-docker compose exec openldap ldapsearch \
-  -x -H ldap://localhost:389 \
-  -D "cn=admin,dc=example,dc=com" \
-  -w admin_password \
-  -b "ou=people,dc=example,dc=com" \
-  "(uid=testuser)"
-
-# 全ユーザー一覧
-docker compose exec openldap ldapsearch \
-  -x -H ldap://localhost:389 \
-  -D "cn=admin,dc=example,dc=com" \
-  -w admin_password \
-  -b "dc=example,dc=com" \
-  "(objectClass=posixAccount)"
-```
-
-**3. Apache Directory Studioでの接続**（GUI LDAPブラウザ）
-
-- プロトコル: LDAP（非暗号化）
-- ホスト: localhost
-- ポート: 389
-- ユーザーDN: `cn=admin,dc=example,dc=com`
-- パスワード: `admin_password`
-
-#### 7.5.8 複数テストユーザーの追加例
-
-LAMで以下のようなテストユーザーを追加できます:
-
-| ユーザー名 | メールアドレス | パスワード | 権限 | 用途 |
-|-----------|---------------|-----------|------|------|
-| testuser | testuser@example.com | testpass | 一般 | 基本動作確認 |
-| admin.user | admin.user@example.com | adminpass | 管理者 | 管理者権限テスト |
-| taro.yamada | taro.yamada@example.com | taropass | 一般 | 日本語名テスト |
-| john.doe | john.doe@example.com | johnpass | 一般 | 英語名テスト |
-
-**管理者ユーザーの作成後:**
-
-Streamlit管理画面で管理者フラグを有効化:
-1. 管理者権限を持つユーザーでログイン
-2. 「ユーザー管理」→ 対象ユーザーを編集
-3. 「管理者権限を付与」をチェック
-4. 保存
-
-#### 7.5.9 トラブルシューティング
-
-**LDAP接続エラー**
-
-```bash
-# OpenLDAPコンテナの状態確認
-docker compose logs openldap
-
-# 接続テスト
-docker compose exec openldap ldapsearch \
-  -x -H ldap://localhost:389 \
-  -D "cn=admin,dc=example,dc=com" \
-  -w admin_password \
-  -b "dc=example,dc=com"
-```
-
-**LAMにアクセスできない**
-
-```bash
-# LAMコンテナの状態確認
-docker compose logs ldap-account-manager
-
-# LAMコンテナの再起動
-docker compose restart ldap-account-manager
-```
-
-**ユーザー認証に失敗**
-
-- LDAP検索フィルタが正しいか確認: `(uid={username})`
-- Base DNが正しいか確認: `ou=people,dc=example,dc=com`
-- メールアドレス属性が設定されているか確認: `userPrincipalName`
-
-**データのリセット**
-
-```bash
-# LDAPデータを完全にリセット
-docker compose down
-docker volume rm coding-agent_openldap-data coding-agent_openldap-config
-docker compose up -d openldap ldap-account-manager
-```
-
-### 7.6 アクセスURL
-
-| サービス | URL | 説明 |
-|---------|-----|------|
-| Streamlit管理画面 | http://localhost:8501 | ブラウザで管理操作 |
-| FastAPI REST API | http://localhost:8081 | コーディングエージェント用API |
-| API ドキュメント | http://localhost:8081/docs | Swagger UI |
-| LDAP Account Manager | http://localhost:8090 | テスト用LDAP管理画面 |
-| OpenLDAP | ldap://localhost:389 | LDAP接続（非暗号化） |
-| OpenLDAP（SSL） | ldaps://localhost:636 | LDAPS接続（暗号化） |
-
-## 8. まとめ
-
-### 8.1 主要な設計ポイント
-
-1. **Streamlitによる管理画面**
-   - Pythonのみでフル機能の管理UIを構築
-   - 迅速な開発とメンテナンス性の向上
-   - バックエンドコードとの直接連携
-
-2. **SQLAlchemyによるデータベース抽象化**
-   - ORMによる型安全なデータアクセス
-   - SQLiteからPostgreSQL/MySQL等への移行が容易
-   - マイグレーション機能でスキーマ変更を管理
-
-3. **Active Directory認証**
-   - 既存のADインフラを活用
-   - メールアドレスからGitHub/GitLabユーザー名を自動導出
-
-4. **2サーバー構成**
-   - Streamlit管理画面（ポート8501）: 人間向けUI
-   - FastAPI REST API（ポート8080）: コーディングエージェント向け
-
-5. **テスト環境**
-   - OpenLDAP + LAMでADサーバーをシミュレート
-   - 開発・テストが容易
-
-### 8.2 今後の拡張性
-
-- 複数ADサーバーのサポート
-- OAuth2/OIDC認証の追加
-- ロールベースアクセス制御（RBAC）の拡張
-- ダークモード対応
+- [ユーザー管理API仕様](user_management_api_spec.md)
+- [基本仕様](spec.md)
 
 ---
 
 **文書バージョン:** 2.0  
-**最終更新日:** 2024-11-27  
-**ステータス:** 詳細設計完了（レビュー反映版）
+**最終更新日:** 2024-11-28  
+**ステータス:** 実装済み

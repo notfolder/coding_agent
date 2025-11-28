@@ -1,183 +1,136 @@
-# Context File-Based Storage Implementation Summary
+# コンテキストストレージ実装仕様書
 
-## Overview
+## 1. 概要
 
-This implementation adds file-based context storage to the coding agent to reduce memory usage by 95-99%. The system stores all conversation history, tool calls, and summaries in files instead of keeping them in memory.
+### 1.1 目的
 
-## Implementation Status: ✅ COMPLETE
+本仕様書は、コンテキストファイル化仕様の実装詳細を定義します。
 
-### Key Features Implemented
+### 1.2 対象
 
-1. **Core Storage Classes**
-   - `TaskContextManager`: Manages overall task context, database, and file structure
-   - `MessageStore`: Manages message history in JSONL format (messages.jsonl, current.jsonl)
-   - `SummaryStore`: Manages context compression history
-   - `ToolStore`: Tracks tool execution with timing and results
-   - `ContextCompressor`: Handles context size monitoring and compression
+- TaskContextManagerの実装詳細
+- MessageStoreの実装詳細
+- データベース操作の詳細
+- ファイル操作の詳細
 
-2. **File-Based Architecture**
-   - `contexts/` directory with `running/` and `completed/` subdirectories
-   - SQLite database (`tasks.db`) for task state management
-   - Per-task UUID-based directories
-   - JSONL format for all message storage (human-readable, appendable)
+---
 
-3. **Backward Compatibility**
-   - All LLM clients support both legacy (in-memory) and file-based modes
-   - Controlled via `context_storage.enabled` configuration
-   - Existing functionality preserved when feature is disabled
+## 2. TaskContextManager実装
 
-4. **UUID-Based Task Tracking**
-   - UUID v4 generated at task queue insertion
-   - Tracked through entire task lifecycle
-   - Enables unique identification and file organization
+### 2.1 初期化処理
 
-5. **Database Schema**
-   - Comprehensive task tracking with statistics
-   - Status tracking (running/completed/failed)
-   - LLM call counts, token usage, compression counts
-   - Performance metrics and error tracking
+TaskContextManagerの初期化時に以下の処理を実行します：
 
-## Configuration
+1. タスクUUIDの検証
+2. コンテキストディレクトリの作成（running/{uuid}/）
+3. metadata.jsonの作成
+4. tasks.dbへのレコード挿入
+5. サブストア（MessageStore、SummaryStore、ToolStore）の初期化
 
-Add to `config.yaml`:
+### 2.2 状態管理
 
-```yaml
-# Enable file-based context storage
-context_storage:
-  enabled: true                    # Set to false to use legacy in-memory mode
-  base_dir: "contexts"
-  compression_threshold: 0.7
-  keep_recent_messages: 5
-  cleanup_days: 30
-  summary_prompt: |
-    あなたは会話履歴を要約するアシスタントです。
-    以下のメッセージ履歴を簡潔かつ包括的に要約してください。
-    # ... (see config.yaml for full prompt)
-```
+タスクの状態はtasks.dbで管理します。ステータスの遷移は以下の通りです：
 
-## File Structure
+- running: タスク実行中
+- completed: タスク完了
+- failed: タスク失敗
+- paused: 一時停止中
 
-```
-contexts/
-├── tasks.db                    # SQLite database for all tasks
-├── running/                    # Active tasks
-│   └── {uuid}/
-│       ├── metadata.json       # Task metadata
-│       ├── messages.jsonl      # Complete message history
-│       ├── current.jsonl       # Current context (for LLM)
-│       ├── summaries.jsonl     # Compression history
-│       └── tools.jsonl         # Tool execution log
-└── completed/                  # Finished tasks
-    └── {uuid}/                 # Same structure as running
-```
+### 2.3 ディレクトリ移動
 
-## Testing
+タスク完了時または失敗時に、コンテキストディレクトリを移動します：
 
-- **Unit Tests**: 12 tests covering all storage classes
-- **Code Review**: All feedback addressed
-- **Security Scan**: CodeQL - 0 alerts
-- **Test Coverage**: Core storage functionality fully tested
+- 正常完了: running/{uuid}/ → completed/{uuid}/
+- 失敗: running/{uuid}/ → completed/{uuid}/
+- 一時停止: running/{uuid}/ → paused/{uuid}/
 
-### Test Results
+---
 
-```
-Ran 12 tests in 0.023s - OK
-- MessageStore: 4/4 tests passed
-- SummaryStore: 3/3 tests passed  
-- ToolStore: 2/2 tests passed
-- TaskContextManager: 3/3 tests passed
-```
+## 3. MessageStore実装
 
-## Memory Optimization
+### 3.1 ファイル形式
 
-### Before (In-Memory Mode)
-- All messages stored in Python lists
-- Context grows linearly with conversation length
-- Memory pressure on long-running tasks
-- Limited by available RAM
+#### messages.jsonl
 
-### After (File-Based Mode)
-- Messages stored in JSONL files
-- Context loaded on-demand
-- Memory usage constant regardless of history length
-- Limited only by disk space
-- **Expected: 95-99% reduction in memory usage**
+全メッセージ履歴を保存します。各行は以下のフィールドを含むJSONオブジェクトです：
 
-## Usage
+- seq: シーケンス番号
+- role: メッセージロール
+- content: メッセージ内容
+- timestamp: タイムスタンプ
+- tokens: 推定トークン数
+- tool_name: ツール名（オプション）
 
-### Enable File-Based Storage
+#### current.jsonl
 
-Set in `config.yaml`:
-```yaml
-context_storage:
-  enabled: true
-```
+現在のコンテキストを保存します。OpenAI API互換形式で、以下のフィールドのみを含みます：
 
-### Disable (Use Legacy Mode)
+- role: メッセージロール
+- content: メッセージ内容
+- tool_name: ツール名（オプション）
 
-Set in `config.yaml`:
-```yaml
-context_storage:
-  enabled: false
-```
+### 3.2 トークン数計算
 
-## Migration Notes
+トークン数は文字数を4で割った値として推定します。日本語の場合は文字数を2で割った値を使用します。
 
-- **No migration required**: Feature is opt-in via configuration
-- **Backward compatible**: Existing code works unchanged
-- **Gradual rollout**: Can enable per-environment
-- **Testing recommended**: Verify in development before production
+### 3.3 コンテキスト再構築
 
-## Known Limitations
+圧縮後のコンテキスト再構築手順：
 
-1. **LLM Summarization**: Currently uses placeholder implementation
-   - TODO: Implement actual LLM-based summarization
-   - Requires enhancement to LLM client interface
-   - Alternative: Use dedicated summarization service
+1. current.jsonlを削除
+2. 要約を最初の行として書き込み
+3. unsummarized.jsonlの内容を追記
+4. unsummarized.jsonlを削除
 
-2. **Compression Trigger**: Based on simple token count threshold
-   - Could be enhanced with more sophisticated heuristics
-   - Consider conversation semantics for better compression points
+---
 
-## Future Enhancements
+## 4. データベース操作
 
-1. **Implement Proper LLM Summarization**
-   - Add dedicated summarization method to LLM clients
-   - Support streaming summarization for large contexts
-   - Configurable summarization strategies
+### 4.1 SQLite設定
 
-2. **Advanced Compression**
-   - Semantic-aware compression points
-   - Differential compression
-   - Configurable retention policies
+以下の設定でSQLiteを使用します：
 
-3. **Performance Optimizations**
-   - Lazy loading of message history
-   - Caching strategies for frequently accessed data
-   - Batch operations for improved I/O
+- WALモード: 有効
+- 同期モード: NORMAL
+- ジャーナルサイズ: 制限なし
 
-4. **Monitoring & Analytics**
-   - Memory usage tracking
-   - Compression effectiveness metrics
-   - Query tools for task database
+### 4.2 接続管理
 
-## Security Considerations
+接続プールは使用せず、各操作ごとに接続を開閉します。1タスク1プロセスの前提のため、排他制御は不要です。
 
-✅ **Security Scan: PASSED (0 alerts)**
+### 4.3 エラーリトライ
 
-- SQLite injection protection via parameterized queries
-- File path validation in directory operations
-- No sensitive data in logs
-- Proper error handling throughout
+データベース操作エラー時は最大3回リトライします。リトライ間隔は指数バックオフを使用します。
 
-## Conclusion
+---
 
-The file-based context storage implementation is complete and ready for use. It provides:
+## 5. ファイル操作
 
-- ✅ Significant memory reduction (95-99% expected)
-- ✅ Full backward compatibility
-- ✅ Comprehensive testing
-- ✅ Security validated
-- ✅ Production-ready code
+### 5.1 JSONLの追記
 
-The feature can be safely enabled via configuration and will automatically manage context storage on disk, dramatically reducing memory footprint for long-running tasks.
+JSONLファイルへの追記は以下の手順で行います：
+
+1. ファイルを追記モードで開く
+2. JSONオブジェクトを文字列化
+3. 改行を付加して書き込み
+4. ファイルを閉じる
+
+### 5.2 ファイル結合
+
+複数のJSONLファイルを結合する場合、ストリーム処理を使用してメモリ消費を抑えます。
+
+### 5.3 アトミック操作
+
+ファイル操作はできる限りアトミックに行います。一時ファイルを作成し、完了後にリネームする方式を採用します。
+
+---
+
+## 6. 関連ドキュメント
+
+- [コンテキストファイル化仕様](context_file_spec.md)
+
+---
+
+**文書バージョン:** 2.0  
+**最終更新日:** 2024-11-28  
+**ステータス:** 実装済み
