@@ -70,6 +70,42 @@ planning:
   # 選択肢: "detailed", "moderate", "minimal"
   decomposition_level: "moderate"
 
+  # 計画前情報収集フェーズ設定
+  # 計画を立てる前に依頼内容を理解し、必要な情報を収集するフェーズ
+  pre_planning:
+    # 計画前情報収集の有効/無効（デフォルト: true）
+    enabled: true
+    
+    # 依頼内容の理解設定
+    understanding:
+      # 理解の確信度閾値（この値未満でも低確信度で継続）
+      confidence_threshold: 0.7
+      
+    # 情報収集設定
+    collection:
+      # 情報収集の有効/無効
+      enabled: true
+      # ツールあたりの最大リトライ回数
+      max_retries_per_tool: 2
+      
+    # 推測設定
+    assumption:
+      # 推測の有効/無効
+      enabled: true
+      # 推測の確信度閾値（これ未満は情報なしで計画）
+      confidence_threshold: 0.5
+      
+    # 通知設定
+    notification:
+      # 開始通知
+      notify_on_start: true
+      # 理解完了通知
+      notify_on_understanding_complete: true
+      # 収集完了通知
+      notify_on_collection_complete: true
+      # 推測発生通知
+      notify_on_assumption: false
+
   # リフレクション設定
   reflection:
     # リフレクション機能の有効/無効(デフォルト: true)

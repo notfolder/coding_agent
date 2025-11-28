@@ -17,6 +17,9 @@ from handlers.replan_manager import ReplanManager
 # 共通の日付フォーマット定数
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+# JSON出力の切り詰め制限定数
+JSON_TRUNCATION_LIMIT = 1000
+
 if TYPE_CHECKING:
     from clients.llm_base import LLMClient
     from clients.mcp_tool_client import MCPToolClient
@@ -134,6 +137,34 @@ class PlanningCoordinator:
         # Checkbox tracking for progress updates
         self.plan_comment_id = None  # ID of the comment containing the checklist
 
+        # 計画前情報収集フェーズの結果
+        self.pre_planning_result: dict[str, Any] | None = None
+
+        # PrePlanningManagerの初期化（有効な場合）
+        self.pre_planning_manager: Any = None
+        pre_planning_config = config.get("pre_planning", {})
+        if pre_planning_config.get("enabled", True):
+            self._init_pre_planning_manager(pre_planning_config)
+
+    def _init_pre_planning_manager(self, pre_planning_config: dict[str, Any]) -> None:
+        """PrePlanningManagerを初期化する.
+
+        Args:
+            pre_planning_config: 計画前情報収集の設定
+
+        """
+        from handlers.pre_planning_manager import PrePlanningManager
+
+        self.pre_planning_manager = PrePlanningManager(
+            config=pre_planning_config,
+            llm_client=self.llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+        )
+        # コンテキストマネージャを設定
+        self.pre_planning_manager.context_manager = self.context_manager
+        self.logger.info("PrePlanningManagerを初期化しました")
+
     def _get_available_tool_names(self) -> list[str]:
         """MCPクライアントから利用可能なツール名のリストを取得する.
 
@@ -178,7 +209,13 @@ class PlanningCoordinator:
             # Check for new comments before starting
             self._check_and_add_new_comments()
             
-            # Post start comment
+            # Step 0: Execute pre-planning phase (計画前情報収集フェーズ)
+            if self.pre_planning_manager is not None:
+                self._post_phase_comment("pre_planning", "started", "タスク内容を分析し、必要な情報を収集しています...")
+                self.pre_planning_result = self._execute_pre_planning_phase()
+                self._post_phase_comment("pre_planning", "completed", "計画前情報収集が完了しました")
+            
+            # Post planning start comment
             self._post_phase_comment("planning", "started", "Beginning task analysis and planning...")
             
             # Step 1: Check for existing plan
@@ -361,6 +398,25 @@ class PlanningCoordinator:
         # Pause the task with planning state
         self.pause_manager.pause_task(self.task, self.task.uuid, planning_state=planning_state)
 
+
+    def _execute_pre_planning_phase(self) -> dict[str, Any] | None:
+        """計画前情報収集フェーズを実行する.
+
+        Returns:
+            計画フェーズへの引き継ぎデータ、または None
+
+        """
+        if self.pre_planning_manager is None:
+            return None
+
+        try:
+            self.logger.info("計画前情報収集フェーズを開始します")
+            result = self.pre_planning_manager.execute()
+            self.logger.info("計画前情報収集フェーズが完了しました")
+            return result
+        except Exception as e:
+            self.logger.warning("計画前情報収集フェーズでエラーが発生しました: %s", e)
+            return None
 
     def _execute_planning_phase(self) -> dict[str, Any] | None:
         """Execute the planning phase.
@@ -1121,6 +1177,106 @@ Maintain the same JSON format as before for action_plan.actions."""
             "",
             task_info,  # This includes issue/MR details and all comments
             "",
+        ]
+        
+        # 計画前情報収集フェーズの結果を追加
+        if self.pre_planning_result:
+            pre_planning = self.pre_planning_result.get("pre_planning_result", {})
+            
+            # 理解した依頼内容のサマリー
+            request_understanding = pre_planning.get("request_understanding", {})
+            if request_understanding:
+                prompt_parts.extend([
+                    "=== 依頼内容の理解（計画前情報収集フェーズで分析済み） ===",
+                    f"タスク種別: {request_understanding.get('task_type', '不明')}",
+                    f"主な目標: {request_understanding.get('primary_goal', '不明')}",
+                    f"理解の確信度: {request_understanding.get('understanding_confidence', 0):.0%}",
+                    "",
+                ])
+                
+                # 成果物
+                deliverables = request_understanding.get("expected_deliverables", [])
+                if deliverables:
+                    prompt_parts.append("期待される成果物:")
+                    for d in deliverables:
+                        prompt_parts.append(f"  - {d}")
+                    prompt_parts.append("")
+                
+                # 制約
+                constraints = request_understanding.get("constraints", [])
+                if constraints:
+                    prompt_parts.append("制約条件:")
+                    for c in constraints:
+                        prompt_parts.append(f"  - {c}")
+                    prompt_parts.append("")
+                
+                # スコープ
+                scope = request_understanding.get("scope", {})
+                if scope:
+                    in_scope = scope.get("in_scope", [])
+                    out_of_scope = scope.get("out_of_scope", [])
+                    if in_scope:
+                        prompt_parts.append(f"スコープ内: {', '.join(in_scope)}")
+                    if out_of_scope:
+                        prompt_parts.append(f"スコープ外: {', '.join(out_of_scope)}")
+                    prompt_parts.append("")
+                
+                # 曖昧な点と選択した解釈
+                ambiguities = request_understanding.get("ambiguities", [])
+                if ambiguities:
+                    prompt_parts.append("曖昧な点と選択した解釈:")
+                    for amb in ambiguities:
+                        item = amb.get("item", "")
+                        selected = amb.get("selected_interpretation", "")
+                        reasoning = amb.get("reasoning", "")
+                        prompt_parts.append(f"  - {item}: {selected} (理由: {reasoning})")
+                    prompt_parts.append("")
+            
+            # 収集した情報
+            collected_info = pre_planning.get("collected_information", {})
+            if collected_info:
+                prompt_parts.append("=== 収集した情報 ===")
+                for category, info in collected_info.items():
+                    if info:
+                        prompt_parts.append(f"{category}:")
+                        # JSON構造を保持するため、truncationは避け、要約形式で表示
+                        json_str = json.dumps(info, indent=2, ensure_ascii=False)
+                        if len(json_str) > JSON_TRUNCATION_LIMIT:
+                            prompt_parts.append(f"{json_str[:JSON_TRUNCATION_LIMIT]}... (省略)")
+                        else:
+                            prompt_parts.append(json_str)
+                        prompt_parts.append("")
+            
+            # 推測した内容
+            assumptions = pre_planning.get("assumptions", [])
+            if assumptions:
+                prompt_parts.append("=== 推測した内容（収集できなかった情報）===")
+                for assumption in assumptions:
+                    info_id = assumption.get("info_id", "")
+                    value = assumption.get("assumed_value", "")
+                    confidence = assumption.get("confidence", 0)
+                    prompt_parts.append(f"  - {info_id}: {value} (確信度: {confidence:.0%})")
+                prompt_parts.append("")
+            
+            # 情報ギャップ
+            gaps = pre_planning.get("information_gaps", [])
+            if gaps:
+                prompt_parts.append("=== 情報ギャップ（収集も推測もできなかった情報）===")
+                for gap in gaps:
+                    desc = gap.get("description", "")
+                    impact = gap.get("impact", "")
+                    prompt_parts.append(f"  - {desc} (影響: {impact})")
+                prompt_parts.append("")
+            
+            # 計画への推奨事項
+            recommendations = pre_planning.get("recommendations_for_planning", [])
+            if recommendations:
+                prompt_parts.append("=== 計画時の推奨事項 ===")
+                for rec in recommendations:
+                    prompt_parts.append(f"  - {rec}")
+                prompt_parts.append("")
+        
+        prompt_parts.extend([
             "IMPORTANT - Task Complexity Assessment:",
             "Before creating your plan, evaluate the task complexity:",
             "- Simple (1-2 tool calls): Single file creation/modification, basic operations → Use 1-3 subtasks",
@@ -1129,7 +1285,7 @@ Maintain the same JSON format as before for action_plan.actions."""
             "",
             "Default to SIMPLER plans. Most tasks are simpler than they appear.",
             "Combine related operations. Don't over-decompose simple tasks.",
-        ]
+        ])
         
         if past_history:
             prompt_parts.extend([
@@ -1448,13 +1604,14 @@ Maintain the same JSON format as before for action_plan.actions."""
         """Post a comment about the current phase status to Issue/MR.
         
         Args:
-            phase: The phase name (e.g., "planning", "execution", "reflection")
+            phase: The phase name (e.g., "planning", "execution", "reflection", "pre_planning")
             status: The status (e.g., "started", "completed", "failed")
             details: Additional details to include in the comment
         """
         try:
             # Build comment based on phase and status
             emoji_map = {
+                "pre_planning": "🔍",
                 "planning": "🎯",
                 "execution": "⚙️",
                 "reflection": "🔍",
@@ -1521,6 +1678,16 @@ Maintain the same JSON format as before for action_plan.actions."""
             self.checklist_comment_id = saved_checklist_id
             self.plan_comment_id = saved_checklist_id
         
+        # Restore pre-planning result if available
+        saved_pre_planning_result = planning_state.get("pre_planning_result")
+        if saved_pre_planning_result is not None:
+            self.pre_planning_result = saved_pre_planning_result
+        
+        # Restore pre-planning manager state if available
+        saved_pre_planning_state = planning_state.get("pre_planning_state")
+        if saved_pre_planning_state and self.pre_planning_manager:
+            self.pre_planning_manager.restore_pre_planning_state(saved_pre_planning_state)
+        
         self.logger.info(
             "Planning状態を復元しました: phase=%s, action_counter=%d, revision_counter=%d, checklist_id=%s",
             self.current_phase,
@@ -1548,14 +1715,21 @@ Maintain the same JSON format as before for action_plan.actions."""
             action_plan = self.current_plan.get("action_plan", {})
             total_actions = len(action_plan.get("actions", []))
         
-        return {
+        state = {
             "enabled": True,
             "current_phase": self.current_phase,
             "action_counter": self.action_counter,
             "revision_counter": self.revision_counter,
             "checklist_comment_id": self.plan_comment_id,
             "total_actions": total_actions,
+            "pre_planning_result": self.pre_planning_result,
         }
+        
+        # Add pre-planning manager state if available
+        if self.pre_planning_manager:
+            state["pre_planning_state"] = self.pre_planning_manager.get_pre_planning_state()
+        
+        return state
 
     def _check_pause_signal(self) -> bool:
         """Check if pause signal is detected.
