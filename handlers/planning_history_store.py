@@ -77,9 +77,10 @@ class PlanningHistoryStore:
 
     def save_reflection(self, reflection: dict[str, Any]) -> None:
         """Save reflection result to JSONL file.
-        
+
         Args:
             reflection: Reflection dictionary to save
+
         """
         entry = {
             "type": "reflection",
@@ -89,7 +90,36 @@ class PlanningHistoryStore:
             "task_uuid": self.task_uuid,
         }
         self._append_to_file(entry)
-        self.logger.debug(f"Saved reflection for task {self.task_uuid}")
+        self.logger.debug("Saved reflection for task %s", self.task_uuid)
+
+    def save_replan_decision(self, replan_entry: dict[str, Any]) -> None:
+        """Save replan decision entry to JSONL file.
+
+        再計画判断の履歴を保存します。
+
+        Args:
+            replan_entry: 再計画判断エントリ（type, llm_decision等を含む辞書）
+
+        """
+        # エントリに必要なメタデータを追加
+        entry = dict(replan_entry)
+        if "timestamp" not in entry:
+            entry["timestamp"] = datetime.now(timezone.utc).isoformat()
+        entry["issue_id"] = self.issue_id
+        entry["task_uuid"] = self.task_uuid
+
+        self._append_to_file(entry)
+        self.logger.debug("Saved replan decision for task %s", self.task_uuid)
+
+    def get_replan_decisions(self) -> list[dict[str, Any]]:
+        """Get all replan decision entries.
+
+        Returns:
+            List of replan decision entries
+
+        """
+        entries = self._read_jsonl()
+        return [e for e in entries if e.get("type") == "replan_decision"]
 
     def get_latest_plan(self) -> dict[str, Any] | None:
         """Get the most recent plan.
