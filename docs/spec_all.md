@@ -232,31 +232,56 @@ main.pyに--continuousオプションを追加して継続動作モードを有�
 
 ---
 
-## 10. ユーザー設定管理
+## 10. プロジェクトファイル一覧の初期コンテキスト化
 
 ### 10.1 概要
 
-ユーザーごとにLLMのAPIキーやモデル設定を管理する機能です。
+IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェクトのファイル一覧を初期コンテキストに含める機能です。
 
 ### 10.2 主要機能
+
+- **自動取得**: タスク処理開始時にローカルgitリポジトリからファイル一覧を自動取得
+- **階層制限**: 取得するディレクトリ階層を制限可能（デフォルト: 無制限）
+- **フォーマット**: フラットリスト形式で出力
+- **格納位置**: システムプロンプト末尾に追加
+
+### 10.3 期待効果
+
+- エージェントがプロジェクト構造を把握した状態で処理開始
+- ファイル一覧取得のためのツール呼び出しを削減
+- より適切な判断による処理品質の向上
+
+### 10.4 詳細仕様
+
+→ 詳細は [PROJECT_FILE_LIST_CONTEXT_SPECIFICATION.md](spec/PROJECT_FILE_LIST_CONTEXT_SPECIFICATION.md) を参照
+
+---
+
+## 11. ユーザー設定管理
+
+### 11.1 概要
+
+ユーザーごとにLLMのAPIキーやモデル設定を管理する機能です。
+
+### 11.2 主要機能
 
 - **REST API**: コーディングエージェントからの設定取得
 - **Streamlit管理画面**: ブラウザからの設定管理
 - **Active Directory認証**: 企業環境での認証連携
 - **データベース管理**: SQLAlchemyによる設定の永続化
 
-### 10.3 システム構成
+### 11.3 システム構成
 
 - **FastAPIサーバー（ポート8080）**: 設定取得API
 - **Streamlitサーバー（ポート8501）**: 管理画面
 
-### 10.4 詳細仕様
+### 11.4 詳細仕様
 
 → 詳細は [USER_CONFIG_WEB_SPECIFICATION.md](spec/USER_CONFIG_WEB_SPECIFICATION.md) および [user_management_api_spec.md](spec/user_management_api_spec.md) を参照
 
 ---
 
-## 11. 外部API仕様
+## 12. 外部API仕様
 
 本プロジェクトで使用する外部APIの仕様については、以下を参照してください。
 
@@ -269,7 +294,7 @@ main.pyに--continuousオプションを追加して継続動作モードを有�
 
 ---
 
-## 12. 仕様書一覧
+## 13. 仕様書一覧
 
 | ファイル名 | 内容 |
 |-----------|------|
@@ -283,6 +308,7 @@ main.pyに--continuousオプションを追加して継続動作モードを有�
 | [COMMENT_DETECTION_SPECIFICATION.md](spec/COMMENT_DETECTION_SPECIFICATION.md) | 新規コメント検知機能仕様 |
 | [CONTINUOUS_MODE_SPECIFICATION.md](spec/CONTINUOUS_MODE_SPECIFICATION.md) | 継続動作モード仕様 |
 | [PROJECT_AGENT_RULES_SPECIFICATION.md](spec/PROJECT_AGENT_RULES_SPECIFICATION.md) | プロジェクトエージェントルール仕様 |
+| [PROJECT_FILE_LIST_CONTEXT_SPECIFICATION.md](spec/PROJECT_FILE_LIST_CONTEXT_SPECIFICATION.md) | プロジェクトファイル一覧コンテキスト仕様 |
 | [USER_CONFIG_WEB_SPECIFICATION.md](spec/USER_CONFIG_WEB_SPECIFICATION.md) | ユーザー設定Web仕様 |
 | [user_management_api_spec.md](spec/user_management_api_spec.md) | ユーザー管理API仕様 |
 
