@@ -84,9 +84,17 @@ st.markdown("---")
 st.markdown("### トークン使用量")
 
 # 現在のユーザーのトークン使用量を取得
+# TokenUsageServiceはエラー時にデフォルト値（0）を返すよう設計されている
 token_service = TokenUsageService()
 username = user.get("username", "")
-token_usage = token_service.get_user_token_usage(username)
+
+# キャッシュを使用してトークン使用量を取得（5分間キャッシュ）
+@st.cache_data(ttl=300)
+def get_cached_token_usage(user: str) -> dict:
+    """キャッシュされたトークン使用量を取得する."""
+    return token_service.get_user_token_usage(user)
+
+token_usage = get_cached_token_usage(username)
 
 # トークン使用量メトリクス
 token_col1, token_col2, token_col3 = st.columns(3)
@@ -136,8 +144,13 @@ with graph_col2:
         key="token_chart_type",
     )
 
-# 履歴データを取得
-history_data = token_service.get_user_daily_history(username, days)
+# 履歴データを取得（キャッシュ使用）
+@st.cache_data(ttl=300)
+def get_cached_history(user: str, num_days: int) -> dict:
+    """キャッシュされた履歴データを取得する."""
+    return token_service.get_user_daily_history(user, num_days)
+
+history_data = get_cached_history(username, days)
 
 # DataFrameに変換
 if history_data["history"]:
@@ -158,7 +171,13 @@ if user.get("is_admin"):
     st.markdown("---")
     st.markdown("### 全ユーザートークン使用状況")
 
-    all_users_usage = token_service.get_all_users_token_usage()
+    # キャッシュを使用して全ユーザーデータを取得（5分間キャッシュ）
+    @st.cache_data(ttl=300)
+    def get_cached_all_users() -> list:
+        """キャッシュされた全ユーザートークン使用量を取得する."""
+        return token_service.get_all_users_token_usage()
+
+    all_users_usage = get_cached_all_users()
 
     if all_users_usage:
         # DataFrameに変換して表示
