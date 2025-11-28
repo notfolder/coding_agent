@@ -8,6 +8,7 @@ import requests
 
 from .llm_base import LLMClient
 from .llm_logger import get_llm_raw_logger
+from .token_estimator import estimate_messages_tokens
 
 
 class LMStudioClient(LLMClient):
@@ -73,11 +74,11 @@ class LMStudioClient(LLMClient):
         output_message = f"output: {result}"
         self.message_store.add_message("user", output_message)
 
-    def get_response(self) -> tuple[str, list]:
+    def get_response(self) -> tuple[str, list, int]:
         """LLMからの応答を取得する.
 
         Returns:
-            タプル: (LLMからの応答テキスト, function callsのリスト)
+            タプル: (LLMからの応答テキスト, function callsのリスト, トークン数)
 
         """
         # Create request.json by streaming current.jsonl
@@ -169,7 +170,12 @@ class LMStudioClient(LLMClient):
                     self.message_store.add_message("assistant", content)
                     reply += content
             
-            return reply, functions
+            # トークン数を推定
+            request_tokens = estimate_messages_tokens(request_data.get("messages", []))
+            response_tokens = len(reply) if reply else 0
+            total_tokens = request_tokens + response_tokens
+            
+            return reply, functions, total_tokens
         
         except Exception as e:
             # Log error

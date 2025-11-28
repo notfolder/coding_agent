@@ -8,6 +8,7 @@ import requests
 
 from .llm_base import LLMClient
 from .llm_logger import get_llm_raw_logger
+from .token_estimator import estimate_messages_tokens
 
 
 class OpenAIClient(LLMClient):
@@ -76,11 +77,11 @@ class OpenAIClient(LLMClient):
         output_message = f"output: {result}"
         self.message_store.add_message("user", output_message)
 
-    def get_response(self) -> tuple[str, list]:
+    def get_response(self) -> tuple[str, list, int]:
         """OpenAI APIから応答を取得する.
 
         Returns:
-            タプル: (LLMからの応答テキスト, function callsのリスト)
+            タプル: (LLMからの応答テキスト, function callsのリスト, トークン数)
 
         """
         # Create request.json by streaming current.jsonl
@@ -182,7 +183,19 @@ class OpenAIClient(LLMClient):
                     self.message_store.add_message("assistant", content)
                     reply += content
             
-            return reply, functions
+            # Extract token usage from response
+            # レスポンスにusageがある場合はそれを使用、ない場合は文字数から推定
+            usage = response_data.get("usage", {})
+            if usage and usage.get("total_tokens", 0) > 0:
+                total_tokens = usage["total_tokens"]
+            else:
+                # 文字数から推定
+                # リクエストメッセージ + レスポンスメッセージでトークン数推定
+                request_tokens = estimate_messages_tokens(request_data.get("messages", []))
+                response_tokens = len(reply) if reply else 0  # レスポンスは1文字=1トークンとして概算
+                total_tokens = request_tokens + response_tokens
+            
+            return reply, functions, total_tokens
         
         except Exception as e:
             # Log error

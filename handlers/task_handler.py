@@ -239,7 +239,7 @@ class TaskHandler:
                     break
                 
                 count += 1
-                context_manager.update_statistics(llm_calls=1)
+                # LLM呼び出しのカウントアップはprocess内でトークン数と一緒に記録される
             
             # Task completed successfully
             task.finish()
@@ -419,8 +419,8 @@ class TaskHandler:
 
         """
         # LLMからレスポンスを取得
-        resp, functions = self.llm_client.get_response()
-        self.logger.info("LLM応答: %s", resp)
+        resp, functions, tokens = self.llm_client.get_response()
+        self.logger.info("LLM応答: %s (トークン数: %d)", resp, tokens)
 
         # レスポンスの前処理
         resp_clean = self._process_think_tags(task, resp)
@@ -435,7 +435,7 @@ class TaskHandler:
                 return True
             return False
 
-        # レスポンスデータの処理
+        # レスポンスデータの処理（トークン数は記録されない - レガシーモード）
         return self._process_response_data(task, data, functions, error_state)
 
     def _process_think_tags(self, task: Task, resp: str) -> str:
@@ -802,8 +802,8 @@ class TaskHandler:
         import time
         
         # LLMからレスポンスを取得
-        resp = llm_client.get_response()
-        self.logger.info("LLM応答: %s", resp)
+        resp, functions, tokens = llm_client.get_response()
+        self.logger.info("LLM応答: %s (トークン数: %d)", resp, tokens)
         
         # 空レスポンスのチェック
         if not resp or not resp.strip():
@@ -829,7 +829,7 @@ class TaskHandler:
 
         # レスポンスデータの処理（ツール実行含む）
         return self._process_response_data_with_context(
-            task, data, error_state, llm_client, tool_store, context_manager
+            task, data, error_state, llm_client, tool_store, context_manager, tokens
         )
 
     def _process_response_data_with_context(
@@ -840,8 +840,18 @@ class TaskHandler:
         llm_client: Any,
         tool_store: Any,
         context_manager: Any,
+        tokens: int = 0,
     ) -> bool:
         """レスポンスデータを解析し、適切な処理を実行する（file-based mode用）.
+
+        Args:
+            task: タスクオブジェクト
+            data: LLMレスポンスデータ
+            error_state: エラー状態管理用辞書
+            llm_client: LLMクライアント
+            tool_store: ツールストア
+            context_manager: コンテキストマネージャー
+            tokens: 今回のLLM呼び出しで使用したトークン数
 
         Returns:
             処理を終了する場合はTrue、継続する場合はFalse
@@ -852,6 +862,8 @@ class TaskHandler:
         # 終了条件のチェック
         if data.get("done", False):
             task.comment("タスク完了")
+            # トークン数を記録してから終了
+            context_manager.update_statistics(tokens=tokens)
             return True
 
         # コメントフィールドの処理
@@ -980,8 +992,13 @@ class TaskHandler:
         if "command" in data:
             # Legacy command format
             task.comment(data.get("comment", ""))
-            return self._process_command_field(task, data, error_state)
+            result = self._process_command_field(task, data, error_state)
+            # LLM呼び出しのトークン数を記録
+            context_manager.update_statistics(llm_calls=1, tokens=tokens)
+            return result
 
+        # 通常のレスポンス処理が完了した場合もLLM統計を記録
+        context_manager.update_statistics(llm_calls=1, tokens=tokens)
         return False
 
     def _load_comment_detection_state(

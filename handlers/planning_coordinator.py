@@ -316,7 +316,11 @@ class PlanningCoordinator:
             
             # Request plan from LLM
             self.llm_client.send_user_message(planning_prompt)
-            response, _ = self.llm_client.get_response()  # Unpack tuple, ignore functions
+            response, _, tokens = self.llm_client.get_response()  # Unpack tuple with tokens
+            self.logger.info("Planning LLM response (tokens: %d)", tokens)
+            
+            # トークン数を記録
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
             
             # Parse response
             plan = self._parse_planning_response(response)
@@ -353,8 +357,11 @@ class PlanningCoordinator:
             self.llm_client.send_user_message(action_prompt)
             
             # Get LLM response with function calls
-            resp, functions = self.llm_client.get_response()
+            resp, functions, tokens = self.llm_client.get_response()
             self.logger.info("Action execution LLM response: %s", resp)
+            
+            # トークン数を記録
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
             
             # Initialize error state for tool execution
             error_state = {"last_tool": None, "tool_error_count": 0}
@@ -522,7 +529,11 @@ class PlanningCoordinator:
             
             # Get reflection from LLM
             self.llm_client.send_user_message(reflection_prompt)
-            response, _ = self.llm_client.get_response()  # Unpack tuple, ignore functions
+            response, _, tokens = self.llm_client.get_response()  # Unpack tuple with tokens
+            self.logger.info("Reflection LLM response (tokens: %d)", tokens)
+            
+            # トークン数を記録
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
             
             # Parse reflection
             reflection = self._parse_reflection_response(response)
@@ -562,7 +573,11 @@ class PlanningCoordinator:
             
             # Get revised plan from LLM
             self.llm_client.send_user_message(revision_prompt)
-            response, _ = self.llm_client.get_response()  # Unpack tuple, ignore functions
+            response, _, tokens = self.llm_client.get_response()  # Unpack tuple with tokens
+            self.logger.info("Plan revision LLM response (tokens: %d)", tokens)
+            
+            # トークン数を記録
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
             
             # Parse revised plan
             revised_plan = self._parse_planning_response(response)
