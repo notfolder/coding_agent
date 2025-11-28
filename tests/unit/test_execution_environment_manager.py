@@ -322,6 +322,53 @@ class TestExecutionEnvironmentManager(unittest.TestCase):
         assert retrieved.container_id == "container-123"
 
 
+class TestParseDatetime(unittest.TestCase):
+    """_parse_docker_datetimeメソッドのテスト."""
+
+    def setUp(self) -> None:
+        """テスト環境のセットアップ."""
+        self.config: dict[str, Any] = {"command_executor": {"enabled": True}}
+        self.manager = ExecutionEnvironmentManager(self.config)
+
+    def test_parse_standard_format(self) -> None:
+        """Docker標準フォーマットのパーステスト."""
+        dt_str = "2024-01-15 12:30:45 +0000 UTC"
+        result = self.manager._parse_docker_datetime(dt_str)
+        
+        assert result is not None
+        assert result.year == 2024
+        assert result.month == 1
+        assert result.day == 15
+        assert result.hour == 12
+        assert result.minute == 30
+
+    def test_parse_iso8601_format(self) -> None:
+        """ISO 8601フォーマットのパーステスト."""
+        dt_str = "2024-01-15T12:30:45Z"
+        result = self.manager._parse_docker_datetime(dt_str)
+        
+        assert result is not None
+        assert result.year == 2024
+        assert result.month == 1
+        assert result.day == 15
+
+    def test_parse_short_format(self) -> None:
+        """短縮フォーマットのパーステスト."""
+        dt_str = "2024-01-15 12:30:45"
+        result = self.manager._parse_docker_datetime(dt_str)
+        
+        assert result is not None
+        assert result.year == 2024
+        assert result.month == 1
+
+    def test_parse_invalid_format(self) -> None:
+        """無効なフォーマットのパーステスト."""
+        dt_str = "invalid-datetime"
+        result = self.manager._parse_docker_datetime(dt_str)
+        
+        assert result is None
+
+
 class TestGetCloneUrl(unittest.TestCase):
     """_get_clone_urlメソッドのテスト."""
 
@@ -364,10 +411,8 @@ class TestGetCloneUrl(unittest.TestCase):
     def test_gitlab_clone_url(self) -> None:
         """GitLab URLの生成テスト."""
         mock_task = MagicMock()
-        mock_task_key = MagicMock()
-        # GitHubのowner/repo属性を削除
-        del mock_task_key.owner
-        del mock_task_key.repo
+        # GitLabタスク用のモックを作成（owner/repo属性なし）
+        mock_task_key = MagicMock(spec=["project_id"])
         mock_task_key.project_id = "group/project"
         mock_task.get_task_key.return_value = mock_task_key
         mock_task.source_branch = None

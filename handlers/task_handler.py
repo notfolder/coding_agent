@@ -152,8 +152,12 @@ class TaskHandler:
                 return None
             
             # タスクにUUIDがない場合はスキップ
+            # UUIDはコンテナ名の一意性確保に必要（通常はタスクキュー経由で自動付与）
             if not task.uuid:
-                self.logger.warning("タスクにUUIDがないため実行環境をスキップします")
+                self.logger.warning(
+                    "タスクにUUIDがないため実行環境をスキップします。"
+                    "タスクキュー経由でタスクを処理することで自動的にUUIDが付与されます。"
+                )
                 return None
             
             # 実行環境を準備

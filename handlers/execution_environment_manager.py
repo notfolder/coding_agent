@@ -229,12 +229,16 @@ class ExecutionEnvironmentManager:
             return clone_url, branch
 
         # 不明なタスク形式
-        error_msg = f"Unknown task type: {type(task_key)}"
+        error_msg = (
+            f"Unknown task type: {type(task_key)}. "
+            "Expected GitHub task key with 'owner' and 'repo' attributes, "
+            "or GitLab task key with 'project_id' attribute."
+        )
         raise ValueError(error_msg)
 
     def prepare(self, task: Task) -> ContainerInfo:
         """タスク用のコンテナを作成し、プロジェクトをクローンする.
-        
+
         Args:
             task: タスクオブジェクト
             
@@ -573,28 +577,55 @@ class ExecutionEnvironmentManager:
 
             container_id, container_name, created_at = parts[0], parts[1], parts[2]
 
-            # 作成時刻をパース
-            try:
-                # Docker の CreatedAt フォーマット: "2024-01-01 12:00:00 +0000 UTC"
-                created = datetime.strptime(
-                    created_at.split(" +")[0],
-                    "%Y-%m-%d %H:%M:%S",
-                ).replace(tzinfo=timezone.utc)
+            # 作成時刻をパース（複数のフォーマットに対応）
+            created = self._parse_docker_datetime(created_at)
+            if created is None:
+                self.logger.warning("コンテナ作成時刻のパースに失敗: %s", created_at)
+                continue
 
-                # 閾値時間を超過しているか確認
-                hours_diff = (threshold - created).total_seconds() / 3600
-                if hours_diff > self._stale_threshold_hours:
-                    self.logger.info(
-                        "残存コンテナを削除します: %s (経過時間: %.1f時間)",
-                        container_name, hours_diff,
-                    )
-                    self._run_docker_command(["rm", "-f", container_id], check=False)
-                    deleted_count += 1
-            except (ValueError, IndexError) as e:
-                self.logger.warning("コンテナ情報のパースに失敗: %s", e)
+            # 閾値時間を超過しているか確認
+            hours_diff = (threshold - created).total_seconds() / 3600
+            if hours_diff > self._stale_threshold_hours:
+                self.logger.info(
+                    "残存コンテナを削除します: %s (経過時間: %.1f時間)",
+                    container_name, hours_diff,
+                )
+                self._run_docker_command(["rm", "-f", container_id], check=False)
+                deleted_count += 1
 
         self.logger.info("残存コンテナのクリーンアップが完了: %d件削除", deleted_count)
         return deleted_count
+
+    def _parse_docker_datetime(self, datetime_str: str) -> datetime | None:
+        """Docker日時文字列をパースする.
+
+        複数のDockerバージョンで異なる日時フォーマットに対応します。
+
+        Args:
+            datetime_str: Docker日時文字列
+
+        Returns:
+            パースされたdatetime、失敗時はNone
+
+        """
+        # 試行するフォーマットのリスト
+        formats = [
+            # Docker標準: "2024-01-01 12:00:00 +0000 UTC"
+            ("%Y-%m-%d %H:%M:%S", lambda s: s.split(" +")[0]),
+            # ISO 8601風: "2024-01-01T12:00:00Z"
+            ("%Y-%m-%dT%H:%M:%SZ", lambda s: s),
+            # 短縮形: "2024-01-01 12:00:00"
+            ("%Y-%m-%d %H:%M:%S", lambda s: s.split(" ")[0] + " " + s.split(" ")[1] if " " in s else s),
+        ]
+
+        for fmt, preprocessor in formats:
+            try:
+                processed = preprocessor(datetime_str)
+                return datetime.strptime(processed, fmt).replace(tzinfo=timezone.utc)
+            except (ValueError, IndexError):
+                continue
+
+        return None
 
     def get_container_info(self, task_uuid: str) -> ContainerInfo | None:
         """タスクUUIDからコンテナ情報を取得する.
