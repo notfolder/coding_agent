@@ -128,6 +128,9 @@ class PlanningCoordinator:
         # Comment detection support
         self.comment_detection_manager = None  # Will be set by TaskHandler
 
+        # Execution environment manager
+        self.execution_manager = None  # Will be set by TaskHandler
+
         # Checkbox tracking for progress updates
         self.plan_comment_id = None  # ID of the comment containing the checklist
 
@@ -499,7 +502,62 @@ class PlanningCoordinator:
             
             self.logger.info("Executing function: %s with args: %s", name, args)
             
-            # Execute the tool
+            # Check if this is a command-executor tool
+            if mcp_server == "command-executor":
+                # Handle command execution through ExecutionEnvironmentManager
+                if self.execution_manager is None:
+                    error_msg = "Execution environment not available"
+                    self.logger.error(error_msg)
+                    self.llm_client.send_function_result(name, f"error: {error_msg}")
+                    return False
+                
+                try:
+                    # Execute command through execution manager
+                    if tool_name == "execute_command":
+                        result = self.execution_manager.execute_command(
+                            command=args.get("command", ""),
+                            working_directory=args.get("working_directory"),
+                        )
+                    else:
+                        error_msg = f"Unknown command-executor tool: {tool_name}"
+                        raise ValueError(error_msg)
+                    
+                    # Reset error count on success
+                    if error_state["last_tool"] == tool_name:
+                        error_state["tool_error_count"] = 0
+                    
+                    # Send result back to LLM
+                    self.llm_client.send_function_result(name, json.dumps(result, ensure_ascii=False))
+                    
+                    return False
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    self.logger.exception("Command execution failed: %s", error_msg)
+                    
+                    # Post error to task
+                    self.task.comment(f"コマンド実行エラー ({name}): {error_msg}")
+                    
+                    # Update error count
+                    if error_state["last_tool"] == tool_name:
+                        error_state["tool_error_count"] += 1
+                    else:
+                        error_state["tool_error_count"] = 1
+                        error_state["last_tool"] = tool_name
+                    
+                    # Send error result to LLM
+                    self.llm_client.send_function_result(name, f"error: {error_msg}")
+                    
+                    # Check if we should abort
+                    if error_state["tool_error_count"] >= MAX_CONSECUTIVE_TOOL_ERRORS:
+                        self.task.comment(
+                            f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。"
+                        )
+                        return True
+                    
+                    return False
+            
+            # Execute the tool through MCP client
             try:
                 result = self.mcp_clients[mcp_server].call_tool(tool_name, args)
                 

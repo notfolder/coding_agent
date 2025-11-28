@@ -285,22 +285,31 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 
 ### 12.1 概要
 
-コーディングエージェントからCommand Executor MCP Serverを使用してコマンド実行を行う機能です。ビルド、テスト、リンター等のコマンドを安全なDocker環境で実行します。
+コーディングエージェントからExecutionEnvironmentManagerを通じてDocker実行環境でコマンド実行を行う機能です。ビルド、テスト、リンター等のコマンドを安全なDocker環境で実行します。
+
+**実装方式:**
+- 外部MCP Serverを使用せず、ExecutionEnvironmentManagerが直接コマンドを実行
+- Function callingツール名: `command-executor_execute_command`
+- PlanningCoordinatorが内部でExecutionEnvironmentManagerを呼び出し
 
 ### 12.2 主要機能
 
 - **Docker実行環境**: タスク毎に独立したDockerコンテナを作成
-- **プロジェクトクローン**: Git経由でプロジェクトファイルを自動ダウンロード
-- **コマンド実行**: MCPプロトコル経由でコマンドを実行
+- **プロジェクトクローン**: Git経由でプロジェクトファイルを自動ダウンロード（git自動インストール）
+- **コマンド実行**: ExecutionEnvironmentManager経由で直接コマンドを実行
 - **自動クリーンアップ**: タスク終了時にコンテナを自動削除
+- **Docker in Docker**: ホストのDocker socketをマウントして実行環境コンテナを管理
+- **SSL対応**: セルフホストGitLab対応（http.sslVerify=false）
 
 ### 12.3 処理フロー
 
-1. タスク開始時にDockerコンテナを作成
-2. プロジェクトリポジトリをクローン
-3. 必要に応じて依存関係をインストール
-4. MCPプロトコル経由でコマンドを実行
-5. タスク終了時にコンテナを削除
+1. タスク開始時にDockerコンテナを作成（ExecutionEnvironmentManager.prepare）
+2. コンテナ内にgitをインストール（apt-get install git）
+3. プロジェクトリポジトリをクローン（GitLab: path_with_namespace使用）
+4. 必要に応じて依存関係をインストール
+5. LLMが`command-executor_execute_command`ツールを呼び出し
+6. PlanningCoordinatorがExecutionEnvironmentManager.execute_command()を実行
+7. タスク終了時にコンテナを削除（TaskHandler.finally）
 
 ### 12.4 詳細仕様
 

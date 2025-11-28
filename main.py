@@ -536,6 +536,8 @@ def run_producer_continuous(
         logger: ロガー
 
     """
+    from handlers.execution_environment_manager import ExecutionEnvironmentManager
+
     # 継続動作モード設定を取得
     continuous_config = config.get("continuous", {})
     producer_config = continuous_config.get("producer", {})
@@ -551,6 +553,13 @@ def run_producer_continuous(
     # PauseResumeManager初期化
     pause_manager = PauseResumeManager(config)
 
+    # ExecutionEnvironmentManager初期化（残存コンテナクリーンアップ用）
+    execution_manager = ExecutionEnvironmentManager(config)
+    cleanup_config = config.get("command_executor", {}).get("cleanup", {})
+    cleanup_interval_hours = cleanup_config.get("interval_hours", 24)
+    cleanup_interval_seconds = cleanup_interval_hours * 3600
+    last_cleanup = 0.0
+
     logger.info("継続動作モードで起動しました(Producer)")
     logger.info("タスク取得間隔: %d分", interval_minutes)
 
@@ -564,6 +573,15 @@ def run_producer_continuous(
             logger.info("継続動作モードを終了しました(Producer)")
             return
 
+    # 起動時に残存コンテナをクリーンアップ
+    if execution_manager.is_enabled():
+        try:
+            deleted = execution_manager.cleanup_stale_containers()
+            if deleted > 0:
+                logger.info("起動時の残存コンテナクリーンアップ: %d件削除", deleted)
+        except Exception:
+            logger.exception("起動時の残存コンテナクリーンアップに失敗")
+
     lock_path = Path(tempfile.gettempdir()) / "produce_tasks.lock"
 
     while True:
@@ -574,6 +592,16 @@ def run_producer_continuous(
         if current_time - last_healthcheck >= healthcheck_interval:
             update_healthcheck_file(healthcheck_dir, "producer")
             last_healthcheck = current_time
+
+        # 残存コンテナの定期クリーンアップ
+        if execution_manager.is_enabled() and current_time - last_cleanup >= cleanup_interval_seconds:
+            try:
+                deleted = execution_manager.cleanup_stale_containers()
+                if deleted > 0:
+                    logger.info("定期クリーンアップ: %d件の残存コンテナを削除", deleted)
+                last_cleanup = current_time
+            except Exception:
+                logger.exception("残存コンテナのクリーンアップに失敗")
 
         # 停止シグナルをチェック
         if pause_manager.check_pause_signal():

@@ -163,6 +163,7 @@ services:
       - ./logs:/app/logs
       - ./contexts:/app/contexts
       - ./healthcheck:/app/healthcheck
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker in Docker用
     restart: unless-stopped
     # gracefulシャットダウンの猶予時間
     stop_grace_period: 300s
@@ -215,6 +216,7 @@ services:
       - ./logs:/app/logs
       - ./contexts:/app/contexts
       - ./healthcheck:/app/healthcheck
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker in Docker用
     restart: unless-stopped
     # gracefulシャットダウンの猶予時間(タスク処理完了を待つ)
     # 注: タスク処理に時間がかかる場合(LLM呼び出し、ファイル操作等)、

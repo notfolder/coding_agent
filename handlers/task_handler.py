@@ -99,23 +99,105 @@ class TaskHandler:
         # タスク固有の設定を取得
         task_config = self._get_task_config(task)
         
-        # Check if planning is enabled
-        planning_config = task_config.get("planning", {})
-        planning_enabled = planning_config.get("enabled", True)
+        # 実行環境の初期化
+        execution_manager = self._init_execution_environment(task, task_config)
         
-        if planning_enabled and task.uuid:
-            # Use planning-based task handling
-            self._handle_with_planning(task, task_config)
-        else:
-            # Check if context storage is enabled
-            context_storage_enabled = task_config.get("context_storage", {}).get("enabled", False)
+        try:
+            # Check if planning is enabled
+            planning_config = task_config.get("planning", {})
+            planning_enabled = planning_config.get("enabled", True)
             
-            if context_storage_enabled and task.uuid:
-                # Use file-based context storage
-                self._handle_with_context_storage(task, task_config)
+            if planning_enabled and task.uuid:
+                # Use planning-based task handling
+                self._handle_with_planning(task, task_config)
             else:
-                # Use legacy in-memory handling
-                self._handle_legacy(task, task_config)
+                # Check if context storage is enabled
+                context_storage_enabled = task_config.get("context_storage", {}).get("enabled", False)
+                
+                if context_storage_enabled and task.uuid:
+                    # Use file-based context storage
+                    self._handle_with_context_storage(task, task_config)
+                else:
+                    # Use legacy in-memory handling
+                    self._handle_legacy(task, task_config)
+        finally:
+            # 実行環境のクリーンアップ
+            self._cleanup_execution_environment(execution_manager, task)
+
+    def _init_execution_environment(
+        self,
+        task: Task,
+        task_config: dict[str, Any],
+    ) -> Any | None:
+        """実行環境を初期化する.
+
+        Command Executor機能が有効な場合、タスク用のDocker実行環境を準備します。
+
+        Args:
+            task: タスクオブジェクト
+            task_config: タスク固有の設定
+
+        Returns:
+            ExecutionEnvironmentManagerインスタンス（無効な場合はNone）
+
+        """
+        from handlers.execution_environment_manager import ExecutionEnvironmentManager
+
+        try:
+            # ExecutionEnvironmentManagerを初期化
+            manager = ExecutionEnvironmentManager(task_config)
+            
+            # 機能が無効な場合はNoneを返す
+            if not manager.is_enabled():
+                return None
+            
+            # タスクにUUIDがない場合はスキップ
+            # UUIDはコンテナ名の一意性確保に必要（通常はタスクキュー経由で自動付与）
+            if not task.uuid:
+                self.logger.warning(
+                    "タスクにUUIDがないため実行環境をスキップします。"
+                    "タスクキュー経由でタスクを処理することで自動的にUUIDが付与されます。"
+                )
+                return None
+            
+            # 実行環境を準備
+            self.logger.info("Command Executor実行環境を準備します: %s", task.uuid)
+            container_info = manager.prepare(task)
+            self.logger.info("実行環境の準備が完了しました: %s", container_info.container_id)
+            
+            return manager
+            
+        except Exception as e:
+            self.logger.warning("実行環境の初期化に失敗しました: %s", e)
+            # 実行環境の初期化失敗は警告として記録し、処理は続行
+            task.comment(f"⚠️ 実行環境の初期化に失敗しました: {e}")
+            return None
+
+    def _cleanup_execution_environment(
+        self,
+        execution_manager: Any | None,
+        task: Task,
+    ) -> None:
+        """実行環境をクリーンアップする.
+
+        タスク終了時にDocker実行環境を削除します。
+
+        Args:
+            execution_manager: ExecutionEnvironmentManagerインスタンス
+            task: タスクオブジェクト
+
+        """
+        if execution_manager is None:
+            return
+        
+        if not task.uuid:
+            return
+        
+        try:
+            self.logger.info("Command Executor実行環境をクリーンアップします: %s", task.uuid)
+            execution_manager.cleanup(task.uuid)
+        except Exception as e:
+            self.logger.warning("実行環境のクリーンアップに失敗しました: %s", e)
 
     def _handle_with_context_storage(self, task: Task, task_config: dict[str, Any]) -> None:
         """Handle task with file-based context storage.
@@ -294,11 +376,32 @@ class TaskHandler:
             is_resumed=is_resumed,
         )
         
+        # Initialize execution environment if enabled
+        execution_manager = self._init_execution_environment(task, task_config)
+        
         try:
             # Get planning configuration
             planning_config = task_config.get("planning", {})
             # Add main config for LLM client initialization
             planning_config["main_config"] = self.config
+            
+            # Add execution environment tools to LLM client if available
+            if execution_manager is not None:
+                # Set current task for execution manager
+                execution_manager.set_current_task(task)
+                
+                # Get function calling definitions
+                exec_functions = execution_manager.get_function_calling_functions()
+                exec_tools = execution_manager.get_function_calling_tools()
+                
+                # Add to LLM client if it has these attributes
+                if hasattr(self.llm_client, 'functions') and self.llm_client.functions is not None:
+                    self.llm_client.functions.extend(exec_functions)
+                if hasattr(self.llm_client, 'tools') and self.llm_client.tools is not None:
+                    self.llm_client.tools.extend(exec_tools)
+                
+                self.logger.info("実行環境のツールをLLMクライアントに追加しました: %d functions, %d tools", 
+                               len(exec_functions), len(exec_tools))
             
             # Create planning coordinator with context_manager
             coordinator = PlanningCoordinator(
@@ -328,6 +431,9 @@ class TaskHandler:
             # Pass comment detection manager to coordinator
             coordinator.comment_detection_manager = comment_detection_manager
             
+            # Pass execution environment manager to coordinator
+            coordinator.execution_manager = execution_manager
+            
             # Execute with planning
             success = coordinator.execute_with_planning()
             
@@ -343,6 +449,9 @@ class TaskHandler:
             context_manager.fail(str(e))
             self.logger.exception("Planning-based task processing failed")
             raise
+        finally:
+            # Cleanup execution environment
+            self._cleanup_execution_environment(execution_manager, task)
 
     def _handle_legacy(self, task: Task, task_config: dict[str, Any]) -> None:
         """Handle task using legacy in-memory approach.
@@ -643,6 +752,7 @@ class TaskHandler:
         MCPプロンプトを埋め込んで返します.
         プロジェクト固有のエージェントルールがある場合は末尾に追加します。
         プロジェクトファイル一覧がある場合は末尾に追加します。
+        Command Executor機能が有効な場合はその説明を追加します。
         
         Args:
             task_config: タスク固有の設定（Noneの場合はself.configを使用）
@@ -672,6 +782,11 @@ class TaskHandler:
         # プロンプトテンプレートのプレースホルダーを置換
         prompt = prompt.replace("{mcp_prompt}", mcp_prompt)
 
+        # Command Executor機能が有効な場合、その説明を追加
+        command_executor_prompt = self._load_command_executor_prompt(task_config)
+        if command_executor_prompt:
+            prompt = prompt + "\n" + command_executor_prompt
+
         # プロジェクト固有のエージェントルールを取得して追加
         project_rules = self._load_project_agent_rules(task_config, task)
         if project_rules:
@@ -683,6 +798,58 @@ class TaskHandler:
             prompt = prompt + "\n" + file_list_context
 
         return prompt
+
+    def _load_command_executor_prompt(
+        self,
+        task_config: dict[str, Any],
+    ) -> str:
+        """Command Executor機能のシステムプロンプトを読み込む.
+
+        Command Executor機能が有効な場合、プロンプトテンプレートを読み込み、
+        許可コマンドリストを埋め込んで返します。
+
+        Args:
+            task_config: タスク固有の設定
+
+        Returns:
+            Command Executorのシステムプロンプト文字列（無効な場合は空文字列）
+
+        """
+        import os
+        
+        from handlers.execution_environment_manager import ExecutionEnvironmentManager
+
+        # 環境変数による有効/無効チェック
+        env_enabled = os.environ.get("COMMAND_EXECUTOR_ENABLED", "").lower()
+        if env_enabled:
+            if env_enabled != "true":
+                return ""
+        else:
+            # 設定ファイルによる有効/無効チェック
+            executor_config = task_config.get("command_executor", {})
+            if not executor_config.get("enabled", False):
+                return ""
+
+        # プロンプトテンプレートを読み込む
+        prompt_path = Path("system_prompt_command_executor.txt")
+        if not prompt_path.exists():
+            self.logger.warning("Command Executorプロンプトファイルが見つかりません: %s", prompt_path)
+            return ""
+
+        try:
+            with prompt_path.open() as f:
+                prompt = f.read()
+
+            # 許可コマンドリストを取得して埋め込む
+            manager = ExecutionEnvironmentManager(task_config)
+            allowed_commands_text = manager.get_allowed_commands_text()
+            prompt = prompt.replace("{allowed_commands_list}", allowed_commands_text)
+
+            return prompt
+
+        except Exception as e:
+            self.logger.warning("Command Executorプロンプトの読み込みに失敗: %s", e)
+            return ""
 
     def _load_project_agent_rules(
         self,
