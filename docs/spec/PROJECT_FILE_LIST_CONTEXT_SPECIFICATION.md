@@ -51,7 +51,7 @@ flowchart TD
     A[TaskHandler.handle開始] --> B{file_list_context有効?}
     B -->|No| C[通常処理へ]
     B -->|Yes| D[リポジトリ情報取得]
-    D --> E[ローカルgitリポジトリからファイル一覧取得]
+    D --> E[MCPクライアントでファイル一覧取得]
     E --> F{取得成功?}
     F -->|Yes| G[階層制限適用]
     F -->|No| H[ログ出力]
@@ -69,14 +69,22 @@ flowchart TD
 
 - **owner**: リポジトリオーナー（組織名またはユーザー名）
 - **repo**: リポジトリ名
-- **local_repo_path**: ローカルにクローンされたリポジトリのパス
+- **project_id**: GitLabの場合のプロジェクトID
 
-#### ローカルgitリポジトリからのファイル一覧取得
+#### MCPクライアントによるファイル一覧取得
 
-gitリポジトリを直接参照してファイル一覧を取得します。gitが管理しているファイルのみが対象となるため、.gitignoreで除外されているファイルは自動的に除外されます。
+GitHub MCPサーバーまたはGitLab MCPサーバーのファイル一覧取得機能を使用します。
 
-取得方法：
-- `git ls-files`コマンドを使用してgitが追跡しているファイル一覧を取得
+**GitHub MCPサーバーの場合:**
+- `get_file_contents`ツールを使用（本ツールはファイルまたはディレクトリの内容を取得可能）
+- ルートディレクトリ（path=""または"/"）を指定してディレクトリ一覧を取得
+- ディレクトリが返された場合は、設定に応じて再帰的にサブディレクトリを取得
+- 再帰取得時は階層制限（max_depth）を適用
+
+**GitLab MCPサーバーの場合:**
+- `get_repository_tree`ツールを使用（リポジトリツリーの取得専用ツール）
+- プロジェクトID、パス（ルート）、参照（デフォルトブランチ）を指定
+- 設定に応じて再帰的にサブディレクトリを取得
 
 #### 階層制限の適用
 
@@ -95,8 +103,8 @@ gitリポジトリを直接参照してファイル一覧を取得します。gi
 フラットリスト形式で出力します。
 
 - プロジェクトルートからの相対パスを1行1ファイルで表示
+- ディレクトリパスを含めたフルパス形式（例: `foo/bar/sample1.py`）
 - アルファベット順でソート
-- ディレクトリは含めず、ファイルのみを列挙
 
 ### 4.3 ヘッダー・フッター
 
@@ -120,14 +128,18 @@ gitリポジトリを直接参照してファイル一覧を取得します。gi
 sequenceDiagram
     participant TH as TaskHandler
     participant FLC as FileListContextLoader
-    participant Git as GitRepository
+    participant MCP as MCPToolClient
     participant MS as MessageStore
 
     TH->>TH: タスク処理開始
-    TH->>FLC: load_file_list(task)
-    FLC->>FLC: リポジトリパス取得
-    FLC->>Git: git ls-files実行
-    Git-->>FLC: ファイル一覧
+    TH->>FLC: load_file_list(task, mcp_clients)
+    FLC->>FLC: リポジトリ情報取得
+    alt GitHubの場合
+        FLC->>MCP: get_file_contents(owner, repo, path="")
+    else GitLabの場合
+        FLC->>MCP: get_repository_tree(project_id, path="", ref)
+    end
+    MCP-->>FLC: ファイル一覧（JSON）
     FLC->>FLC: 階層制限適用
     FLC->>FLC: フラットリスト形式に変換
     FLC-->>TH: 整形済みファイル一覧
@@ -163,10 +175,12 @@ FileListContextLoaderクラスを新規作成します。
 
 引数：
 - config: dict型。設定情報を含む辞書
+- mcp_clients: dict型。MCPツールクライアントの辞書（キー: "github"または"gitlab"）
 
 処理内容：
 - 設定からfile_list_contextセクションを読み込み、インスタンス変数に保持
 - enabled、max_depthの値を取得
+- MCPクライアントの辞書を保持
 
 #### メソッド一覧
 
@@ -174,31 +188,47 @@ FileListContextLoaderクラスを新規作成します。
 
 引数：
 - task: Task型。タスクオブジェクト
-- repo_path: str型。ローカルリポジトリのパス
 
 戻り値：
 - str型。整形済みファイル一覧文字列。取得失敗時は空文字列
 
 処理内容：
 - 設定でenabledがFalseの場合は空文字列を返す
-- _fetch_file_listメソッドを呼び出してファイル一覧を取得
+- タスクからプラットフォーム（GitHub/GitLab）を判定
+- _fetch_file_list_from_githubまたは_fetch_file_list_from_gitlabメソッドを呼び出してファイル一覧を取得
 - 取得に失敗した場合はログ出力して空文字列を返す
 - _apply_depth_limitメソッドを呼び出して階層制限を適用
 - _format_file_listメソッドを呼び出してフラットリスト形式に整形
 - ヘッダーとフッターを付与して返す
 
-**_fetch_file_listメソッド**
+**_fetch_file_list_from_githubメソッド**
 
 引数：
-- repo_path: str型。ローカルリポジトリのパス
+- owner: str型。リポジトリオーナー
+- repo: str型。リポジトリ名
 
 戻り値：
 - list[str]型。ファイルパスのリスト
 
 処理内容：
-- subprocessモジュールを使用して`git ls-files`コマンドを実行
-- コマンドの標準出力を改行で分割してリストに変換
-- コマンド実行に失敗した場合はエラー内容をログ出力して空リストを返す
+- GitHub MCPクライアントの`get_file_contents`ツールを使用
+- ルートディレクトリから再帰的にファイル一覧を取得
+- 各ファイルのフルパス（ディレクトリパスを含む）をリストに追加
+- API呼び出しに失敗した場合はエラー内容をログ出力して空リストを返す
+
+**_fetch_file_list_from_gitlabメソッド**
+
+引数：
+- project_id: str型。GitLabプロジェクトID
+
+戻り値：
+- list[str]型。ファイルパスのリスト
+
+処理内容：
+- GitLab MCPクライアントの`get_repository_tree`ツールを使用
+- プロジェクトのファイルツリーを取得
+- 各ファイルのフルパス（ディレクトリパスを含む）をリストに追加
+- API呼び出しに失敗した場合はエラー内容をログ出力して空リストを返す
 
 **_apply_depth_limitメソッド**
 
@@ -228,7 +258,7 @@ FileListContextLoaderクラスを新規作成します。
 処理内容：
 - ファイルリストをアルファベット順にソート
 - ヘッダー行を生成（プロジェクト情報を含む）
-- 各ファイルパスを1行ずつ追加
+- 各ファイルパス（ディレクトリパスを含むフルパス形式）を1行ずつ追加
 - フッター行を生成（ファイル数を含む）
 - 全体を改行で連結して返す
 
@@ -244,6 +274,7 @@ handlers/task_handler.py
 
 処理内容の追加：
 - FileListContextLoaderのインスタンスを生成し、インスタンス変数として保持
+- MCPクライアントの辞書を渡す
 
 **handleメソッドの修正**
 
@@ -264,6 +295,7 @@ handlers/planning_coordinator.py
 
 処理内容の追加：
 - FileListContextLoaderのインスタンスを生成し、インスタンス変数として保持
+- MCPクライアントの辞書を渡す
 
 **_load_planning_system_promptメソッドの修正**
 
@@ -297,14 +329,24 @@ file_list_contextセクションで以下を設定します：
 
 ### 8.2 想定されるエラー
 
-#### gitコマンド実行エラー
+#### API制限エラー
 
-- **原因**: gitがインストールされていない、またはリポジトリが存在しない
+- **原因**: GitHub/GitLab APIのレート制限に到達
 - **対応**: ログ出力後、ファイル一覧なしで継続
 
-#### リポジトリパス不正
+#### 認証エラー
 
-- **原因**: 指定されたパスにリポジトリが存在しない
+- **原因**: トークンの期限切れや権限不足
+- **対応**: ログ出力後、ファイル一覧なしで継続
+
+#### タイムアウト
+
+- **原因**: 大規模リポジトリでの取得に時間がかかる
+- **対応**: タイムアウト後、ファイル一覧なしで継続
+
+#### リポジトリ不存在
+
+- **原因**: リポジトリが削除された、またはプライベート化された
 - **対応**: ログ出力後、ファイル一覧なしで継続
 
 ---
