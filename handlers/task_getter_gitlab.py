@@ -155,6 +155,29 @@ class TaskGitLabIssue(Task):
         
         return self.get_assignees()
 
+    def get_comments(self) -> list[dict[str, Any]]:
+        """Issueの全コメントを取得する.
+
+        Returns:
+            コメント情報のリスト
+        """
+        note_args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid}
+        discussions = self.mcp_client.call_tool("list_issue_discussions", note_args)
+        
+        # GitLabのdiscussion構造からコメントを抽出し、標準形式に変換
+        comments = []
+        for discussion in discussions.get("items", []):
+            for note in discussion.get("notes", []):
+                comments.append({
+                    "id": note.get("id"),
+                    "author": note.get("author", {}).get("username", ""),
+                    "body": note.get("body", ""),
+                    "created_at": note.get("created_at", ""),
+                    "updated_at": note.get("updated_at"),
+                })
+        
+        return comments
+
 
 class TaskGitLabMergeRequest(Task):
     def __init__(
@@ -304,6 +327,30 @@ class TaskGitLabMergeRequest(Task):
         self.mr["assignee"] = updated_mr.get("assignee")
         
         return self.get_assignees()
+
+    def get_comments(self) -> list[dict[str, Any]]:
+        """Merge Requestの全コメントを取得する.
+
+        Returns:
+            コメント情報のリスト
+        """
+        raw_notes = self.gitlab_client.list_merge_request_notes(
+            project_id=self.project_id,
+            merge_request_iid=self.merge_request_iid,
+        )
+        
+        # 標準形式に変換
+        comments = []
+        for note in raw_notes:
+            comments.append({
+                "id": note.get("id"),
+                "author": note.get("author", {}).get("username", ""),
+                "body": note.get("body", ""),
+                "created_at": note.get("created_at", ""),
+                "updated_at": note.get("updated_at"),
+            })
+        
+        return comments
 
 
 class TaskGetterFromGitLab(TaskGetter):
