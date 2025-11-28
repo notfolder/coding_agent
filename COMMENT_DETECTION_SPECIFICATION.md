@@ -272,11 +272,17 @@ Comment 2 from @{username2} ({timestamp2}):
 
 **`get_state() -> dict`**
 - 一時停止時の状態永続化用
-- 戻り値: `last_comment_ids`と`last_check_time`を含む辞書
+- 戻り値: 以下の構造の辞書
+```python
+{
+    "last_comment_ids": list[str],       # コメントIDのリスト
+    "last_check_timestamp": str          # ISO 8601形式の日時文字列
+}
+```
 
 **`restore_state(state: dict)`**
 - 再開時の状態復元用
-- 引数: 永続化された状態辞書
+- 引数: `get_state()`と同じ構造の状態辞書
 
 ### 3.2 Taskクラスへの追加メソッド
 
