@@ -417,9 +417,12 @@ class TestGetCloneUrl(unittest.TestCase):
         mock_task.get_task_key.return_value = mock_task_key
         mock_task.source_branch = None
         
+        # gitlab_client属性がないことを明示的に設定
+        mock_task.gitlab_client = None
+        
         with patch.dict("os.environ", {
             "GITLAB_PERSONAL_ACCESS_TOKEN": "",
-            "GITLAB_API_URL": "https://gitlab.example.com",
+            "GITLAB_API_URL": "https://gitlab.example.com/api/v4",
         }):
             url, branch = self.manager._get_clone_url(mock_task)
         
