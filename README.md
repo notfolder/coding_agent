@@ -12,6 +12,11 @@ GitHub Copilot のようなコーディングエージェントを作成する�
 - **タスクベースワークフロー**: ラベル付きの Issue/PR/MR をタスクとして処理
 - **Docker 対応**: コンテナでの実行をサポート
 - **キューベース処理**: RabbitMQ を使用したタスクキューイング
+- **コンテキスト管理**: 会話履歴の永続化と自動圧縮
+- **一時停止・再開機能**: タスク処理の一時停止と状態保存からの再開
+- **計画実行モード**: 構造化されたタスク処理のためのPlanning機能
+- **継続動作モード**: Docker Composeによる継続的なタスク処理
+- **新規コメント検知**: 処理中のユーザーコメントをリアルタイムに検知
 
 ## 機能
 
@@ -23,6 +28,13 @@ GitHub Copilot のようなコーディングエージェントを作成する�
 - ✅ Docker コンテナでの実行
 - ✅ RabbitMQ を使用したキューイング
 - ✅ 設定可能なロギングシステム
+- ✅ コンテキストファイルによる会話履歴の永続化
+- ✅ 自動コンテキスト圧縮（トークン数制御）
+- ✅ タスクの一時停止と再開
+- ✅ 処理中の新規コメント検知
+- ✅ 計画実行モード（Planning）
+- ✅ アサイン解除によるタスク停止
+- ✅ プロジェクト固有のエージェントルール
 
 ### 対応プラットフォーム
 - **GitHub**: Issue、Pull Request の処理
@@ -285,27 +297,58 @@ DEBUG=true python main.py
 
 ```
 .
-├── main.py                 # メインエントリーポイント
-├── config.yaml            # 設定ファイル
-├── system_prompt.txt      # システムプロンプト
-├── condaenv.yaml          # Conda 環境定義
-├── docker-compose.yml     # Docker 構成
-├── clients/               # LLM・MCP クライアント
-│   ├── lm_client.py
-│   ├── mcp_tool_client.py
-│   ├── openai_client.py
-│   ├── lmstudio_client.py
-│   └── ollama_client.py
-├── handlers/              # タスク処理ハンドラー
-│   ├── task_getter.py
-│   ├── task_handler.py
-│   ├── task_getter_github.py
-│   └── task_getter_gitlab.py
-├── github-mcp-server/     # GitHub MCP サーバー
-└── docs/                  # ドキュメント
-    ├── spec.md
-    ├── class_spec.md
-    └── *.md
+├── main.py                     # メインエントリーポイント
+├── config.yaml                 # 設定ファイル
+├── system_prompt.txt           # システムプロンプト（通常モード）
+├── system_prompt_function_call.txt  # システムプロンプト（関数呼び出しモード）
+├── system_prompt_planning.txt  # システムプロンプト（計画実行モード）
+├── condaenv.yaml               # Conda 環境定義
+├── docker-compose.yml          # Docker 構成
+├── SETUP.md                    # セットアップガイド
+├── clients/                    # LLM・MCP クライアント
+│   ├── llm_base.py             # LLMクライアント基底クラス
+│   ├── openai_client.py        # OpenAIクライアント
+│   ├── lmstudio_client.py      # LM Studioクライアント
+│   ├── ollama_client.py        # Ollamaクライアント
+│   ├── mcp_tool_client.py      # MCPツールクライアント
+│   ├── github_client.py        # GitHubクライアント
+│   └── gitlab_client.py        # GitLabクライアント
+├── handlers/                   # タスク処理ハンドラー
+│   ├── task.py                 # タスク基底クラス
+│   ├── task_key.py             # タスクキークラス
+│   ├── task_factory.py         # タスクファクトリー
+│   ├── task_getter.py          # タスク取得基底クラス
+│   ├── task_getter_github.py   # GitHub用タスク取得
+│   ├── task_getter_gitlab.py   # GitLab用タスク取得
+│   ├── task_handler.py         # タスクハンドラー
+│   ├── planning_coordinator.py # 計画実行コーディネーター
+│   ├── planning_history_store.py # 計画履歴ストア
+│   └── project_agent_rules_loader.py # プロジェクトルールローダー
+├── context_storage/            # コンテキスト管理
+│   ├── task_context_manager.py # タスクコンテキストマネージャー
+│   ├── message_store.py        # メッセージストア
+│   ├── summary_store.py        # 要約ストア
+│   ├── tool_store.py           # ツールストア
+│   └── context_compressor.py   # コンテキスト圧縮
+├── pause_resume_manager.py     # 一時停止・再開マネージャー
+├── task_stop_manager.py        # タスク停止マネージャー
+├── comment_detection_manager.py # コメント検知マネージャー
+├── queueing.py                 # タスクキュー管理
+├── filelock_util.py            # ファイルロックユーティリティ
+├── github-mcp-server/          # GitHub MCP サーバー（サブモジュール）
+├── user_config_api/            # ユーザー設定管理API
+│   ├── server.py               # FastAPIサーバー
+│   ├── streamlit_app.py        # Streamlit管理画面
+│   └── ...
+├── tests/                      # テスト
+│   ├── unit/                   # ユニットテスト
+│   ├── integration/            # 統合テスト
+│   └── real_integration/       # 実際の環境でのテスト
+└── docs/                       # ドキュメント
+    ├── spec_all.md             # 仕様書統合ドキュメント
+    ├── spec/                   # 仕様ドキュメント
+    ├── external-api/           # 外部API仕様
+    └── setup/                  # セットアップ説明
 ```
 
 ## トラブルシューティング
@@ -419,13 +462,29 @@ grep "LLM" logs/agent.log
 
 ## 関連ドキュメント
 
-- [仕様書](spec.md) - 詳細な仕様
-- [クラス設計](class_spec.md) - アーキテクチャ詳細
-- [GitHub MCP サーバー](github-mcp-server.md) - GitHub 連携
-- [GitLab MCP サーバー](gitlab-mcp-server.md) - GitLab 連携
-- [OpenAI 設定](openai.md) - OpenAI 設定詳細
-- [LM Studio 設定](lmstudio.md) - LM Studio 設定詳細
-- [Ollama 設定](ollama.md) - Ollama 設定詳細
+### 仕様書
+- [仕様書統合ドキュメント](docs/spec_all.md) - 全機能の概要と仕様へのリンク
+- [基本仕様書](docs/spec/spec.md) - プロジェクトの基本仕様
+- [クラス設計](docs/spec/class_spec.md) - アーキテクチャ詳細
+
+### 機能別仕様
+- [コンテキストファイル化仕様](docs/spec/context_file_spec.md) - 会話履歴の永続化
+- [計画実行モード仕様](docs/spec/PLANNING_SPECIFICATION.md) - Planning機能の詳細
+- [一時停止・再開仕様](docs/spec/PAUSE_RESUME_SPECIFICATION.md) - タスクの一時停止と再開
+- [タスク停止仕様](docs/spec/TASK_STOP_SPECIFICATION.md) - アサイン解除による停止
+- [コメント検知仕様](docs/spec/COMMENT_DETECTION_SPECIFICATION.md) - 新規コメントの検知
+- [継続動作モード仕様](docs/spec/CONTINUOUS_MODE_SPECIFICATION.md) - Docker継続実行
+
+### セットアップ
+- [セットアップガイド](SETUP.md) - インストールと設定の概要
+- [一時停止・再開の使い方](docs/setup/PAUSE_RESUME_USAGE.md) - 一時停止機能の使用方法
+
+### 外部API仕様
+- [OpenAI API](docs/external-api/openai.md) - OpenAI設定詳細
+- [LM Studio API](docs/external-api/lmstudio.md) - LM Studio設定詳細
+- [Ollama API](docs/external-api/ollama.md) - Ollama設定詳細
+- [GitHub MCP Server](docs/external-api/github-mcp-server.md) - GitHub連携
+- [GitLab MCP Server](docs/external-api/gitlab-mcp-server.md) - GitLab連携
 
 ## サポート
 
