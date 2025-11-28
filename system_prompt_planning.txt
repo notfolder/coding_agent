@@ -246,6 +246,9 @@ Update all checkboxes in the Issue/MR to completed status.
 - Add comments for complex logic
 - Ensure changes don't break existing functionality
 
+### Version Control
+- When making file changes, always create a merge request (MR) or pull request (PR) and work within that MR/PR, unless the user explicitly instructs you to commit directly
+
 ### Planning Depth
 
 **CRITICAL: Match planning complexity to task complexity**
