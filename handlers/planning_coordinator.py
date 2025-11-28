@@ -11,6 +11,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from handlers.replan_decision import ReplanDecision, ReplanType, TargetPhase
+from handlers.replan_manager import ReplanManager
+
+# 共通の日付フォーマット定数
+DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+
 if TYPE_CHECKING:
     from clients.llm_base import LLMClient
     from clients.mcp_tool_client import MCPToolClient
@@ -20,7 +26,7 @@ if TYPE_CHECKING:
 
 class PlanningCoordinator:
     """Coordinates planning-based task execution.
-    
+
     Manages the planning process including goal understanding, task decomposition,
     action execution, reflection, and plan revision.
     """
@@ -34,31 +40,32 @@ class PlanningCoordinator:
         context_manager: TaskContextManager,
     ) -> None:
         """Initialize the planning coordinator.
-        
+
         Args:
             config: Planning configuration
             llm_client: LLM client instance to use. If None, a new client will be created.
             mcp_clients: Dictionary of MCP tool clients
             task: Task object to process
             context_manager: TaskContextManager instance for unified context management
+
         """
         self.config = config
         self.mcp_clients = mcp_clients
         self.task = task
         self.context_manager = context_manager
         self.logger = logging.getLogger(__name__)
-        
+
         # Get stores from context manager
         self.history_store = context_manager.get_planning_store()
         message_store = context_manager.get_message_store()
-        
+
         # Set issue_id for cross-task history tracking
         if hasattr(task, "number"):
             self.history_store.issue_id = str(task.number)
-        
+
         # Track checklist comment ID for updates
         self.checklist_comment_id: int | str | None = None
-        
+
         # Use provided LLM client or create new one if not provided
         if llm_client is not None:
             self.llm_client = llm_client
@@ -68,10 +75,10 @@ class PlanningCoordinator:
         else:
             # Create planning-specific LLM client
             from clients.lm_client import get_llm_client
-            
+
             # Get the main config for LLM client initialization
             main_config = config.get("main_config", {})
-            
+
             # Get functions and tools from MCP clients
             functions = []
             tools = []
@@ -79,7 +86,7 @@ class PlanningCoordinator:
                 for mcp_client in mcp_clients.values():
                     functions.extend(mcp_client.get_function_calling_functions())
                     tools.extend(mcp_client.get_function_calling_tools())
-            
+
             self.llm_client = get_llm_client(
                 main_config,
                 functions=functions if functions else None,
@@ -87,27 +94,62 @@ class PlanningCoordinator:
                 message_store=message_store,
                 context_dir=context_manager.context_dir,
             )
-        
+
         # Load and send planning-specific system prompt
         self._load_planning_system_prompt()
-        
+
         # Current state
         self.current_phase = "planning"
         self.current_plan = None
         self.action_counter = 0
         self.revision_counter = 0
-        
+
+        # 再計画管理用のReplanManagerを初期化
+        available_tools = self._get_available_tool_names()
+        self.replan_manager = ReplanManager(
+            config=config,
+            history_store=self.history_store,
+            available_tools=available_tools,
+        )
+
+        # エラーカウンター(再計画判断用)
+        self.error_count = 0
+        self.consecutive_errors = 0
+
+        # 計画リビジョン番号(チェックリスト表示用)
+        self.plan_revision_number = 0
+
         # Pause/resume support
         self.pause_manager = None  # Will be set by TaskHandler
-        
+
         # Task stop support
         self.stop_manager = None  # Will be set by TaskHandler
-        
+
         # Comment detection support
         self.comment_detection_manager = None  # Will be set by TaskHandler
-        
+
         # Checkbox tracking for progress updates
         self.plan_comment_id = None  # ID of the comment containing the checklist
+
+    def _get_available_tool_names(self) -> list[str]:
+        """MCPクライアントから利用可能なツール名のリストを取得する.
+
+        Returns:
+            ツール名のリスト
+
+        """
+        tool_names = []
+        for client_name, mcp_client in self.mcp_clients.items():
+            try:
+                tools = mcp_client.get_function_calling_tools()
+                for tool in tools:
+                    if isinstance(tool, dict) and "function" in tool:
+                        tool_names.append(tool["function"].get("name", ""))
+                    elif hasattr(tool, "name"):
+                        tool_names.append(tool.name)
+            except Exception:
+                self.logger.warning("ツール一覧の取得に失敗: %s", client_name)
+        return [name for name in tool_names if name]
 
     def execute_with_planning(self) -> bool:
         """Execute task with planning capabilities.
@@ -201,19 +243,38 @@ class PlanningCoordinator:
                 
                 # Execute next action
                 result = self._execute_action()
-                
+
                 if result is None:
                     self.logger.warning("No more actions to execute")
                     break
-                
-                # Check for action failure
+
+                # エラー追跡の更新
+                current_action = result.get("action", {})
                 if result.get("status") == "error":
+                    self.error_count += 1
+                    self.consecutive_errors += 1
+
                     error_msg = result.get("error", "Unknown error occurred")
-                    self._post_phase_comment("execution", "failed", f"Action failed: {error_msg}")
+                    self._post_phase_comment(
+                        "execution", "failed", f"Action failed: {error_msg}"
+                    )
+
+                    # 再計画判断をLLMに依頼
+                    if self.replan_manager.enabled:
+                        decision = self._request_execution_replan_decision(
+                            current_action, result
+                        )
+                        if self._handle_replan(decision):
+                            # 再計画が実行された場合、ループを継続
+                            continue
+
                     # Continue or stop based on configuration
                     if not self.config.get("continue_on_error", False):
                         return False
-                
+                else:
+                    # 成功した場合はエラーカウンターをリセット
+                    self.consecutive_errors = 0
+
                 # Update progress checklist
                 self._update_checklist_progress(self.action_counter - 1)
                 
@@ -581,16 +642,394 @@ class PlanningCoordinator:
             
             # Parse revised plan
             revised_plan = self._parse_planning_response(response)
-            
+
             # Save revision
             if revised_plan:
                 self.history_store.save_revision(revised_plan, reflection)
-            
+
             return revised_plan
-            
-        except Exception as e:
-            self.logger.exception(f"Plan revision failed: {e}")
+
+        except Exception:
+            self.logger.exception("Plan revision failed")
             return None
+
+    def _request_execution_replan_decision(
+        self,
+        current_action: dict[str, Any],
+        result: dict[str, Any],
+    ) -> ReplanDecision:
+        """実行フェーズでの再計画判断をLLMに依頼する.
+
+        Args:
+            current_action: 実行されたアクション
+            result: 実行結果
+
+        Returns:
+            ReplanDecision インスタンス
+
+        """
+        if not self.replan_manager.enabled:
+            return ReplanDecision()
+
+        # 残りのアクションを取得
+        remaining_actions = []
+        if self.current_plan:
+            action_plan = self.current_plan.get("action_plan", {})
+            actions = action_plan.get("actions", [])
+            remaining_actions = actions[self.action_counter:]
+
+        # エラー情報を準備
+        error_info = result.get("error", "") if result.get("status") == "error" else ""
+
+        # コンテキストを構築
+        context = {
+            "executed_action": current_action,
+            "execution_result": result,
+            "error_info": error_info,
+            "completed_count": self.action_counter,
+            "total_count": len(self.current_plan.get("action_plan", {}).get("actions", [])),
+            "error_count": self.error_count,
+            "consecutive_errors": self.consecutive_errors,
+            "remaining_actions": remaining_actions,
+        }
+
+        # LLMに再計画判断を依頼
+        decision = self.replan_manager.request_llm_decision(
+            self.llm_client,
+            TargetPhase.EXECUTION.value,
+            context,
+        )
+
+        return decision
+
+    def _handle_replan(self, decision: ReplanDecision) -> bool:
+        """再計画を実行する.
+
+        Args:
+            decision: LLMの再計画判断
+
+        Returns:
+            再計画が実行された場合True
+
+        """
+        if not decision.replan_needed:
+            return False
+
+        # 再計画を実行可能かチェック
+        if not self.replan_manager.execute_replan(decision, self.current_phase):
+            return False
+
+        # 再計画通知をIssue/MRに投稿
+        self._post_replan_notification(decision)
+
+        # 再計画タイプに応じた処理
+        replan_type = decision.replan_type
+        target_phase = decision.target_phase
+
+        if replan_type == ReplanType.RETRY.value:
+            # リトライ: アクションカウンターを1つ戻す
+            if self.action_counter > 0:
+                self.action_counter -= 1
+            self.consecutive_errors = 0
+            return True
+
+        if replan_type == ReplanType.PARTIAL_REPLAN.value:
+            # 部分再計画: 残りのアクションを再生成
+            self._execute_partial_replan(decision)
+            return True
+
+        if replan_type in (
+            ReplanType.FULL_REPLAN.value,
+            ReplanType.ACTION_REGENERATION.value,
+        ):
+            # 完全再計画またはアクション再生成
+            self._execute_full_replan(decision)
+            return True
+
+        if replan_type == ReplanType.TASK_REDECOMPOSITION.value:
+            # タスク再分解: 計画フェーズから再実行
+            self._execute_task_redecomposition(decision)
+            return True
+
+        if replan_type == ReplanType.GOAL_REVISION.value:
+            # 目標再確認: 最初から再実行
+            self._execute_goal_revision(decision)
+            return True
+
+        return False
+
+    def _post_replan_notification(self, decision: ReplanDecision) -> None:
+        """再計画判断の通知をIssue/MRに投稿する.
+
+        Args:
+            decision: LLMの再計画判断
+
+        """
+        # ユーザー確認が必要な場合
+        if decision.clarification_needed and decision.clarification_questions:
+            questions_str = "\n".join(
+                f"{i}. {q}" for i, q in enumerate(decision.clarification_questions, 1)
+            )
+            assumptions_str = ""
+            if decision.assumptions_to_make:
+                assumptions_str = (
+                    "\n\n**If no response**:\n"
+                    "I will proceed with the following assumptions:\n"
+                    + "\n".join(f"- {a}" for a in decision.assumptions_to_make)
+                )
+
+            comment = f"""## ❓ Clarification Needed (AI Decision)
+
+I've analyzed the task and need some clarification to proceed effectively:
+
+**Questions**:
+{questions_str}
+
+**Context**:
+{decision.reasoning}{assumptions_str}
+
+Please reply to this comment with your answers."""
+            if hasattr(self.task, "comment"):
+                self.task.comment(comment)
+            return
+
+        # 通常の再計画通知
+        issues_str = ""
+        if decision.issues_found:
+            issues_str = "\n**Issues Found**:\n" + "\n".join(
+                f"- {issue}" for issue in decision.issues_found
+            )
+
+        actions_str = ""
+        if decision.recommended_actions:
+            actions_str = "\n\n**Recommended Actions**:\n" + "\n".join(
+                f"- {action}" for action in decision.recommended_actions
+            )
+
+        comment = f"""## 🔄 Plan Revision Decided by AI
+
+**Phase**: {self.current_phase}
+**Confidence**: {decision.confidence * 100:.0f}%
+**Replan Type**: {decision.replan_type}
+**Target Phase**: {decision.target_phase}
+
+**Reasoning**:
+{decision.reasoning}{issues_str}{actions_str}
+
+*{datetime.now().strftime(DATETIME_FORMAT)}*"""
+
+        if hasattr(self.task, "comment"):
+            self.task.comment(comment)
+
+    def _execute_partial_replan(self, decision: ReplanDecision) -> None:
+        """部分再計画を実行する.
+
+        Args:
+            decision: LLMの再計画判断
+
+        """
+        self.logger.info("部分再計画を実行します")
+
+        # 完了済みアクションを保持しつつ、残りのアクションを再生成
+        if self.current_plan:
+            completed_actions = self.current_plan.get("action_plan", {}).get(
+                "actions", []
+            )[: self.action_counter]
+
+            # LLMに残りのアクションの再生成を依頼
+            remaining_prompt = self._build_partial_replan_prompt(
+                completed_actions, decision
+            )
+            self.llm_client.send_user_message(remaining_prompt)
+            response, _, tokens = self.llm_client.get_response()
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
+
+            # 新しいアクションをパース
+            new_plan = self._parse_planning_response(response)
+            if new_plan and new_plan.get("action_plan", {}).get("actions"):
+                # 完了済みアクションと新しいアクションをマージ
+                new_actions = new_plan["action_plan"]["actions"]
+                self.current_plan["action_plan"]["actions"] = (
+                    completed_actions + new_actions
+                )
+                self.plan_revision_number += 1
+
+                # チェックリストを更新
+                self._update_checklist_on_replan(decision)
+
+    def _execute_full_replan(self, decision: ReplanDecision) -> None:
+        """完全再計画を実行する.
+
+        Args:
+            decision: LLMの再計画判断
+
+        """
+        self.logger.info("完全再計画を実行します")
+
+        # 完了済みアクションを保持
+        completed_count = self.action_counter
+        completed_actions = []
+        if self.current_plan:
+            completed_actions = self.current_plan.get("action_plan", {}).get(
+                "actions", []
+            )[:completed_count]
+
+        # 新しい計画を生成
+        new_plan = self._execute_planning_phase()
+        if new_plan:
+            self.current_plan = new_plan
+            self.history_store.save_plan(new_plan)
+            self.plan_revision_number += 1
+
+            # チェックリストを更新
+            self._update_checklist_on_replan(decision, completed_actions)
+
+    def _execute_task_redecomposition(self, decision: ReplanDecision) -> None:
+        """タスク再分解を実行する.
+
+        Args:
+            decision: LLMの再計画判断
+
+        """
+        self.logger.info("タスク再分解を実行します")
+
+        # アクションカウンターをリセット
+        self.action_counter = 0
+        self.error_count = 0
+        self.consecutive_errors = 0
+        self.plan_revision_number += 1
+
+        # 新しい計画を生成
+        new_plan = self._execute_planning_phase()
+        if new_plan:
+            self.current_plan = new_plan
+            self.history_store.save_plan(new_plan)
+
+            # チェックリストを更新
+            self._update_checklist_on_replan(decision)
+
+    def _execute_goal_revision(self, decision: ReplanDecision) -> None:
+        """目標再確認を実行する.
+
+        Args:
+            decision: LLMの再計画判断
+
+        """
+        self.logger.info("目標再確認を実行します")
+
+        # すべてをリセット
+        self.action_counter = 0
+        self.revision_counter = 0
+        self.error_count = 0
+        self.consecutive_errors = 0
+        self.plan_revision_number += 1
+        self.replan_manager.reset_counts()
+
+        # 新しい計画を生成
+        new_plan = self._execute_planning_phase()
+        if new_plan:
+            self.current_plan = new_plan
+            self.history_store.save_plan(new_plan)
+
+            # チェックリストを更新
+            self._update_checklist_on_replan(decision)
+
+    def _build_partial_replan_prompt(
+        self,
+        completed_actions: list[dict[str, Any]],
+        decision: ReplanDecision,
+    ) -> str:
+        """部分再計画用のプロンプトを生成する.
+
+        Args:
+            completed_actions: 完了済みアクション
+            decision: LLMの再計画判断
+
+        Returns:
+            プロンプト文字列
+
+        """
+        completed_str = json.dumps(completed_actions, indent=2, ensure_ascii=False)
+        issues_str = "\n".join(f"- {issue}" for issue in decision.issues_found)
+
+        return f"""The following actions have been completed:
+{completed_str}
+
+However, we encountered issues and need to replan the remaining actions:
+
+**Issues Found**:
+{issues_str}
+
+**Reason for Replanning**:
+{decision.reasoning}
+
+Please generate new actions to complete the remaining work.
+Maintain the same JSON format as before for action_plan.actions."""
+
+    def _update_checklist_on_replan(
+        self,
+        decision: ReplanDecision,
+        completed_actions: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """再計画時にチェックリストを更新する.
+
+        Args:
+            decision: LLMの再計画判断
+            completed_actions: 完了済みアクション(オプション)
+
+        """
+        if not self.current_plan:
+            return
+
+        action_plan = self.current_plan.get("action_plan", {})
+        actions = action_plan.get("actions", [])
+
+        if not actions:
+            return
+
+        # チェックリストを構築
+        checklist_lines = [
+            f"## 📋 Execution Plan (Revised #{self.plan_revision_number})",
+            "",
+            f"**Revision Reason**: {decision.reasoning[:100]}...",
+            "",
+            f"**Previous Progress**: {self.action_counter}/{len(actions)} completed",
+            "",
+            "### New Plan:",
+        ]
+
+        for i, action in enumerate(actions):
+            task_id = action.get("task_id", f"task_{i + 1}")
+            purpose = action.get("purpose", "Execute action")
+
+            # 完了済みかどうかを判定
+            checkbox = "[x]" if i < self.action_counter else "[ ]"
+            checklist_lines.append(f"- {checkbox} **{task_id}**: {purpose}")
+
+        checklist_lines.append("")
+        progress_pct = (
+            int(self.action_counter / len(actions) * 100) if actions else 0
+        )
+        checklist_lines.append(
+            f"*Progress: {self.action_counter}/{len(actions)} ({progress_pct}%) complete "
+            f"| Revision: #{self.plan_revision_number} "
+            f"at {datetime.now().strftime(DATETIME_FORMAT)}*"
+        )
+
+        checklist_content = "\n".join(checklist_lines)
+
+        # 既存のコメントを更新または新規投稿
+        if self.checklist_comment_id and hasattr(self.task, "update_comment"):
+            self.task.update_comment(self.checklist_comment_id, checklist_content)
+            self.logger.info(
+                "再計画時にチェックリストを更新しました (comment_id=%s)",
+                self.checklist_comment_id,
+            )
+        elif hasattr(self.task, "comment"):
+            result = self.task.comment(checklist_content)
+            if isinstance(result, dict):
+                self.checklist_comment_id = result.get("id")
+            self.logger.info("再計画時に新しいチェックリストを投稿しました")
 
     def _is_complete(self) -> bool:
         """Check if task is complete.
@@ -987,11 +1426,11 @@ class PlanningCoordinator:
             if details:
                 comment_lines.append(details)
                 comment_lines.append("")
-            
+
             # Add timestamp
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            timestamp = datetime.now().strftime(DATETIME_FORMAT)
             comment_lines.append(f"*{timestamp}*")
-            
+
             comment_content = "\n".join(comment_lines)
             
             # Post comment to Issue/MR using Task.comment method
