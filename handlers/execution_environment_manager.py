@@ -118,6 +118,18 @@ class ExecutionEnvironmentManager:
 
         # アクティブコンテナの追跡
         self._active_containers: dict[str, ContainerInfo] = {}
+        
+        # 現在のタスク参照（コマンド実行時に使用）
+        self._current_task: Task | None = None
+
+    def set_current_task(self, task: Task) -> None:
+        """現在のタスクを設定する.
+        
+        Args:
+            task: 現在処理中のタスク
+
+        """
+        self._current_task = task
 
     def is_enabled(self) -> bool:
         """Command Executor機能が有効かどうかを確認する.
@@ -214,15 +226,40 @@ class ExecutionEnvironmentManager:
 
             # 認証トークンの取得
             token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN", "")
-            gitlab_url = os.environ.get("GITLAB_API_URL", "https://gitlab.com")
+            gitlab_url = os.environ.get("GITLAB_API_URL", "https://gitlab.com/api/v4")
 
-            # APIURLからホスト名を抽出
-            host = gitlab_url.replace("https://", "").replace("http://", "").split("/")[0]
+            # APIURLからベースURLを抽出（/api/v4を除去）
+            base_url = gitlab_url.replace("/api/v4", "").replace("/api/v3", "")
+            
+            # プロトコル（http/https）を保持
+            if base_url.startswith("https://"):
+                protocol = "https://"
+                host = base_url.replace("https://", "")
+            elif base_url.startswith("http://"):
+                protocol = "http://"
+                host = base_url.replace("http://", "")
+            else:
+                protocol = "https://"
+                host = base_url
+
+            # GitLabクライアントからプロジェクト情報を取得してパスを使用
+            try:
+                if hasattr(task, "gitlab_client"):
+                    project = task.gitlab_client.get_project(project_id)
+                    project_path = project.get("path_with_namespace", str(project_id))
+                else:
+                    # gitlab_clientがない場合はproject_idをそのまま使用
+                    project_path = str(project_id)
+            except Exception as e:
+                self.logger.warning(
+                    "プロジェクトパスの取得に失敗、project_idを使用: %s", e,
+                )
+                project_path = str(project_id)
 
             if token:
-                clone_url = f"https://oauth2:{token}@{host}/{project_id}.git"
+                clone_url = f"{protocol}oauth2:{token}@{host}/{project_path}.git"
             else:
-                clone_url = f"https://{host}/{project_id}.git"
+                clone_url = f"{protocol}{host}/{project_path}.git"
 
             # MRの場合はソースブランチを取得
             branch = getattr(task, "source_branch", None)
@@ -269,6 +306,14 @@ class ExecutionEnvironmentManager:
             task_uuid=task_uuid,
             status="created",
         )
+
+        # gitをインストール
+        try:
+            self._install_git(container_id)
+        except RuntimeError:
+            # コンテナを削除してエラーを再送出
+            self._remove_container(task_uuid)
+            raise
 
         # プロジェクトをクローン
         try:
@@ -344,6 +389,39 @@ class ExecutionEnvironmentManager:
 
         return container_id
 
+    def _install_git(self, container_id: str) -> None:
+        """コンテナ内にgitをインストールする.
+
+        Args:
+            container_id: コンテナID
+
+        Raises:
+            RuntimeError: インストールに失敗した場合
+
+        """
+        self.logger.info("コンテナにgitをインストールします")
+
+        # apt-getでgitをインストール
+        install_cmd = [
+            "exec",
+            container_id,
+            "sh",
+            "-c",
+            "apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*",
+        ]
+
+        try:
+            self._run_docker_command(install_cmd, timeout=300)
+            self.logger.info("gitのインストールが完了しました")
+        except subprocess.CalledProcessError as e:
+            error_msg = f"gitのインストールに失敗しました: {e.stderr}"
+            self.logger.exception(error_msg)
+            raise RuntimeError(error_msg) from e
+        except subprocess.TimeoutExpired as e:
+            error_msg = "gitのインストールがタイムアウトしました"
+            self.logger.exception(error_msg)
+            raise RuntimeError(error_msg) from e
+
     def _clone_project(self, container_id: str, task: Task) -> None:
         """コンテナ内にプロジェクトをクローンする.
 
@@ -362,7 +440,11 @@ class ExecutionEnvironmentManager:
         self.logger.info("プロジェクトをクローンします: %s", safe_url)
 
         # クローンコマンドを構築
-        clone_cmd = ["git", "clone"]
+        clone_cmd = [
+            "git",
+            "-c", "http.sslVerify=false",  # SSL検証を無効化（セルフホストGitLab用）
+            "clone",
+        ]
 
         if self._shallow_clone:
             clone_cmd.extend(["--depth", str(self._clone_depth)])
@@ -701,3 +783,133 @@ class ExecutionEnvironmentManager:
             lines.append(f"{category_name}: {', '.join(cmd_list)}")
 
         return "\n".join(lines)
+
+    def execute_command(self, command: str, working_directory: str | None = None) -> dict[str, Any]:
+        """実行環境コンテナ内でコマンドを実行する.
+        
+        Args:
+            command: 実行するコマンド
+            working_directory: 作業ディレクトリ（Noneの場合はデフォルト）
+            
+        Returns:
+            実行結果の辞書 {"exit_code": int, "stdout": str, "stderr": str, "duration_ms": int}
+            
+        Raises:
+            RuntimeError: 実行環境が準備されていない場合
+
+        """
+        if self._current_task is None:
+            raise RuntimeError("Current task not set. Call set_current_task() first.")
+        
+        task_uuid = self._current_task.uuid
+        container_info = self._active_containers.get(task_uuid)
+        
+        if container_info is None or container_info.status != "ready":
+            raise RuntimeError(f"Execution environment not ready for task {task_uuid}")
+        
+        container_id = container_info.container_id
+        work_dir = working_directory or container_info.workspace_path
+        
+        self.logger.info("コマンドを実行します: %s (作業ディレクトリ: %s)", command, work_dir)
+        
+        # コマンド実行
+        exec_args = [
+            "exec",
+            "-w", work_dir,
+            container_id,
+            "sh", "-c", command,
+        ]
+        
+        start_time = time.time()
+        
+        try:
+            result = self._run_docker_command(
+                exec_args,
+                timeout=self._timeout_seconds,
+                check=False,
+            )
+            duration_ms = int((time.time() - start_time) * 1000)
+            
+            # 出力サイズを制限
+            stdout = result.stdout
+            stderr = result.stderr
+            
+            if len(stdout) > self._max_output_size:
+                stdout = stdout[:self._max_output_size] + "\n...(truncated)"
+            if len(stderr) > self._max_output_size:
+                stderr = stderr[:self._max_output_size] + "\n...(truncated)"
+            
+            return {
+                "exit_code": result.returncode,
+                "stdout": stdout,
+                "stderr": stderr,
+                "duration_ms": duration_ms,
+            }
+            
+        except subprocess.TimeoutExpired:
+            duration_ms = int((time.time() - start_time) * 1000)
+            return {
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": f"Command timeout after {self._timeout_seconds} seconds",
+                "duration_ms": duration_ms,
+            }
+        except Exception as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+            return {
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": f"Command execution error: {str(e)}",
+                "duration_ms": duration_ms,
+            }
+
+    def get_function_calling_functions(self) -> list[dict[str, Any]]:
+        """Function calling用の関数定義を取得する.
+        
+        Returns:
+            関数定義のリスト
+
+        """
+        if not self.is_enabled():
+            return []
+        
+        return [
+            {
+                "name": "command-executor_execute_command",
+                "description": "Execute a command in an isolated Docker execution environment with project source code. The project is already cloned and dependencies are installed.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The command to execute (e.g., 'pytest tests/', 'npm test', 'grep -rn \"function_name\" src/')",
+                        },
+                        "working_directory": {
+                            "type": "string",
+                            "description": "Working directory path (optional, defaults to project root /workspace/project)",
+                        },
+                    },
+                    "required": ["command"],
+                },
+            }
+        ]
+
+    def get_function_calling_tools(self) -> list[dict[str, Any]]:
+        """Function calling用のツール定義を取得する（OpenAI形式）.
+        
+        Returns:
+            ツール定義のリスト
+
+        """
+        if not self.is_enabled():
+            return []
+        
+        functions = self.get_function_calling_functions()
+        return [
+            {
+                "type": "function",
+                "function": func,
+            }
+            for func in functions
+        ]
+

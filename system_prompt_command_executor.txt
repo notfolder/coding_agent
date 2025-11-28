@@ -2,6 +2,8 @@
 
 You can execute commands in an isolated Docker execution environment with project source code through the `command-executor` MCP server.
 
+**Important:** Use the tool name `command-executor_execute_command` when calling the command execution tool.
+
 **Execution Environment Information:**
 - Working directory: `/workspace/project/` (where project files are cloned)
 - Dependencies: Automatically installed

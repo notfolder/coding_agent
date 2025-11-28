@@ -376,11 +376,32 @@ class TaskHandler:
             is_resumed=is_resumed,
         )
         
+        # Initialize execution environment if enabled
+        execution_manager = self._init_execution_environment(task, task_config)
+        
         try:
             # Get planning configuration
             planning_config = task_config.get("planning", {})
             # Add main config for LLM client initialization
             planning_config["main_config"] = self.config
+            
+            # Add execution environment tools to LLM client if available
+            if execution_manager is not None:
+                # Set current task for execution manager
+                execution_manager.set_current_task(task)
+                
+                # Get function calling definitions
+                exec_functions = execution_manager.get_function_calling_functions()
+                exec_tools = execution_manager.get_function_calling_tools()
+                
+                # Add to LLM client if it has these attributes
+                if hasattr(self.llm_client, 'functions') and self.llm_client.functions is not None:
+                    self.llm_client.functions.extend(exec_functions)
+                if hasattr(self.llm_client, 'tools') and self.llm_client.tools is not None:
+                    self.llm_client.tools.extend(exec_tools)
+                
+                self.logger.info("実行環境のツールをLLMクライアントに追加しました: %d functions, %d tools", 
+                               len(exec_functions), len(exec_tools))
             
             # Create planning coordinator with context_manager
             coordinator = PlanningCoordinator(
@@ -410,6 +431,9 @@ class TaskHandler:
             # Pass comment detection manager to coordinator
             coordinator.comment_detection_manager = comment_detection_manager
             
+            # Pass execution environment manager to coordinator
+            coordinator.execution_manager = execution_manager
+            
             # Execute with planning
             success = coordinator.execute_with_planning()
             
@@ -425,6 +449,9 @@ class TaskHandler:
             context_manager.fail(str(e))
             self.logger.exception("Planning-based task processing failed")
             raise
+        finally:
+            # Cleanup execution environment
+            self._cleanup_execution_environment(execution_manager, task)
 
     def _handle_legacy(self, task: Task, task_config: dict[str, Any]) -> None:
         """Handle task using legacy in-memory approach.

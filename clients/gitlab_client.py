@@ -80,6 +80,20 @@ class GitlabClient:
         resp.raise_for_status()
         return resp.json()
 
+    def get_project(self, project_id: int | str) -> dict[str, Any]:
+        """Get project information.
+        
+        Args:
+            project_id: Project ID
+            
+        Returns:
+            Project information including path_with_namespace
+        """
+        url = f"{self.api_url}/projects/{project_id}"
+        resp = requests.get(url, headers=self.headers, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+
     def list_merge_requests(
         self,
         project_id: int | str,

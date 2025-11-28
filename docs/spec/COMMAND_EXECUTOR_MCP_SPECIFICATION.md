@@ -160,6 +160,7 @@ coding-agent-exec-{task_uuid}
 **デフォルト設定:**
 - 外部ネットワークへのアクセスを許可（パッケージインストール等のため）
 - ホストネットワークへのアクセスは制限
+- Docker in Docker: `/var/run/docker.sock`をマウントし、docker.ioパッケージをインストール
 
 **セキュリティ設定:**
 - 特定ドメインへのアクセスのみ許可するホワイトリスト方式をオプションで提供
@@ -212,7 +213,10 @@ sequenceDiagram
 
 **GitLab:**
 - 環境変数`GITLAB_PERSONAL_ACCESS_TOKEN`を使用
-- git cloneのURL形式で認証情報を付与
+- GITLAB_API_URLから自動的にプロトコル（http/https）を抽出
+- `get_project()` APIでpath_with_namespace取得
+- Clone URL: `{protocol}oauth2:{token}@{host}/{path_with_namespace}.git`
+- セルフホストGitLab対応: `git -c http.sslVerify=false clone`でSSL検証を無効化
 
 **セキュリティ考慮:**
 - 認証情報はコンテナ内に永続化しない
@@ -303,13 +307,20 @@ flowchart TD
 
 ## 6. コマンド実行仕様
 
-### 6.1 Command Executor MCP Serverとの連携
+### 6.1 ExecutionEnvironmentManagerによるコマンド実行
 
-コーディングエージェントはMCPプロトコルを通じてCommand Executor MCP Serverにコマンド実行を依頼します。
+コーディングエージェントは外部MCPサーバーを使用せず、ExecutionEnvironmentManagerクラスが直接Dockerコンテナ内でコマンドを実行します。
+
+**実装アプローチ:**
+- ExecutionEnvironmentManagerがfunction calling形式のツール定義を提供
+- PlanningCoordinatorが`command-executor_execute_command`ツール呼び出しを検出
+- ExecutionEnvironmentManagerの`execute_command()`メソッドを直接呼び出し
+- 外部プロセスとの通信オーバーヘッドを削減
 
 **MCPツール呼び出し形式:**
-- ツール名: `command-executor/execute_command`
-- コンテナ指定: ExecutionEnvironmentManagerから取得したコンテナIDを使用
+- ツール名: `command-executor_execute_command`（アンダースコア区切り）
+- 実装方式: ExecutionEnvironmentManagerが直接コマンドを実行（外部MCPサーバー不使用）
+- コンテナ管理: ExecutionEnvironmentManagerが内部で管理
 
 ### 6.2 コマンド実行フロー
 
@@ -521,6 +532,8 @@ LLMがCommand Executor MCP Serverの機能を適切に活用できるよう、�
 ## Command Execution Feature
 
 You can execute commands in an isolated Docker execution environment with project source code through the `command-executor` MCP server.
+
+**Important:** Use the tool name `command-executor_execute_command` when calling the command execution tool.
 
 **Execution Environment Information:**
 - Working directory: `/workspace/project/` (where project files are cloned)
@@ -913,10 +926,13 @@ classDiagram
 タスク毎の実行環境を管理するクラスです。
 
 **メソッド:**
-- `prepare(task)`: タスク用のコンテナを作成し、プロジェクトをクローン
-- `execute(container_id, command)`: 指定コンテナでコマンドを実行
+- `prepare(task)`: タスク用のコンテナを作成し、プロジェクトをクローン（git自動インストール含む）
+- `execute_command(command, working_directory)`: 現在のタスクのコンテナでコマンドを実行
+- `set_current_task(task)`: 実行対象のタスクを設定
 - `cleanup(task_uuid)`: タスク終了時にコンテナを削除
 - `cleanup_stale_containers()`: 残存コンテナの定期クリーンアップ
+- `get_function_calling_functions()`: function calling用の関数定義を返す
+- `get_function_calling_tools()`: OpenAI形式のツール定義を返す
 
 #### ContainerInfo
 
@@ -950,28 +966,33 @@ sequenceDiagram
     participant TG as TaskGetter
     participant TH as TaskHandler
     participant EM as ExecutionEnvironmentManager
+    participant PC as PlanningCoordinator
     participant LLM as LLMClient
     participant MCP as MCPToolClient
-    participant CE as CommandExecutor
     
     TG->>TH: タスク取得
     TH->>EM: prepare(task)
     EM-->>TH: ContainerInfo
-    TH->>LLM: システムプロンプト送信
+    TH->>EM: set_current_task(task)
+    TH->>PC: PlanningCoordinator作成
+    TH->>PC: execution_manager設定
+    TH->>LLM: 実行環境ツール追加
+    PC->>LLM: システムプロンプト送信
     
     loop タスク処理ループ
-        TH->>LLM: メッセージ送信
-        LLM-->>TH: 応答
+        PC->>LLM: メッセージ送信
+        LLM-->>PC: 応答（function calls）
         
         alt コマンド実行要求
-            TH->>MCP: call_tool(command-executor/execute)
-            MCP->>CE: execute_command
-            CE-->>MCP: ExecutionResult
-            MCP-->>TH: ツール結果
+            PC->>EM: execute_command(command)
+            EM-->>PC: ExecutionResult
+            PC->>LLM: 結果送信
         else GitHub/GitLab操作
-            TH->>MCP: call_tool(github/...)
-            MCP-->>TH: ツール結果
+            PC->>MCP: call_tool(github/...)
+            MCP-->>PC: ツール結果
+            PC->>LLM: 結果送信
         else 完了
+            PC-->>TH: 成功
             TH->>EM: cleanup(task_uuid)
             EM-->>TH: クリーンアップ完了
         end

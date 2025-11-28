@@ -24,9 +24,9 @@ FROM condaforge/miniforge3
 ENV PYTHONUNBUFFERED=1
 RUN mkdir -p /logs
 
-# Node.js, npm, gitインストール（conda環境切り替え前に実行）
+# Node.js, npm, git, Dockerクライアントをインストール（conda環境切り替え前に実行）
 RUN apt-get update --allow-insecure-repositories && \
-    apt-get install -y --allow-unauthenticated nodejs npm git && \
+    apt-get install -y --allow-unauthenticated nodejs npm git docker.io && \
     rm -rf /var/lib/apt/lists/*
 
 # Python依存パッケージのインストール

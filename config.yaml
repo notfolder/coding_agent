@@ -289,7 +289,7 @@ continuous:
 command_executor:
   # 機能の有効/無効（デフォルト: false）
   # 環境変数 COMMAND_EXECUTOR_ENABLED で上書き可能
-  enabled: false
+  enabled: true
   
   # MCP Server設定
   mcp_server:
@@ -303,7 +303,7 @@ command_executor:
   # Docker実行環境設定
   docker:
     # ベースイメージ（環境変数 EXECUTOR_BASE_IMAGE で上書き可能）
-    base_image: "coding-agent-executor:latest"
+    base_image: "ubuntu:25.04"
     
     # リソース制限
     resources:
