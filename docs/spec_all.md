@@ -281,7 +281,34 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 
 ---
 
-## 12. 外部API仕様
+## 12. Command Executor MCP Server連携
+
+### 12.1 概要
+
+コーディングエージェントからCommand Executor MCP Serverを使用してコマンド実行を行う機能です。ビルド、テスト、リンター等のコマンドを安全なDocker環境で実行します。
+
+### 12.2 主要機能
+
+- **Docker実行環境**: タスク毎に独立したDockerコンテナを作成
+- **プロジェクトクローン**: Git経由でプロジェクトファイルを自動ダウンロード
+- **コマンド実行**: MCPプロトコル経由でコマンドを実行
+- **自動クリーンアップ**: タスク終了時にコンテナを自動削除
+
+### 12.3 処理フロー
+
+1. タスク開始時にDockerコンテナを作成
+2. プロジェクトリポジトリをクローン
+3. 必要に応じて依存関係をインストール
+4. MCPプロトコル経由でコマンドを実行
+5. タスク終了時にコンテナを削除
+
+### 12.4 詳細仕様
+
+→ 詳細は [COMMAND_EXECUTOR_MCP_SPECIFICATION.md](spec/COMMAND_EXECUTOR_MCP_SPECIFICATION.md) を参照
+
+---
+
+## 13. 外部API仕様
 
 本プロジェクトで使用する外部APIの仕様については、以下を参照してください。
 
@@ -294,7 +321,7 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 
 ---
 
-## 13. 仕様書一覧
+## 14. 仕様書一覧
 
 | ファイル名 | 内容 |
 |-----------|------|
@@ -311,6 +338,7 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 | [PROJECT_FILE_LIST_CONTEXT_SPECIFICATION.md](spec/PROJECT_FILE_LIST_CONTEXT_SPECIFICATION.md) | プロジェクトファイル一覧コンテキスト仕様 |
 | [USER_CONFIG_WEB_SPECIFICATION.md](spec/USER_CONFIG_WEB_SPECIFICATION.md) | ユーザー設定Web仕様 |
 | [user_management_api_spec.md](spec/user_management_api_spec.md) | ユーザー管理API仕様 |
+| [COMMAND_EXECUTOR_MCP_SPECIFICATION.md](spec/COMMAND_EXECUTOR_MCP_SPECIFICATION.md) | Command Executor MCP Server連携仕様 |
 
 ---
 
