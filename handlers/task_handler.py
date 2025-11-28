@@ -99,23 +99,101 @@ class TaskHandler:
         # タスク固有の設定を取得
         task_config = self._get_task_config(task)
         
-        # Check if planning is enabled
-        planning_config = task_config.get("planning", {})
-        planning_enabled = planning_config.get("enabled", True)
+        # 実行環境の初期化
+        execution_manager = self._init_execution_environment(task, task_config)
         
-        if planning_enabled and task.uuid:
-            # Use planning-based task handling
-            self._handle_with_planning(task, task_config)
-        else:
-            # Check if context storage is enabled
-            context_storage_enabled = task_config.get("context_storage", {}).get("enabled", False)
+        try:
+            # Check if planning is enabled
+            planning_config = task_config.get("planning", {})
+            planning_enabled = planning_config.get("enabled", True)
             
-            if context_storage_enabled and task.uuid:
-                # Use file-based context storage
-                self._handle_with_context_storage(task, task_config)
+            if planning_enabled and task.uuid:
+                # Use planning-based task handling
+                self._handle_with_planning(task, task_config)
             else:
-                # Use legacy in-memory handling
-                self._handle_legacy(task, task_config)
+                # Check if context storage is enabled
+                context_storage_enabled = task_config.get("context_storage", {}).get("enabled", False)
+                
+                if context_storage_enabled and task.uuid:
+                    # Use file-based context storage
+                    self._handle_with_context_storage(task, task_config)
+                else:
+                    # Use legacy in-memory handling
+                    self._handle_legacy(task, task_config)
+        finally:
+            # 実行環境のクリーンアップ
+            self._cleanup_execution_environment(execution_manager, task)
+
+    def _init_execution_environment(
+        self,
+        task: Task,
+        task_config: dict[str, Any],
+    ) -> Any | None:
+        """実行環境を初期化する.
+
+        Command Executor機能が有効な場合、タスク用のDocker実行環境を準備します。
+
+        Args:
+            task: タスクオブジェクト
+            task_config: タスク固有の設定
+
+        Returns:
+            ExecutionEnvironmentManagerインスタンス（無効な場合はNone）
+
+        """
+        from handlers.execution_environment_manager import ExecutionEnvironmentManager
+
+        try:
+            # ExecutionEnvironmentManagerを初期化
+            manager = ExecutionEnvironmentManager(task_config)
+            
+            # 機能が無効な場合はNoneを返す
+            if not manager.is_enabled():
+                return None
+            
+            # タスクにUUIDがない場合はスキップ
+            if not task.uuid:
+                self.logger.warning("タスクにUUIDがないため実行環境をスキップします")
+                return None
+            
+            # 実行環境を準備
+            self.logger.info("Command Executor実行環境を準備します: %s", task.uuid)
+            container_info = manager.prepare(task)
+            self.logger.info("実行環境の準備が完了しました: %s", container_info.container_id)
+            
+            return manager
+            
+        except Exception as e:
+            self.logger.warning("実行環境の初期化に失敗しました: %s", e)
+            # 実行環境の初期化失敗は警告として記録し、処理は続行
+            task.comment(f"⚠️ 実行環境の初期化に失敗しました: {e}")
+            return None
+
+    def _cleanup_execution_environment(
+        self,
+        execution_manager: Any | None,
+        task: Task,
+    ) -> None:
+        """実行環境をクリーンアップする.
+
+        タスク終了時にDocker実行環境を削除します。
+
+        Args:
+            execution_manager: ExecutionEnvironmentManagerインスタンス
+            task: タスクオブジェクト
+
+        """
+        if execution_manager is None:
+            return
+        
+        if not task.uuid:
+            return
+        
+        try:
+            self.logger.info("Command Executor実行環境をクリーンアップします: %s", task.uuid)
+            execution_manager.cleanup(task.uuid)
+        except Exception as e:
+            self.logger.warning("実行環境のクリーンアップに失敗しました: %s", e)
 
     def _handle_with_context_storage(self, task: Task, task_config: dict[str, Any]) -> None:
         """Handle task with file-based context storage.
