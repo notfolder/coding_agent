@@ -54,43 +54,86 @@ max_llm_process_num: 1000
 
 # プランニング機能の設定
 planning:
-  # プランニング機能の有効/無効（デフォルト: true）
+  # プランニング機能の有効/無効(デフォルト: true)
   enabled: true
-  
-  # プランニング戦略（デフォルト: chain_of_thought）
+
+  # プランニング戦略(デフォルト: chain_of_thought)
   # 注: 現在は "chain_of_thought" のみサポート。将来の拡張用オプション
   # 選択肢: "chain_of_thought", "hierarchical", "simple"
   strategy: "chain_of_thought"
-  
-  # 最大サブタスク数（デフォルト: 100）
+
+  # 最大サブタスク数(デフォルト: 100)
   max_subtasks: 100
-  
-  # タスク分解の詳細度（デフォルト: moderate）
+
+  # タスク分解の詳細度(デフォルト: moderate)
   # 注: 将来の拡張用オプション。現在は内部で使用されていません
   # 選択肢: "detailed", "moderate", "minimal"
   decomposition_level: "moderate"
-  
+
   # リフレクション設定
   reflection:
-    # リフレクション機能の有効/無効（デフォルト: true）
+    # リフレクション機能の有効/無効(デフォルト: true)
     enabled: true
-    
+
     # エラー発生時に自動的にリフレクション実行
     trigger_on_error: true
-    
+
     # N回のアクション毎に定期的にリフレクション実行
     # 0の場合は定期リフレクション無効
     trigger_interval: 3
-    
+
     # リフレクションの深さ
     # 注: 将来の拡張用オプション。現在は内部で使用されていません
     # 選択肢: "deep", "moderate", "shallow"
     depth: "moderate"
-  
+
   # 計画修正設定
   revision:
     # 最大計画修正回数
     max_revisions: 3
+
+  # 再計画(リプランニング)設定
+  replanning:
+    # 再計画機能の有効/無効(デフォルト: true)
+    enabled: true
+
+    # LLM判断の設定
+    llm_decision:
+      # 確信度の閾値(この値未満の場合は再計画をスキップ)
+      min_confidence_threshold: 0.5
+      # 低確信度時のユーザー確認を有効化
+      require_user_confirmation_on_low_confidence: true
+      # ユーザー確認を要求する確信度の閾値
+      user_confirmation_threshold: 0.3
+
+    # 目標の理解フェーズの再計画設定
+    goal_understanding:
+      max_clarification_requests: 2
+      auto_assume_on_no_response: true
+      auto_assume_timeout_minutes: 30
+
+    # タスクの分解フェーズの再計画設定
+    task_decomposition:
+      max_redecomposition_attempts: 3
+
+    # 行動系列の生成フェーズの再計画設定
+    action_sequence:
+      max_regeneration_attempts: 3
+
+    # 実行フェーズの再計画設定
+    execution:
+      max_action_retries: 3
+      max_partial_replans: 2
+
+    # 監視と修正(リフレクション)フェーズの再計画設定
+    reflection:
+      max_plan_revisions: 2
+
+    # 全体制限
+    global:
+      max_total_replans: 10
+      infinite_loop_detection: true
+      same_trigger_max_count: 2
 
 # コンテキストストレージ設定
 # 注: Planning履歴も統合され、contexts/{running|completed}/{task_uuid}/planning/ に保存されます
