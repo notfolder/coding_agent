@@ -325,19 +325,165 @@ sequenceDiagram
     TH->>LLM: 結果送信
 ```
 
-### 6.3 サポートするコマンドタイプ
+### 6.3 許可コマンドリスト
 
-**許可されるコマンド:**
-- ビルドコマンド（npm、make、gradle等）
-- テストコマンド（pytest、jest、go test等）
-- リンター・フォーマッター（eslint、black、prettier等）
-- バージョン管理コマンド（git status、git diff等）
-- ファイル操作（ls、cat、grep等）
+実行環境で許可されるコマンドを以下に明示します。セキュリティと実用性のバランスを考慮して選定しています。
 
-**制限されるコマンド:**
-- システム管理コマンド（sudo、su等）
-- ネットワーク操作コマンド（iptables等）
-- デーモン起動コマンド（systemctl等）
+#### 6.3.1 ビルド・パッケージ管理コマンド
+
+| コマンド | 説明 | 用途例 |
+|---------|------|-------|
+| npm | Node.jsパッケージマネージャー | `npm install`, `npm run build`, `npm test` |
+| yarn | Node.jsパッケージマネージャー | `yarn install`, `yarn build`, `yarn test` |
+| pnpm | Node.jsパッケージマネージャー | `pnpm install`, `pnpm build` |
+| pip | Pythonパッケージマネージャー | `pip install`, `pip list` |
+| pip3 | Python3パッケージマネージャー | `pip3 install -r requirements.txt` |
+| python | Pythonインタープリター | `python setup.py`, `python -m pytest` |
+| python3 | Python3インタープリター | `python3 -m venv`, `python3 script.py` |
+| go | Go言語ツールチェーン | `go build`, `go test`, `go mod download` |
+| cargo | Rustパッケージマネージャー | `cargo build`, `cargo test` |
+| maven / mvn | Javaビルドツール | `mvn install`, `mvn test` |
+| gradle | Javaビルドツール | `gradle build`, `gradle test` |
+| make | ビルド自動化ツール | `make`, `make install`, `make test` |
+| cmake | ビルドシステムジェネレーター | `cmake .`, `cmake --build .` |
+| bundle | Rubyパッケージマネージャー | `bundle install`, `bundle exec` |
+| gem | Rubyパッケージマネージャー | `gem install` |
+| composer | PHPパッケージマネージャー | `composer install`, `composer update` |
+| dotnet | .NETツールチェーン | `dotnet build`, `dotnet test` |
+
+#### 6.3.2 テスト実行コマンド
+
+| コマンド | 説明 | 用途例 |
+|---------|------|-------|
+| pytest | Pythonテストフレームワーク | `pytest`, `pytest -v`, `pytest tests/` |
+| jest | JavaScriptテストフレームワーク | `jest`, `jest --coverage` |
+| mocha | JavaScriptテストフレームワーク | `mocha`, `mocha tests/` |
+| rspec | Rubyテストフレームワーク | `rspec`, `rspec spec/` |
+| phpunit | PHPテストフレームワーク | `phpunit`, `phpunit tests/` |
+| go test | Goテストコマンド | `go test ./...`, `go test -v` |
+| cargo test | Rustテストコマンド | `cargo test`, `cargo test --all` |
+| dotnet test | .NETテストコマンド | `dotnet test` |
+
+#### 6.3.3 リンター・フォーマッターコマンド
+
+| コマンド | 説明 | 用途例 |
+|---------|------|-------|
+| eslint | JavaScriptリンター | `eslint .`, `eslint --fix .` |
+| prettier | コードフォーマッター | `prettier --check .`, `prettier --write .` |
+| black | Pythonフォーマッター | `black .`, `black --check .` |
+| flake8 | Pythonリンター | `flake8`, `flake8 src/` |
+| pylint | Pythonリンター | `pylint src/` |
+| mypy | Python型チェッカー | `mypy src/` |
+| rubocop | Rubyリンター | `rubocop`, `rubocop -a` |
+| gofmt | Goフォーマッター | `gofmt -w .` |
+| golint | Goリンター | `golint ./...` |
+| rustfmt | Rustフォーマッター | `rustfmt --check .` |
+| clippy | Rustリンター | `cargo clippy` |
+| tsc | TypeScriptコンパイラ | `tsc --noEmit`, `tsc` |
+
+#### 6.3.4 ファイル操作・検索コマンド
+
+| コマンド | 説明 | 用途例 |
+|---------|------|-------|
+| ls | ファイル一覧表示 | `ls -la`, `ls -R` |
+| cat | ファイル内容表示 | `cat file.txt` |
+| head | ファイル先頭表示 | `head -n 50 file.txt` |
+| tail | ファイル末尾表示 | `tail -n 50 file.txt` |
+| grep | テキスト検索 | `grep -r "pattern" .`, `grep -rn "function" src/` |
+| find | ファイル検索 | `find . -name "*.py"`, `find . -type f` |
+| wc | 行数・文字数カウント | `wc -l file.txt` |
+| diff | ファイル差分表示 | `diff file1.txt file2.txt` |
+| tree | ディレクトリ構造表示 | `tree`, `tree -L 2` |
+| file | ファイルタイプ判定 | `file filename` |
+| stat | ファイル情報表示 | `stat filename` |
+
+#### 6.3.5 バージョン管理コマンド
+
+| コマンド | 説明 | 用途例 |
+|---------|------|-------|
+| git status | リポジトリ状態確認 | `git status` |
+| git diff | 差分表示 | `git diff`, `git diff HEAD~1` |
+| git log | コミット履歴表示 | `git log --oneline -10` |
+| git branch | ブランチ一覧・操作 | `git branch`, `git branch -a` |
+| git show | コミット内容表示 | `git show HEAD` |
+| git blame | 行ごとの変更者表示 | `git blame file.txt` |
+
+#### 6.3.6 その他のユーティリティコマンド
+
+| コマンド | 説明 | 用途例 |
+|---------|------|-------|
+| echo | テキスト出力 | `echo "text"` |
+| pwd | カレントディレクトリ表示 | `pwd` |
+| cd | ディレクトリ移動 | `cd src/` |
+| mkdir | ディレクトリ作成 | `mkdir -p dir/subdir` |
+| rm | ファイル削除 | `rm file.txt`, `rm -rf dir/` |
+| cp | ファイルコピー | `cp src.txt dst.txt` |
+| mv | ファイル移動・リネーム | `mv old.txt new.txt` |
+| touch | ファイル作成・更新 | `touch newfile.txt` |
+| chmod | 権限変更 | `chmod +x script.sh` |
+| env | 環境変数表示 | `env` |
+| which | コマンドパス表示 | `which python` |
+| curl | HTTP通信（読み取り専用） | `curl -s https://api.example.com` |
+| wget | ファイルダウンロード | `wget https://example.com/file` |
+| tar | アーカイブ操作 | `tar -xzf archive.tar.gz` |
+| unzip | ZIP解凍 | `unzip archive.zip` |
+| jq | JSON処理 | `cat data.json \| jq '.key'` |
+| sed | テキスト置換 | `sed -i 's/old/new/g' file.txt` |
+| awk | テキスト処理 | `awk '{print $1}' file.txt` |
+| sort | ソート | `sort file.txt` |
+| uniq | 重複除去 | `uniq file.txt` |
+| xargs | 引数展開 | `find . -name "*.txt" \| xargs grep "pattern"` |
+
+#### 6.3.7 禁止コマンドリスト
+
+以下のコマンドはセキュリティ上の理由から実行を禁止します。
+
+| コマンド | 禁止理由 |
+|---------|---------|
+| sudo | 特権昇格の防止 |
+| su | ユーザー切り替えの防止 |
+| chmod 777 | 過剰な権限付与の防止 |
+| chown | 所有者変更の防止 |
+| mount / umount | ファイルシステム操作の防止 |
+| iptables / ip6tables | ネットワーク設定変更の防止 |
+| systemctl / service | サービス制御の防止 |
+| kill / killall | プロセス強制終了の防止（自身のプロセス以外） |
+| reboot / shutdown | システム制御の防止 |
+| dd | 低レベルディスク操作の防止 |
+| mkfs | ファイルシステム作成の防止 |
+| fdisk / parted | パーティション操作の防止 |
+| nc / netcat | 任意ネットワーク接続の防止 |
+| nmap | ネットワークスキャンの防止 |
+| ssh | リモート接続の防止 |
+| scp / rsync | リモートファイル転送の防止（外部への） |
+
+#### 6.3.8 コマンド許可リストの設定
+
+設定ファイルでコマンド許可リストをカスタマイズできます。
+
+```yaml
+command_executor:
+  # 許可コマンドの設定
+  allowed_commands:
+    # デフォルト許可リストを使用するか
+    use_default: true
+    
+    # 追加で許可するコマンド
+    additional:
+      - "custom-build-tool"
+      - "project-specific-script"
+    
+    # デフォルトから除外するコマンド
+    exclude:
+      - "curl"
+      - "wget"
+    
+    # 完全カスタムリスト（use_default: falseの場合に使用）
+    custom_list:
+      - "npm"
+      - "python"
+      - "grep"
+```
 
 ### 6.4 実行結果の取得
 
@@ -353,6 +499,102 @@ sequenceDiagram
 - stdout/stderrの最大サイズを制限
 - デフォルト: 各1MB
 - 超過した場合は末尾を切り詰め
+
+### 6.5 システムプロンプト拡張仕様
+
+LLMがCommand Executor MCP Serverの機能を適切に活用できるよう、システムプロンプトに以下の情報を追加します。
+
+#### 6.5.1 追加するプロンプト内容
+
+システムプロンプトに以下の文言を追加します：
+
+```
+## コマンド実行機能
+
+あなたは `command-executor` MCPサーバーを通じて、プロジェクトのソースコードがある独立したDocker実行環境でコマンドを実行できます。
+
+### 利用可能な主要機能
+
+**テスト実行:**
+- プロジェクトのテストスイートを実行して、コード変更が正しく動作するか確認できます
+- 例: `npm test`, `pytest`, `go test ./...`, `cargo test`
+
+**コード検索:**
+- `grep` コマンドを使用して、プロジェクト全体からコードパターンを再帰的に検索できます
+- 例: `grep -rn "function_name" src/` で関数の使用箇所を検索
+- 例: `grep -r "import.*module" --include="*.py"` でPythonのインポート文を検索
+
+**ビルド・コンパイル:**
+- プロジェクトのビルドコマンドを実行して、コンパイルエラーを確認できます
+- 例: `npm run build`, `make`, `go build`, `cargo build`
+
+**リンター・フォーマッター:**
+- コードの品質チェックやフォーマット確認ができます
+- 例: `eslint .`, `black --check .`, `flake8`
+
+**ファイル操作:**
+- `ls`, `cat`, `head`, `tail`, `find`, `tree` などでファイル構造やコード内容を確認できます
+- 例: `find . -name "*.ts" -type f` でTypeScriptファイルを検索
+- 例: `tree -L 2` でディレクトリ構造を表示
+
+### 使用上の注意
+
+- 実行環境にはプロジェクトのソースコードが `/workspace/project/` にクローンされています
+- 依存関係は自動的にインストールされています
+- コマンドの実行結果（stdout/stderr）を確認して、次のアクションを決定してください
+- 長時間かかるコマンドはタイムアウトする可能性があります
+
+### 推奨する活用方法
+
+1. **コード変更前**: `grep` でコードベースを検索し、変更箇所の影響範囲を把握
+2. **コード変更後**: テストを実行して変更の正当性を確認
+3. **プルリクエスト作成前**: リンターを実行してコード品質を確認
+```
+
+#### 6.5.2 プロンプト挿入位置
+
+システムプロンプトの以下の位置に挿入します：
+
+- MCPサーバー一覧（Available MCP Tools）セクションの直後
+- Behavior Rulesセクションの直前
+
+#### 6.5.3 動的プロンプト生成
+
+Command Executor機能が有効な場合のみ、上記プロンプトをシステムプロンプトに追加します。
+
+**条件:**
+- `command_executor.enabled` が `true` の場合に追加
+- `false` の場合はプロンプトに含めない
+
+**プロンプトテンプレートファイル:**
+- ファイル名: `system_prompt_command_executor.txt`
+- 配置場所: プロジェクトルート
+
+#### 6.5.4 プロンプトのカスタマイズ
+
+プロジェクト固有の情報をプロンプトに含めることができます。
+
+**テンプレート変数:**
+- `{project_type}`: 検出されたプロジェクトタイプ（nodejs, python, go等）
+- `{test_command}`: 推奨テストコマンド
+- `{build_command}`: 推奨ビルドコマンド
+- `{lint_command}`: 推奨リンターコマンド
+
+**カスタマイズ例:**
+
+```yaml
+command_executor:
+  prompt:
+    # カスタムプロンプトテンプレートの使用
+    custom_template: |
+      このプロジェクトでは以下のコマンドが利用可能です：
+      - テスト: {test_command}
+      - ビルド: {build_command}
+      - リント: {lint_command}
+    
+    # プロジェクトタイプの自動検出
+    auto_detect_project: true
+```
 
 ---
 
