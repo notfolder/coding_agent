@@ -1,104 +1,140 @@
-Chat Completions
+# LM Studio API 仕様
 
-Use llm.respond(...) to generate completions for a chat conversation.
+本ドキュメントは、LM Studio APIの概要と使用方法を日本語でまとめたものです。
 
-Quick Example: Generate a Chat Response
-The following snippet shows how to obtain the AI's response to a quick chat prompt.
+---
 
-Python (convenience API)Python (scoped resource API)
-import lmstudio as lms
-model = lms.llm()
-print(model.respond("What is the meaning of life?"))
+## 1. 概要
 
-Streaming a Chat Response
-The following snippet shows how to stream the AI's response to a chat prompt, displaying text fragments as they are received (rather than waiting for the entire response to be generated before displaying anything).
+### 1.1 LM Studioとは
 
-Python (convenience API)Python (scoped resource API)
-import lmstudio as lms
-model = lms.llm()
+LM Studioは、ローカル環境で大規模言語モデル（LLM）を実行するためのソフトウェアです。OpenAI互換のAPIサーバーを提供し、様々なオープンソースモデルをローカルで実行できます。
 
-for fragment in model.respond_stream("What is the meaning of life?"):
-    print(fragment.content, end="", flush=True)
-print() # Advance to a new line at the end of the response
+### 1.2 主な機能
 
-Obtain a Model
-First, you need to get a model handle. This can be done using the top-level llm convenience API, or the model method in the llm namespace when using the scoped resource API. For example, here is how to use Qwen2.5 7B Instruct.
+- **ローカルLLM実行**: GPUを使用してローカルでモデルを実行
+- **OpenAI互換API**: OpenAI APIと互換性のあるエンドポイントを提供
+- **モデル管理**: 様々なオープンソースモデルのダウンロードと管理
+- **ストリーミング応答**: リアルタイムでの応答取得
 
-Python (convenience API)Python (scoped resource API)
-import lmstudio as lms
-model = lms.llm("qwen2.5-7b-instruct")
+---
 
-There are other ways to get a model handle. See Managing Models in Memory for more info.
+## 2. チャット補完
 
-Manage Chat Context
-The input to the model is referred to as the "context". Conceptually, the model receives a multi-turn conversation as input, and it is asked to predict the assistant's response in that conversation.
+### 2.1 基本的な使い方
 
-import lmstudio as lms
+LM Studioのllm.respondメソッドを使用して、チャット会話に対する補完を生成します。
 
-# Create a chat with an initial system prompt.
-chat = lms.Chat("You are a resident AI philosopher.")
+### 2.2 応答の取得
 
-# Build the chat context by adding messages of relevant types.
-chat.add_user_message("What is the meaning of life?")
-# ... continued in next example
+モデルハンドルを取得し、respondメソッドにプロンプトを渡すことで、AIからの応答を得ることができます。
 
-See Working with Chats for more information on managing chat context.
+### 2.3 ストリーミング応答
 
-Generate a response
-You can ask the LLM to predict the next response in the chat context using the respond() method.
+respond_streamメソッドを使用すると、応答全体を待たずにテキストフラグメントを受信しながら表示できます。
 
-Non-streamingStreaming
-# The `chat` object is created in the previous step.
-result = model.respond(chat)
+---
 
-print(result)
+## 3. モデルの取得
 
-Customize Inferencing Parameters
-You can pass in inferencing parameters via the config keyword parameter on .respond().
+### 3.1 モデルハンドルの取得
 
-StreamingNon-streaming
-prediction_stream = model.respond_stream(chat, config={
-    "temperature": 0.6,
-    "maxTokens": 50,
-})
+トップレベルのllm便利APIまたはスコープリソースAPIのllmネームスペースのmodelメソッドを使用してモデルハンドルを取得します。
 
-See Configuring the Model for more information on what can be configured.
+### 3.2 モデルの指定
 
-Print prediction stats
-You can also print prediction metadata, such as the model used for generation, number of generated tokens, time to first token, and stop reason.
+特定のモデル（例：qwen2.5-7b-instruct）を使用する場合は、モデル名を引数として指定します。
 
-StreamingNon-streaming
-# After iterating through the prediction fragments,
-# the overall prediction result may be obtained from the stream
-result = prediction_stream.result()
+---
 
-print("Model used:", result.model_info.display_name)
-print("Predicted tokens:", result.stats.predicted_tokens_count)
-print("Time to first token (seconds):", result.stats.time_to_first_token_sec)
-print("Stop reason:", result.stats.stop_reason)
+## 4. チャットコンテキスト管理
 
-Example: Multi-turn Chat
-chatbot.py
-import lmstudio as lms
+### 4.1 コンテキストの概念
 
-model = lms.llm()
-chat = lms.Chat("You are a task focused AI assistant")
+モデルへの入力は「コンテキスト」と呼ばれます。概念的には、モデルはマルチターンの会話を入力として受け取り、その会話でのアシスタントの応答を予測するよう求められます。
 
-while True:
-    try:
-        user_input = input("You (leave blank to exit): ")
-    except EOFError:
-        print()
-        break
-    if not user_input:
-        break
-    chat.add_user_message(user_input)
-    prediction_stream = model.respond_stream(
-        chat,
-        on_message=chat.append,
-    )
-    print("Bot: ", end="", flush=True)
-    for fragment in prediction_stream:
-        print(fragment.content, end="", flush=True)
-    print()
+### 4.2 チャットの作成
 
+初期システムプロンプトを指定してChatオブジェクトを作成し、ユーザーメッセージやアシスタントメッセージを追加してコンテキストを構築します。
+
+---
+
+## 5. 応答の生成
+
+### 5.1 非ストリーミング応答
+
+respondメソッドを使用して、チャットコンテキストに対する次の応答を予測させます。
+
+### 5.2 ストリーミング応答
+
+respond_streamメソッドを使用すると、応答をリアルタイムで受信できます。
+
+---
+
+## 6. 推論パラメータのカスタマイズ
+
+### 6.1 設定可能なパラメータ
+
+respondメソッドのconfigキーワードパラメータを通じて推論パラメータを渡すことができます。
+
+### 6.2 主要なパラメータ
+
+- **temperature**: 出力のランダム性を制御（0.0〜1.0）
+- **maxTokens**: 生成する最大トークン数
+
+---
+
+## 7. 予測統計
+
+### 7.1 取得可能な統計情報
+
+予測結果から以下のメタデータを取得できます：
+
+- **model_info.display_name**: 生成に使用されたモデル
+- **stats.predicted_tokens_count**: 生成されたトークン数
+- **stats.time_to_first_token_sec**: 最初のトークンまでの時間（秒）
+- **stats.stop_reason**: 停止理由
+
+---
+
+## 8. マルチターンチャット
+
+### 8.1 概要
+
+対話的なチャットボットを実装するには、会話履歴を管理しながらユーザー入力を処理し、モデルの応答を取得します。
+
+### 8.2 実装の流れ
+
+1. モデルハンドルを取得
+2. システムプロンプトを設定したChatオブジェクトを作成
+3. ユーザー入力を受け取りチャットに追加
+4. respond_streamで応答を取得
+5. 応答をチャットに追加
+6. 繰り返し
+
+---
+
+## 9. 本プロジェクトでの使用
+
+### 9.1 使用方法
+
+本プロジェクトのLMStudioClientクラスでは、LM StudioのOpenAI互換APIを使用してLLMとの対話を行います。
+
+### 9.2 設定項目
+
+config.yamlのllm.lmstudioセクションで以下を設定します：
+
+- **base_url**: LM StudioサーバーのURL（デフォルト：localhost:1234）
+- **model**: 使用するモデル
+- **context_length**: コンテキスト長
+
+### 9.3 起動方法
+
+1. LM Studioアプリケーションを起動
+2. 使用するモデルをロード
+3. サーバーを開始（デフォルトポート：1234）
+4. config.yamlでllm.providerをlmstudioに設定
+
+---
+
+**参照元**: LM Studio公式ドキュメント（https://lmstudio.ai/docs）

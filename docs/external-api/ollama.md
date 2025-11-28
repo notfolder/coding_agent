@@ -1,191 +1,154 @@
-# Ollama Python Library
+# Ollama API 仕様
 
-The Ollama Python library provides the easiest way to integrate Python 3.8+ projects with [Ollama](https://github.com/ollama/ollama).
+本ドキュメントは、Ollama APIの概要と使用方法を日本語でまとめたものです。
 
-## Prerequisites
+---
 
-- [Ollama](https://ollama.com/download) should be installed and running
-- Pull a model to use with the library: `ollama pull <model>` e.g. `ollama pull llama3.2`
-  - See [Ollama.com](https://ollama.com/search) for more information on the models available.
+## 1. 概要
 
-## Install
+### 1.1 Ollamaとは
 
-```sh
-pip install ollama
-```
+Ollamaは、ローカル環境で大規模言語モデル（LLM）を簡単に実行するためのツールです。様々なオープンソースモデルをダウンロードして実行でき、REST APIを通じてアクセスできます。
 
-## Usage
+### 1.2 主な機能
 
-```python
-from ollama import chat
-from ollama import ChatResponse
+- **ローカルLLM実行**: コマンドラインから簡単にモデルを実行
+- **REST API**: HTTP経由でのモデルアクセス
+- **モデル管理**: モデルのpull、push、リスト表示、削除
+- **カスタムモデル**: Modelfileを使用したカスタムモデルの作成
 
-response: ChatResponse = chat(model='llama3.2', messages=[
-  {
-    'role': 'user',
-    'content': 'Why is the sky blue?',
-  },
-])
-print(response['message']['content'])
-# or access fields directly from the response object
-print(response.message.content)
-```
+---
 
-See [_types.py](ollama/_types.py) for more information on the response types.
+## 2. 前提条件
 
-## Streaming responses
+### 2.1 インストール
 
-Response streaming can be enabled by setting `stream=True`.
+Ollamaをインストールして実行している必要があります。公式サイト（https://ollama.com/download）からダウンロードできます。
 
-```python
-from ollama import chat
+### 2.2 モデルのダウンロード
 
-stream = chat(
-    model='llama3.2',
-    messages=[{'role': 'user', 'content': 'Why is the sky blue?'}],
-    stream=True,
-)
+使用するモデルを事前にダウンロードする必要があります。ollama pullコマンドを使用してモデルをダウンロードします。利用可能なモデルはOllama公式サイト（https://ollama.com/search）で確認できます。
 
-for chunk in stream:
-  print(chunk['message']['content'], end='', flush=True)
-```
+---
 
-## Custom client
-A custom client can be created by instantiating `Client` or `AsyncClient` from `ollama`.
+## 3. チャットAPI
 
-All extra keyword arguments are passed into the [`httpx.Client`](https://www.python-httpx.org/api/#client).
+### 3.1 基本的な使い方
 
-```python
-from ollama import Client
-client = Client(
-  host='http://localhost:11434',
-  headers={'x-some-header': 'some-value'}
-)
-response = client.chat(model='llama3.2', messages=[
-  {
-    'role': 'user',
-    'content': 'Why is the sky blue?',
-  },
-])
-```
+Ollamaのchat関数を使用して、チャット形式でモデルと対話します。
 
-## Async client
+### 3.2 リクエストの構成
 
-The `AsyncClient` class is used to make asynchronous requests. It can be configured with the same fields as the `Client` class.
+チャットリクエストには以下のパラメータを指定します：
 
-```python
-import asyncio
-from ollama import AsyncClient
+- **model**: 使用するモデル名（必須）
+- **messages**: メッセージのリスト（必須）
+  - 各メッセージにはroleとcontentを含める
 
-async def chat():
-  message = {'role': 'user', 'content': 'Why is the sky blue?'}
-  response = await AsyncClient().chat(model='llama3.2', messages=[message])
+### 3.3 レスポンスの取得
 
-asyncio.run(chat())
-```
+レスポンスオブジェクトから応答内容を取得できます。messageフィールドに応答メッセージが含まれます。
 
-Setting `stream=True` modifies functions to return a Python asynchronous generator:
+---
 
-```python
-import asyncio
-from ollama import AsyncClient
+## 4. ストリーミング応答
 
-async def chat():
-  message = {'role': 'user', 'content': 'Why is the sky blue?'}
-  async for part in await AsyncClient().chat(model='llama3.2', messages=[message], stream=True):
-    print(part['message']['content'], end='', flush=True)
+### 4.1 概要
 
-asyncio.run(chat())
-```
+streamパラメータをtrueに設定することで、レスポンスのストリーミングを有効にできます。
 
-## API
+### 4.2 使用方法
 
-The Ollama Python library's API is designed around the [Ollama REST API](https://github.com/ollama/ollama/blob/main/docs/api.md)
+ストリーミングを有効にすると、応答がチャンク単位で返されます。各チャンクを処理することで、リアルタイムに応答を表示できます。
 
-### Chat
+---
 
-```python
-ollama.chat(model='llama3.2', messages=[{'role': 'user', 'content': 'Why is the sky blue?'}])
-```
+## 5. カスタムクライアント
 
-### Generate
+### 5.1 クライアントの作成
 
-```python
-ollama.generate(model='llama3.2', prompt='Why is the sky blue?')
-```
+ClientまたはAsyncClientをインスタンス化してカスタムクライアントを作成できます。
 
-### List
+### 5.2 設定オプション
 
-```python
-ollama.list()
-```
+- **host**: Ollamaサーバーのホスト（デフォルト：http://localhost:11434）
+- **headers**: カスタムHTTPヘッダー
 
-### Show
+---
 
-```python
-ollama.show('llama3.2')
-```
+## 6. 非同期クライアント
 
-### Create
+### 6.1 概要
 
-```python
-ollama.create(model='example', from_='llama3.2', system="You are Mario from Super Mario Bros.")
-```
+AsyncClientクラスを使用して非同期リクエストを行うことができます。Clientクラスと同じフィールドで設定できます。
 
-### Copy
+### 6.2 ストリーミング
 
-```python
-ollama.copy('llama3.2', 'user/llama3.2')
-```
+非同期クライアントでストリーミングを有効にすると、Python非同期ジェネレータとして応答が返されます。
 
-### Delete
+---
 
-```python
-ollama.delete('llama3.2')
-```
+## 7. API機能一覧
 
-### Pull
+### 7.1 チャット・生成
 
-```python
-ollama.pull('llama3.2')
-```
+- **chat**: チャット形式でモデルと対話
+- **generate**: プロンプトからテキストを生成
 
-### Push
+### 7.2 モデル管理
 
-```python
-ollama.push('user/llama3.2')
-```
+- **list**: 利用可能なモデルを一覧表示
+- **show**: モデルの詳細情報を表示
+- **pull**: モデルをダウンロード
+- **push**: モデルをアップロード
+- **copy**: モデルをコピー
+- **delete**: モデルを削除
+- **create**: カスタムモデルを作成
 
-### Embed
+### 7.3 埋め込み
 
-```python
-ollama.embed(model='llama3.2', input='The sky is blue because of rayleigh scattering')
-```
+- **embed**: テキストの埋め込みベクトルを生成
+- 単一テキストまたはバッチ処理に対応
 
-### Embed (batch)
+### 7.4 システム
 
-```python
-ollama.embed(model='llama3.2', input=['The sky is blue because of rayleigh scattering', 'Grass is green because of chlorophyll'])
-```
+- **ps**: 実行中のモデルを表示
 
-### Ps
+---
 
-```python
-ollama.ps()
-```
+## 8. エラーハンドリング
 
+### 8.1 エラーの種類
 
-## Errors
+リクエストがエラーステータスを返した場合、またはストリーミング中にエラーが検出された場合にエラーが発生します。
 
-Errors are raised if requests return an error status or if an error is detected while streaming.
+### 8.2 エラー処理
 
-```python
-model = 'does-not-yet-exist'
+ResponseErrorをキャッチしてエラーを処理します。status_codeでエラーの種類を判別できます（例：404はモデルが存在しない）。
 
-try:
-  ollama.chat(model)
-except ollama.ResponseError as e:
-  print('Error:', e.error)
-  if e.status_code == 404:
-    ollama.pull(model)
-```
+---
+
+## 9. 本プロジェクトでの使用
+
+### 9.1 使用方法
+
+本プロジェクトのOllamaClientクラスでは、OllamaのREST APIを使用してLLMとの対話を行います。
+
+### 9.2 設定項目
+
+config.yamlのllm.ollamaセクションで以下を設定します：
+
+- **endpoint**: OllamaサーバーのURL（デフォルト：http://localhost:11434）
+- **model**: 使用するモデル
+- **max_token**: 最大トークン数
+
+### 9.3 起動方法
+
+1. Ollamaをインストール
+2. 使用するモデルをpull（ollama pull llama3.2など）
+3. Ollamaサービスを起動（ollama serve）
+4. config.yamlでllm.providerをollamaに設定
+
+---
+
+**参照元**: Ollama公式ドキュメント（https://github.com/ollama/ollama/blob/main/docs/api.md）
