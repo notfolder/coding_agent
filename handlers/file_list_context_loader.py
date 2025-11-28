@@ -144,7 +144,9 @@ class FileListContextLoader:
             current_depth: 現在の階層深度
 
         """
-        if self.max_depth >= 0 and current_depth > self.max_depth:
+        # max_depthが0以上の場合は深度制限を適用
+        # current_depth = 0 はルートディレクトリ
+        if self.max_depth >= 0 and current_depth >= self.max_depth:
             return
 
         try:
@@ -316,8 +318,9 @@ class FileListContextLoader:
                 return True
 
         # ExceptionGroupの場合、再帰的にチェック
-        if hasattr(exception, "exceptions"):
-            for e in exception.exceptions:  # type: ignore[attr-defined]
+        exceptions = getattr(exception, "exceptions", None)
+        if exceptions is not None:
+            for e in exceptions:
                 if self._check_not_found_error(e):
                     return True
 

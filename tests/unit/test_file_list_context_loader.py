@@ -5,6 +5,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock
 
+from handlers.file_list_context_loader import FileListContextLoader
+
 
 class TestFileListContextLoader(unittest.TestCase):
     """Test FileListContextLoader class."""
@@ -21,8 +23,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_initialization(self) -> None:
         """Test FileListContextLoader initialization."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         loader = FileListContextLoader(
             config=self.config,
             mcp_clients={"github": self.mock_mcp_client},
@@ -32,8 +32,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_initialization_with_defaults(self) -> None:
         """Test initialization with default values."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         loader = FileListContextLoader(
             config={},
             mcp_clients={"github": self.mock_mcp_client},
@@ -43,8 +41,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_initialization_disabled(self) -> None:
         """Test initialization with disabled flag."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         config = {
             "file_list_context": {
                 "enabled": False,
@@ -58,8 +54,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_load_file_list_disabled(self) -> None:
         """Test load_file_list returns empty when disabled."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         config = {
             "file_list_context": {
                 "enabled": False,
@@ -77,8 +71,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_apply_depth_limit_no_limit(self) -> None:
         """Test _apply_depth_limit with no limit."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         loader = FileListContextLoader(
             config=self.config,
             mcp_clients={"github": self.mock_mcp_client},
@@ -97,8 +89,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_apply_depth_limit_with_limit(self) -> None:
         """Test _apply_depth_limit with depth limit."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         loader = FileListContextLoader(
             config=self.config,
             mcp_clients={"github": self.mock_mcp_client},
@@ -120,8 +110,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_apply_depth_limit_zero(self) -> None:
         """Test _apply_depth_limit with depth 0."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         loader = FileListContextLoader(
             config=self.config,
             mcp_clients={"github": self.mock_mcp_client},
@@ -140,8 +128,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_format_file_list_empty(self) -> None:
         """Test _format_file_list with empty list."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         loader = FileListContextLoader(
             config=self.config,
             mcp_clients={"github": self.mock_mcp_client},
@@ -153,8 +139,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_format_file_list_with_files(self) -> None:
         """Test _format_file_list with files."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         loader = FileListContextLoader(
             config=self.config,
             mcp_clients={"github": self.mock_mcp_client},
@@ -171,8 +155,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_format_file_list_without_owner(self) -> None:
         """Test _format_file_list without owner."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         loader = FileListContextLoader(
             config=self.config,
             mcp_clients={"github": self.mock_mcp_client},
@@ -185,8 +167,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_fetch_file_list_from_github(self) -> None:
         """Test _fetch_file_list_from_github."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         self.mock_mcp_client.call_tool.return_value = [
             {"type": "file", "path": "file1.py"},
             {"type": "file", "path": "file2.py"},
@@ -205,8 +185,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_fetch_file_list_from_github_with_directories(self) -> None:
         """Test _fetch_file_list_from_github processes directories recursively."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         # First call returns file and directory, second call (for subdir) returns file
         self.mock_mcp_client.call_tool.side_effect = [
             [
@@ -230,8 +208,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_fetch_file_list_from_gitlab(self) -> None:
         """Test _fetch_file_list_from_gitlab."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         self.mock_mcp_client.call_tool.return_value = [
             {"type": "blob", "path": "file1.py"},
             {"type": "blob", "path": "file2.py"},
@@ -252,8 +228,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_load_file_list_github(self) -> None:
         """Test load_file_list for GitHub."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         self.mock_mcp_client.call_tool.return_value = [
             {"type": "file", "path": "file1.py"},
         ]
@@ -277,8 +251,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_load_file_list_gitlab(self) -> None:
         """Test load_file_list for GitLab."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         self.mock_mcp_client.call_tool.return_value = [
             {"type": "blob", "path": "file1.py"},
         ]
@@ -302,8 +274,6 @@ class TestFileListContextLoader(unittest.TestCase):
 
     def test_load_file_list_no_platform_info(self) -> None:
         """Test load_file_list with no platform info."""
-        from handlers.file_list_context_loader import FileListContextLoader
-
         loader = FileListContextLoader(
             config=self.config,
             mcp_clients={"github": self.mock_mcp_client},
