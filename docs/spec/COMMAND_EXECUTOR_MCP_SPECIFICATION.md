@@ -272,7 +272,7 @@ flowchart TD
 **検出対象:**
 - package.json: `npm install` または `yarn install`
 - requirements.txt: `pip install -r requirements.txt`
-- condaenv.yaml / environment.yml: `mamba env create -f condaenv.yaml`（miniforge/mambaforge使用）
+- condaenv.yaml / environment.yml: `mamba env create -f <環境ファイル>`（miniforge/mambaforge使用）
 - go.mod: `go mod download`
 - pom.xml: `mvn dependency:resolve`
 - Gemfile: `bundle install`
@@ -345,7 +345,7 @@ sequenceDiagram
 | pip | Pythonパッケージマネージャー | `pip install`, `pip list` |
 | pip3 | Python3パッケージマネージャー | `pip3 install -r requirements.txt` |
 | conda | Conda環境・パッケージマネージャー | `conda activate`, `conda install`, `conda env create` |
-| mamba | 高速Condaパッケージマネージャー | `mamba install`, `mamba env create -f condaenv.yaml` |
+| mamba | 高速Condaパッケージマネージャー | `mamba install`, `mamba env create -f environment.yml` |
 | python | Pythonインタープリター | `python setup.py`, `python -m pytest` |
 | python3 | Python3インタープリター | `python3 -m venv`, `python3 script.py` |
 | go | Go言語ツールチェーン | `go build`, `go test`, `go mod download` |
