@@ -642,6 +642,7 @@ class TaskHandler:
         適切なシステムプロンプトファイルを読み込んで、
         MCPプロンプトを埋め込んで返します.
         プロジェクト固有のエージェントルールがある場合は末尾に追加します。
+        プロジェクトファイル一覧がある場合は末尾に追加します。
         
         Args:
             task_config: タスク固有の設定（Noneの場合はself.configを使用）
@@ -675,6 +676,11 @@ class TaskHandler:
         project_rules = self._load_project_agent_rules(task_config, task)
         if project_rules:
             prompt = prompt + "\n" + project_rules
+
+        # プロジェクトファイル一覧を取得して追加
+        file_list_context = self._load_file_list_context(task_config, task)
+        if file_list_context:
+            prompt = prompt + "\n" + file_list_context
 
         return prompt
 
@@ -738,6 +744,37 @@ class TaskHandler:
                 self.logger.warning("プロジェクトルールの読み込みに失敗しました: %s", e)
 
         return ""
+
+    def _load_file_list_context(
+        self,
+        task_config: dict[str, Any],
+        task: Task | None = None,
+    ) -> str:
+        """プロジェクトファイル一覧を読み込む.
+
+        Args:
+            task_config: タスク固有の設定
+            task: タスクオブジェクト
+
+        Returns:
+            プロジェクトファイル一覧文字列
+
+        """
+        from handlers.file_list_context_loader import FileListContextLoader
+
+        # タスクがない場合は空文字列を返す
+        if task is None:
+            return ""
+
+        try:
+            loader = FileListContextLoader(
+                config=task_config,
+                mcp_clients=self.mcp_clients,
+            )
+            return loader.load_file_list(task)
+        except Exception as e:
+            self.logger.warning("ファイル一覧の読み込みに失敗しました: %s", e)
+            return ""
 
     def _extract_json(self, text: str) -> dict[str, Any]:
         """テキストから最初のJSONブロックを抽出する.

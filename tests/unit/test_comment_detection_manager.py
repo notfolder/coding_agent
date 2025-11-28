@@ -422,11 +422,15 @@ class TestCommentDetectionManagerGitLab(unittest.TestCase):
 
     def test_gitlab_initialization_with_bot_name(self) -> None:
         """Test that manager is enabled for GitLab when bot_name is set."""
+        import os
+        from unittest.mock import patch
         from comment_detection_manager import CommentDetectionManager
 
-        manager = CommentDetectionManager(self.task, self.config)
-        self.assertTrue(manager.enabled)
-        self.assertEqual(manager.bot_username, "gitlab-bot")
+        # 環境変数の影響を排除するためにモック
+        with patch.dict(os.environ, {}, clear=True):
+            manager = CommentDetectionManager(self.task, self.config)
+            self.assertTrue(manager.enabled)
+            self.assertEqual(manager.bot_username, "gitlab-bot")
 
 
 if __name__ == "__main__":

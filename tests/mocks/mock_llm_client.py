@@ -9,6 +9,7 @@ from typing import Any
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from clients.llm_base import LLMClient
+from clients.token_estimator import estimate_tokens
 
 
 class MockLLMClient(LLMClient):
@@ -97,14 +98,18 @@ class MockLLMClient(LLMClient):
         """Store function result."""
         # Not needed for current tests
 
-    def get_response(self) -> tuple[str, list]:
-        """Get mock response."""
+    def get_response(self) -> tuple[str, list, int]:
+        """Get mock response with token count."""
         if self.current_response_index < len(self.response_queue):
-            response = self.response_queue[self.current_response_index]
+            response_text, functions = self.response_queue[self.current_response_index]
             self.current_response_index += 1
-            return response
+            # レスポンステキストからトークン数を推定
+            token_count = estimate_tokens(response_text)
+            return (response_text, functions, token_count)
         # Default completion response
-        return (json.dumps({"comment": "No more responses", "done": True}), [])
+        response_text = json.dumps({"comment": "No more responses", "done": True})
+        token_count = estimate_tokens(response_text)
+        return (response_text, [], token_count)
 
     def set_custom_responses(self, responses: list[tuple[str, list]]) -> None:
         """Set custom response queue for specific tests."""
@@ -145,8 +150,8 @@ class MockLLMClientWithErrors(MockLLMClient):
         self.error_types = ["json_error", "timeout_error", "api_error"]
         self.current_error_type = 0
 
-    def get_response(self) -> tuple[str, list]:
-        """Get response with simulated errors."""
+    def get_response(self) -> tuple[str, list, int]:
+        """Get response with simulated errors and token count."""
         if self.error_count < self.max_errors:
             self.error_count += 1
             error_type = self.error_types[self.current_error_type % len(self.error_types)]
@@ -154,24 +159,29 @@ class MockLLMClientWithErrors(MockLLMClient):
 
             if error_type == "json_error":
                 # Return invalid JSON to simulate parsing errors
-                return ("Invalid JSON response {", [])
+                response_text = "Invalid JSON response {"
+                token_count = estimate_tokens(response_text)
+                return (response_text, [], token_count)
             if error_type == "timeout_error":
                 # Simulate timeout by returning incomplete response
-                return ("Partial response without proper", [])
+                response_text = "Partial response without proper"
+                token_count = estimate_tokens(response_text)
+                return (response_text, [], token_count)
             # api_error
             # Return valid JSON but with error content
-            return (
-                json.dumps(
-                    {
-                        "error": "API Error occurred",
-                        "comment": "There was an error processing the request",
-                        "done": False,
-                    },
-                ),
-                [],
+            response_text = json.dumps(
+                {
+                    "error": "API Error occurred",
+                    "comment": "There was an error processing the request",
+                    "done": False,
+                },
             )
+            token_count = estimate_tokens(response_text)
+            return (response_text, [], token_count)
         # After max errors, return valid completion
-        return (json.dumps({"comment": "Finally completed after errors", "done": True}), [])
+        response_text = json.dumps({"comment": "Finally completed after errors", "done": True})
+        token_count = estimate_tokens(response_text)
+        return (response_text, [], token_count)
 
 
 class MockLLMClientWithToolCalls(MockLLMClient):
