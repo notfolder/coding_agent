@@ -756,9 +756,9 @@ planning:
 
 環境変数でオーバーライド可能な設定：
 
-- **REPLANNING_ENABLED**: 再計画機能の有効/無効（true/false）
-- **REPLANNING_MIN_CONFIDENCE**: LLM判断の最小確信度
-- **MAX_TOTAL_REPLANS**: 総再計画回数の上限
+- **REPLANNING_ENABLED**: 再計画機能の有効/無効（true/false、デフォルト: true）
+- **REPLANNING_MIN_CONFIDENCE**: LLM判断の最小確信度（デフォルト: 0.5）
+- **MAX_TOTAL_REPLANS**: 総再計画回数の上限（デフォルト: 10）
 
 ---
 
