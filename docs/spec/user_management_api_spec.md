@@ -8,18 +8,20 @@
 
 ### 1.2 ベースURL
 
-デフォルト: http://localhost:8080/api/v1
+デフォルト: http://localhost:8080
 
 ---
 
 ## 2. 認証
 
-### 2.1 APIキー認証
+### 2.1 Bearer トークン認証
 
-すべてのAPIリクエストにはAPIキーが必要です。
+すべてのAPIリクエストにはBearerトークン認証が必要です。
 
 **ヘッダー形式:**
-- X-API-Key: {api_key}
+- Authorization: Bearer {api_key}
+
+APIキーは環境変数`USER_CONFIG_API_KEY`または設定ファイルの`api_server.api_key`で設定します。
 
 ### 2.2 エラーレスポンス
 
@@ -34,28 +36,31 @@
 
 ### 3.1 ユーザー設定取得
 
-**エンドポイント:** GET /config/{username}
+**エンドポイント:** GET /config/{platform}/{username}
 
-**説明:** 指定されたユーザーの設定を取得します。
+**説明:** 指定されたプラットフォーム・ユーザーの設定を取得します。
 
 **パスパラメータ:**
-- username: ユーザー名
+- platform: プラットフォーム（github または gitlab）
+- username: GitHub/GitLabユーザー名
 
 **成功レスポンス:**
 - ステータスコード: 200 OK
 - レスポンス: ユーザー設定を含むJSONオブジェクト
 
-**レスポンスフィールド:**
-- llm_provider: LLMプロバイダー（openai/ollama/lmstudio）
-- openai_api_key: OpenAI APIキー（復号化済み）
-- openai_model: OpenAIモデル
-- ollama_endpoint: Ollamaエンドポイント
-- ollama_model: Ollamaモデル
-- lmstudio_base_url: LM StudioベースURL
-- lmstudio_model: LM Studioモデル
+**レスポンス構造:**
 
-**エラーレスポンス:**
-- 404 Not Found: ユーザーが存在しない場合
+statusフィールドが"success"の場合、dataフィールドに以下を含みます：
+
+- **llm**: LLM設定（provider、openai、ollama、lmstudioのサブフィールドを含む）
+- **system_prompt**: システムプロンプト
+- **max_llm_process_num**: LLM最大処理数
+
+**ユーザー設定が存在する場合:**
+ユーザー固有の設定でベース設定がオーバーライドされます。追加システムプロンプトがある場合は末尾に追加されます。
+
+**ユーザー設定が存在しない場合:**
+config.yamlのデフォルト設定を返します。
 
 ### 3.2 ヘルスチェック
 

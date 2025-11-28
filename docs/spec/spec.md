@@ -104,9 +104,8 @@ sequenceDiagram
     participant LLM as LLMClient
     participant MCP as MCPToolClient
 
+    Note over Main: Producer側でTask.prepare()実行済み
     Main->>TH: handle(task)
-    TH->>Task: prepare()
-    Task-->>TH: ラベル更新完了
     TH->>LLM: send_system_prompt()
     TH->>Task: get_prompt()
     Task-->>TH: プロンプト
@@ -127,8 +126,10 @@ sequenceDiagram
     end
 ```
 
-1. **タスク準備**: Task.prepare()を呼び出してタスクの処理開始を通知
-2. **LLM呼び出し**: システムプロンプトとTask.get_prompt()の内容でLLMを呼び出し
+**注意**: Task.prepare()はProducerモード（produce_tasks関数）でタスクをキューに追加する前に呼び出されます。TaskHandler.handle()内では呼び出されません。
+
+1. **タスク準備（Producer側）**: produce_tasks関数内でTask.prepare()を呼び出してラベル付与などの準備処理を実行
+2. **LLM呼び出し（Consumer側）**: システムプロンプトとTask.get_prompt()の内容でLLMを呼び出し
 3. **応答処理ループ**: 以下をdone: trueが返るまで繰り返し
    - LLM応答のcommentフィールドでTask.comment()を呼び出し
    - command要求があればMCPサーバーを呼び出して応答を取得

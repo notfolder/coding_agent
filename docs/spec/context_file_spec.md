@@ -299,8 +299,19 @@ classDiagram
     TaskContextManager o-- MessageStore
     TaskContextManager o-- SummaryStore
     TaskContextManager o-- ToolStore
+    TaskContextManager o-- PlanningHistoryStore
     ContextCompressor --> MessageStore
     ContextCompressor --> SummaryStore
+    
+    class PlanningHistoryStore {
+        -planning_dir
+        -issue_id
+        +__init__(task_uuid, planning_dir)
+        +save_plan(plan)
+        +has_plan()
+        +get_latest_plan()
+        +append_entry()
+    }
 ```
 
 ### 5.2 TaskContextManagerクラス
@@ -311,12 +322,13 @@ classDiagram
 
 - キューから受け取ったUUIDでディレクトリ作成
 - tasks.dbへのタスク登録・更新
-- MessageStore、SummaryStore、ToolStoreの統合管理
+- MessageStore、SummaryStore、ToolStore、PlanningHistoryStoreの統合管理
+- planningサブディレクトリの作成
 - タスク完了時のディレクトリ移動
 
 #### 主要メソッド
 
-- **__init__**: タスクキー、UUID、設定を受け取り初期化
+- **__init__**: タスクキー、UUID、設定を受け取り初期化、is_resumedフラグで再開タスクかを判定
 - **update_status**: tasks.dbのstatusを更新
 - **update_statistics**: tasks.dbの統計カウンターを更新
 - **complete**: タスク完了処理（ステータス更新とディレクトリ移動）
@@ -324,6 +336,7 @@ classDiagram
 - **get_message_store**: MessageStoreインスタンスを返す
 - **get_summary_store**: SummaryStoreインスタンスを返す
 - **get_tool_store**: ToolStoreインスタンスを返す
+- **get_planning_store**: PlanningHistoryStoreインスタンスを返す
 
 ### 5.3 MessageStoreクラス
 

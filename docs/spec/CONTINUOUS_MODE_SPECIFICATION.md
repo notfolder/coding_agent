@@ -191,17 +191,17 @@ docker-compose.ymlに以下のサービスを追加します：
 
 - **イメージ**: プロジェクトのDockerfile
 - **コマンド**: python main.py --mode producer --continuous
-- **依存関係**: rabbitmq、user-config-api
+- **依存関係**: rabbitmq、user-config-api、web（GitLab CE、healthyになるまで待機）
 - **再起動ポリシー**: unless-stopped
-- **停止猶予時間**: 30秒
+- **停止猶予時間**: 300秒
 
 #### coding-agent-consumer
 
 - **イメージ**: プロジェクトのDockerfile
 - **コマンド**: python main.py --mode consumer --continuous
-- **依存関係**: rabbitmq、user-config-api
+- **依存関係**: rabbitmq、user-config-api、web（GitLab CE、healthyになるまで待機）
 - **再起動ポリシー**: unless-stopped
-- **停止猶予時間**: 600秒（タスク処理完了を待つため）
+- **停止猶予時間**: 300秒（タスク処理完了を待つため）
 
 ### 8.2 Consumerのスケールアウト
 

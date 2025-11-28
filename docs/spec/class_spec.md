@@ -62,17 +62,28 @@
 
 タスク処理のオーケストレーションを担当するクラスです。LLMクライアントとMCPクライアントを使用してタスクを処理します。
 
+**処理モード選択（handle()メソッド内）:**
+1. Planning機能が有効（planning.enabled=true）かつUUIDが存在する場合: _handle_with_planning()を呼び出し
+2. Context Storage機能が有効（context_storage.enabled=true）かつUUIDが存在する場合: _handle_with_context_storage()を呼び出し
+3. それ以外: _handle_legacy()を呼び出し（従来のインメモリ処理）
+
+**主要メソッド:**
+- handle(): タスク処理のエントリーポイント、処理モードを判定して適切なメソッドを呼び出し
+- _handle_with_planning(): 計画実行モードでのタスク処理
+- _handle_with_context_storage(): ファイルベースコンテキスト管理でのタスク処理
+- _handle_legacy(): 従来のインメモリ処理
+
 #### MCPToolClient（clients/mcp_tool_client.py）
 
 MCPサーバーとの通信を担当するクライアントクラスです。設定ファイルで定義されたMCPサーバーを起動し、ツールの呼び出しを処理します。
 
 #### GithubClient（clients/github_client.py）
 
-GitHub API操作のためのクライアントクラスです。
+GitHub API操作のためのクライアントクラスです。TaskGetterFromGitHubおよびGitHubTaskFactoryで使用され、GitHub APIへの直接アクセス（Issue/PR取得、ラベル操作など）を担当します。
 
 #### GitlabClient（clients/gitlab_client.py）
 
-GitLab API操作のためのクライアントクラスです。
+GitLab API操作のためのクライアントクラスです。TaskGetterFromGitLabおよびGitLabTaskFactoryで使用され、GitLab APIへの直接アクセス（Issue/MR取得、ラベル操作など）を担当します。
 
 #### LLMクライアント群
 
@@ -85,7 +96,7 @@ LLMとの通信を担当するクライアントクラス群です。
 
 #### FileLock（filelock_util.py）
 
-プロセス排他制御のためのファイルロッククラスです。
+プロセス排他制御のためのファイルロッククラスです。Producerモードで同時に複数のProducerが起動しないよう排他制御を行います。
 
 ---
 
@@ -202,7 +213,16 @@ classDiagram
         +prepare()
         +get_prompt()
         +comment()
+        +update_comment()
         +finish()
+        +check()
+        +get_task_key()
+        +add_label()
+        +remove_label()
+        +get_user()
+        +get_assignees()
+        +refresh_assignees()
+        +get_comments()
     }
     class TaskGitHubIssue
     class TaskGitHubPullRequest

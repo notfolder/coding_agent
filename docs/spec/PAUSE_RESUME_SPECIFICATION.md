@@ -118,10 +118,12 @@ sequenceDiagram
    - ユーザー情報
    - 一時停止時刻
    - 処理ステータス（paused）
-4. **Context Storage保持**: contexts/running/{task_uuid}/のディレクトリ構造を維持
+4. **Context Storageディレクトリ移動**: contexts/running/{task_uuid}/をcontexts/paused/{task_uuid}/に移動
 5. **コメント追加**: タスクに一時停止通知のコメントを追加
 6. **ラベル更新**: 処理中ラベルをpaused状態のラベルに変更
 7. **正常終了**: consumer処理を正常終了
+
+**注意**: pause_signalファイルは自動的には削除されません。リジュームの準備ができたら手動で削除する必要があります。
 
 ---
 
