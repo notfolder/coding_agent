@@ -272,9 +272,15 @@ flowchart TD
 **検出対象:**
 - package.json: `npm install` または `yarn install`
 - requirements.txt: `pip install -r requirements.txt`
+- condaenv.yaml / environment.yml: `mamba env create -f condaenv.yaml`（miniforge/mambaforge使用）
 - go.mod: `go mod download`
 - pom.xml: `mvn dependency:resolve`
 - Gemfile: `bundle install`
+
+**Conda環境について:**
+- ベースイメージにminiforgeをプリインストール
+- condaenv.yaml または environment.yml が存在する場合、自動的にconda環境を作成
+- mambaを使用して高速な依存関係解決を実現
 
 **自動インストールの有効/無効:**
 - 設定ファイルで制御可能
@@ -338,6 +344,8 @@ sequenceDiagram
 | pnpm | Node.jsパッケージマネージャー | `pnpm install`, `pnpm build` |
 | pip | Pythonパッケージマネージャー | `pip install`, `pip list` |
 | pip3 | Python3パッケージマネージャー | `pip3 install -r requirements.txt` |
+| conda | Conda環境・パッケージマネージャー | `conda activate`, `conda install`, `conda env create` |
+| mamba | 高速Condaパッケージマネージャー | `mamba install`, `mamba env create -f condaenv.yaml` |
 | python | Pythonインタープリター | `python setup.py`, `python -m pytest` |
 | python3 | Python3インタープリター | `python3 -m venv`, `python3 script.py` |
 | go | Go言語ツールチェーン | `go build`, `go test`, `go mod download` |
@@ -510,60 +518,88 @@ LLMがCommand Executor MCP Serverの機能を適切に活用できるよう、�
 システムプロンプトに以下の文言を追加します：
 
 ```
-## コマンド実行機能
+## Command Execution Feature
 
-あなたは `command-executor` MCPサーバーを通じて、プロジェクトのソースコードがある独立したDocker実行環境でコマンドを実行できます。
+You can execute commands in an isolated Docker execution environment with project source code through the `command-executor` MCP server.
 
-**実行環境情報:**
-- 作業ディレクトリ: `/workspace/project/`（プロジェクトファイルがクローンされた場所）
-- 依存関係: 自動的にインストール済み
+**Execution Environment Information:**
+- Working directory: `/workspace/project/` (where project files are cloned)
+- Dependencies: Automatically installed
 
-### 利用可能な主要機能
+### Available Commands
 
-**テスト実行:**
-- プロジェクトのテストスイートを実行して、コード変更が正しく動作するか確認できます
-- 例: `npm test`, `pytest`, `go test ./...`, `cargo test`
+The following commands are available for execution:
 
-**コード検索:**
-- `grep` コマンドを使用して、プロジェクト全体からコードパターンを再帰的に検索できます
-- 例: `grep -rn "function_name" src/` で関数の使用箇所を検索
-- 例: `grep -r "import.*module" --include="*.py"` でPythonのインポート文を検索
+{allowed_commands_list}
 
-**ビルド・コンパイル:**
-- プロジェクトのビルドコマンドを実行して、コンパイルエラーを確認できます
-- 例: `npm run build`, `make`, `go build`, `cargo build`
+### Key Features
 
-**リンター・フォーマッター:**
-- コードの品質チェックやフォーマット確認ができます
-- 例: `eslint .`, `black --check .`, `flake8`
+**Test Execution:**
+- Run the project's test suite to verify code changes work correctly
+- Examples: `npm test`, `pytest`, `go test ./...`, `cargo test`
 
-**ファイル操作:**
-- `ls`, `cat`, `head`, `tail`, `find`, `tree` などでファイル構造やコード内容を確認できます
-- 例: `find . -name "*.ts" -type f` でTypeScriptファイルを検索
-- 例: `tree -L 2` でディレクトリ構造を表示
+**Code Search:**
+- Use `grep` command to recursively search for code patterns across the entire project
+- Example: `grep -rn "function_name" src/` to find function usage locations
+- Example: `grep -r "import.*module" --include="*.py"` to search Python import statements
 
-### 使用上の注意
+**Build/Compile:**
+- Execute project build commands to check for compilation errors
+- Examples: `npm run build`, `make`, `go build`, `cargo build`
 
-- 実行環境にはプロジェクトのソースコードが `/workspace/project/` にクローンされています
-- 依存関係は自動的にインストールされています
-- コマンドの実行結果（stdout/stderr）を確認して、次のアクションを決定してください
-- 長時間かかるコマンドはタイムアウトする可能性があります
+**Linter/Formatter:**
+- Perform code quality checks and format verification
+- Examples: `eslint .`, `black --check .`, `flake8`
 
-### 推奨する活用方法
+**File Operations:**
+- Use `ls`, `cat`, `head`, `tail`, `find`, `tree` to check file structure and code contents
+- Example: `find . -name "*.ts" -type f` to search for TypeScript files
+- Example: `tree -L 2` to display directory structure
 
-1. **コード変更前**: `grep` でコードベースを検索し、変更箇所の影響範囲を把握
-2. **コード変更後**: テストを実行して変更の正当性を確認
-3. **プルリクエスト作成前**: リンターを実行してコード品質を確認
+### Usage Notes
+
+- Project source code is cloned to `/workspace/project/` in the execution environment
+- Dependencies are automatically installed
+- Check command execution results (stdout/stderr) and determine the next action
+- Long-running commands may timeout
+
+### Recommended Usage
+
+1. **Before code changes**: Search the codebase with `grep` to understand the impact scope of changes
+2. **After code changes**: Run tests to verify the correctness of changes
+3. **Before creating pull request**: Run linters to verify code quality
 ```
 
-#### 6.5.2 プロンプト挿入位置
+#### 6.5.2 許可コマンドリストの埋め込み
+
+システムプロンプト内の `{allowed_commands_list}` プレースホルダーは、セクション6.3で定義された許可コマンドリストの内容で動的に置き換えられます。
+
+**置き換え内容:**
+- ビルド・パッケージ管理コマンド（npm, yarn, pip, conda, mamba, go, cargo等）
+- テスト実行コマンド（pytest, jest, go test等）
+- リンター・フォーマッターコマンド（eslint, black, flake8等）
+- ファイル操作・検索コマンド（grep, find, ls, cat等）
+- バージョン管理コマンド（git status, git diff等）
+- その他ユーティリティコマンド
+
+**生成形式例:**
+```
+Build/Package Management: npm, yarn, pnpm, pip, pip3, conda, mamba, python, python3, go, cargo, maven, gradle, make, cmake, bundle, gem, composer, dotnet
+Test Execution: pytest, jest, mocha, rspec, phpunit, go test, cargo test, dotnet test
+Linter/Formatter: eslint, prettier, black, flake8, pylint, mypy, rubocop, gofmt, golint, rustfmt, clippy, tsc
+File Operations: ls, cat, head, tail, grep, find, wc, diff, tree, file, stat
+Version Control: git status, git diff, git log, git branch, git show, git blame
+Utilities: echo, pwd, cd, mkdir, rm, cp, mv, touch, chmod, env, which, curl, wget, tar, unzip, jq, sed, awk, sort, uniq, xargs
+```
+
+#### 6.5.3 プロンプト挿入位置
 
 システムプロンプトの以下の位置に挿入します：
 
 - MCPサーバー一覧（Available MCP Tools）セクションの直後
 - Behavior Rulesセクションの直前
 
-#### 6.5.3 動的プロンプト生成
+#### 6.5.4 動的プロンプト生成
 
 Command Executor機能が有効な場合のみ、上記プロンプトをシステムプロンプトに追加します。
 
@@ -574,32 +610,6 @@ Command Executor機能が有効な場合のみ、上記プロンプトをシス�
 **プロンプトテンプレートファイル:**
 - ファイル名: `system_prompt_command_executor.txt`
 - 配置場所: プロジェクトルート
-
-#### 6.5.4 プロンプトのカスタマイズ
-
-プロジェクト固有の情報をプロンプトに含めることができます。
-
-**テンプレート変数:**
-- `{project_type}`: 検出されたプロジェクトタイプ（nodejs, python, go等）
-- `{test_command}`: 推奨テストコマンド
-- `{build_command}`: 推奨ビルドコマンド
-- `{lint_command}`: 推奨リンターコマンド
-
-**カスタマイズ例:**
-
-```yaml
-command_executor:
-  prompt:
-    # カスタムプロンプトテンプレートの使用
-    custom_template: |
-      このプロジェクトでは以下のコマンドが利用可能です：
-      - テスト: {test_command}
-      - ビルド: {build_command}
-      - リント: {lint_command}
-    
-    # プロジェクトタイプの自動検出
-    auto_detect_project: true
-```
 
 ---
 
