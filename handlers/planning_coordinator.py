@@ -103,6 +103,9 @@ class PlanningCoordinator:
         # Task stop support
         self.stop_manager = None  # Will be set by TaskHandler
         
+        # Comment detection support
+        self.comment_detection_manager = None  # Will be set by TaskHandler
+        
         # Checkbox tracking for progress updates
         self.plan_comment_id = None  # ID of the comment containing the checklist
 
@@ -126,6 +129,9 @@ class PlanningCoordinator:
                 self.logger.info("アサイン解除を検出、タスクを停止します")
                 self._handle_stop()
                 return True  # Return success to avoid marking as failed
+            
+            # Check for new comments before starting
+            self._check_and_add_new_comments()
             
             # Post start comment
             self._post_phase_comment("planning", "started", "Beginning task analysis and planning...")
@@ -164,6 +170,9 @@ class PlanningCoordinator:
                 self.logger.info("アサイン解除を検出、タスクを停止します")
                 self._handle_stop()
                 return True
+            
+            # Check for new comments after planning phase
+            self._check_and_add_new_comments()
 
             # Post execution start
             self._post_phase_comment("execution", "started", "Beginning execution of planned actions...")
@@ -186,6 +195,9 @@ class PlanningCoordinator:
                     self.logger.info("アサイン解除を検出、タスクを停止します")
                     self._handle_stop()
                     return True
+                
+                # Check for new comments before each action
+                self._check_and_add_new_comments()
                 
                 # Execute next action
                 result = self._execute_action()
@@ -219,6 +231,9 @@ class PlanningCoordinator:
                         self._handle_stop()
                         return True
                     
+                    # Check for new comments before reflection
+                    self._check_and_add_new_comments()
+                    
                     self._post_phase_comment("reflection", "started", f"Analyzing results after {self.action_counter} actions...")
                     self.current_phase = "reflection"
                     reflection = self._execute_reflection_phase(result)
@@ -235,6 +250,9 @@ class PlanningCoordinator:
                             self.logger.info("アサイン解除を検出、タスクを停止します")
                             self._handle_stop()
                             return True
+                        
+                        # Check for new comments before revision
+                        self._check_and_add_new_comments()
                         
                         # Revise plan if needed
                         self._post_phase_comment("revision", "started", "Plan revision needed based on reflection.")
@@ -1062,6 +1080,26 @@ class PlanningCoordinator:
             self.task.uuid,
             planning_state=planning_state,
         )
+
+    def _check_and_add_new_comments(self) -> None:
+        """新規コメントを検出してコンテキストに追加する.
+        
+        comment_detection_managerがNoneの場合は何もしません。
+        """
+        if self.comment_detection_manager is None:
+            return
+        
+        try:
+            new_comments = self.comment_detection_manager.check_for_new_comments()
+            if new_comments:
+                self.comment_detection_manager.add_to_context(
+                    self.llm_client, new_comments
+                )
+                self.logger.info(
+                    "新規コメント %d件をコンテキストに追加しました", len(new_comments)
+                )
+        except Exception as e:
+            self.logger.warning("新規コメントの検出中にエラー発生: %s", e)
 
     def _load_project_agent_rules(self) -> str:
         """プロジェクト固有のエージェントルールを読み込む.

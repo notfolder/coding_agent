@@ -126,6 +126,7 @@ class TaskHandler:
 
         """
         from clients.lm_client import get_llm_client
+        from comment_detection_manager import CommentDetectionManager
         from context_storage import ContextCompressor, TaskContextManager
         from pause_resume_manager import PauseResumeManager
         from task_stop_manager import TaskStopManager
@@ -136,12 +137,19 @@ class TaskHandler:
         # Initialize task stop manager
         stop_manager = TaskStopManager(task_config)
         
+        # Initialize comment detection manager
+        comment_detection_manager = CommentDetectionManager(task, task_config)
+        
         # Check if this is a resumed task
         is_resumed = getattr(task, "is_resumed", False)
+        comment_detection_state = None
         if is_resumed:
             # Restore task context from paused state
             planning_state = pause_manager.restore_task_context(task, task.uuid)
             self.logger.info("一時停止タスクを復元しました: %s", task.uuid)
+            
+            # コメント検出状態の復元を試みる
+            comment_detection_state = self._load_comment_detection_state(task.uuid, task_config)
         
         # Initialize context manager
         context_manager = TaskContextManager(
@@ -185,6 +193,12 @@ class TaskHandler:
             # Setup task handling
             self._setup_task_handling_with_client(task, task_config, task_llm_client)
             
+            # Initialize or restore comment detection
+            if comment_detection_state:
+                comment_detection_manager.restore_state(comment_detection_state)
+            else:
+                comment_detection_manager.initialize()
+            
             # Processing loop
             count = 0
             max_count = task_config.get("max_llm_process_num", 1000)
@@ -194,6 +208,10 @@ class TaskHandler:
                 # Check for pause signal
                 if pause_manager.check_pause_signal():
                     self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                    # コメント検出状態を保存
+                    self._save_comment_detection_state(
+                        task.uuid, task_config, comment_detection_manager.get_state()
+                    )
                     pause_manager.pause_task(task, task.uuid, planning_state=None)
                     return  # Exit without calling finish()
                 
@@ -202,6 +220,11 @@ class TaskHandler:
                     self.logger.info("アサイン解除を検出、タスクを停止します")
                     stop_manager.stop_task(task, task.uuid, llm_call_count=count)
                     return  # Exit without calling finish()
+                
+                # Check for new comments and add to context
+                new_comments = comment_detection_manager.check_for_new_comments()
+                if new_comments:
+                    comment_detection_manager.add_to_context(task_llm_client, new_comments)
                 
                 # Check if compression is needed
                 if compressor.should_compress():
@@ -235,6 +258,7 @@ class TaskHandler:
             task_config: Task configuration
 
         """
+        from comment_detection_manager import CommentDetectionManager
         from context_storage import TaskContextManager
         from handlers.planning_coordinator import PlanningCoordinator
         from pause_resume_manager import PauseResumeManager
@@ -246,13 +270,20 @@ class TaskHandler:
         # Initialize task stop manager
         stop_manager = TaskStopManager(task_config)
         
+        # Initialize comment detection manager
+        comment_detection_manager = CommentDetectionManager(task, task_config)
+        
         # Check if this is a resumed task
         is_resumed = getattr(task, "is_resumed", False)
         planning_state = None
+        comment_detection_state = None
         if is_resumed:
             # Restore task context from paused state
             planning_state = pause_manager.restore_task_context(task, task.uuid)
             self.logger.info("一時停止タスクを復元しました（Planning実行中）: %s", task.uuid)
+            
+            # コメント検出状態の復元を試みる
+            comment_detection_state = self._load_comment_detection_state(task.uuid, task_config)
         
         # Initialize context manager for planning
         context_manager = TaskContextManager(
@@ -287,6 +318,15 @@ class TaskHandler:
             
             # Pass stop manager to coordinator
             coordinator.stop_manager = stop_manager
+            
+            # Initialize or restore comment detection
+            if comment_detection_state:
+                comment_detection_manager.restore_state(comment_detection_state)
+            else:
+                comment_detection_manager.initialize()
+            
+            # Pass comment detection manager to coordinator
+            coordinator.comment_detection_manager = comment_detection_manager
             
             # Execute with planning
             success = coordinator.execute_with_planning()
@@ -943,3 +983,71 @@ class TaskHandler:
             return self._process_command_field(task, data, error_state)
 
         return False
+
+    def _load_comment_detection_state(
+        self,
+        task_uuid: str,
+        task_config: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """一時停止されたタスクのコメント検出状態を読み込む.
+        
+        Args:
+            task_uuid: タスクのUUID
+            task_config: タスク設定
+            
+        Returns:
+            コメント検出状態の辞書、見つからない場合はNone
+        """
+        import json
+        from pathlib import Path
+        
+        context_storage_config = task_config.get("context_storage", {})
+        base_dir = Path(context_storage_config.get("base_dir", "contexts"))
+        running_dir = base_dir / "running" / task_uuid
+        
+        state_path = running_dir / "comment_detection_state.json"
+        
+        if not state_path.exists():
+            self.logger.debug("コメント検出状態ファイルが見つかりません: %s", state_path)
+            return None
+        
+        try:
+            with state_path.open() as f:
+                state = json.load(f)
+            self.logger.info("コメント検出状態を読み込みました: %s", state_path)
+            return state
+        except Exception as e:
+            self.logger.warning("コメント検出状態の読み込みに失敗: %s", e)
+            return None
+
+    def _save_comment_detection_state(
+        self,
+        task_uuid: str,
+        task_config: dict[str, Any],
+        state: dict[str, Any],
+    ) -> None:
+        """コメント検出状態を保存する.
+        
+        Args:
+            task_uuid: タスクのUUID
+            task_config: タスク設定
+            state: 保存する状態辞書
+        """
+        import json
+        from pathlib import Path
+        
+        context_storage_config = task_config.get("context_storage", {})
+        base_dir = Path(context_storage_config.get("base_dir", "contexts"))
+        running_dir = base_dir / "running" / task_uuid
+        
+        # ディレクトリが存在することを確認
+        running_dir.mkdir(parents=True, exist_ok=True)
+        
+        state_path = running_dir / "comment_detection_state.json"
+        
+        try:
+            with state_path.open("w") as f:
+                json.dump(state, f, indent=2, ensure_ascii=False)
+            self.logger.info("コメント検出状態を保存しました: %s", state_path)
+        except Exception as e:
+            self.logger.warning("コメント検出状態の保存に失敗: %s", e)

@@ -171,3 +171,17 @@ class Task(ABC):
             Exception: API呼び出しに失敗した場合
 
         """
+
+    @abstractmethod
+    def get_comments(self) -> list[dict[str, Any]]:
+        """Issue/MRの全コメントを取得する.
+
+        Returns:
+            コメント情報のリスト。各コメントは以下の構造を持つ:
+            - id: コメントの一意識別子（int または str）
+            - author: コメント作成者のユーザー名（str）
+            - body: コメント本文（str）
+            - created_at: 作成日時（ISO 8601形式、str）
+            - updated_at: 更新日時（ISO 8601形式、オプション、str | None）
+
+        """

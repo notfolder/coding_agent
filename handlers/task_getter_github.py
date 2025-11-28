@@ -169,6 +169,32 @@ class TaskGitHubIssue(Task):
         
         return self.get_assignees()
 
+    def get_comments(self) -> list[dict[str, Any]]:
+        """Issueの全コメントを取得する.
+
+        Returns:
+            コメント情報のリスト
+        """
+        args = {
+            "owner": self.config["github"]["owner"],
+            "repo": self.issue["repo"],
+            "issue_number": self.issue["number"],
+        }
+        raw_comments = self.mcp_client.call_tool("get_issue_comments", args)
+        
+        # 標準形式に変換
+        comments = []
+        for comment in raw_comments:
+            comments.append({
+                "id": comment.get("id"),
+                "author": comment.get("user", {}).get("login", ""),
+                "body": comment.get("body", ""),
+                "created_at": comment.get("created_at", ""),
+                "updated_at": comment.get("updated_at"),
+            })
+        
+        return comments
+
 
 class TaskGitHubPullRequest(Task):
     def __init__(
@@ -315,6 +341,34 @@ class TaskGitHubPullRequest(Task):
         self.pr["assignees"] = updated_pr.get("assignees", [])
         
         return self.get_assignees()
+
+    def get_comments(self) -> list[dict[str, Any]]:
+        """Pull Requestの会話コメントを取得する.
+
+        注: レビューコメント（コード固有）ではなく、
+        一般的な会話コメントのみを取得します。
+
+        Returns:
+            コメント情報のリスト
+        """
+        raw_comments = self.github_client.get_pull_request_comments(
+            owner=self.pr["owner"],
+            repo=self.pr["repo"],
+            pull_number=self.pr["number"],
+        )
+        
+        # 標準形式に変換
+        comments = []
+        for comment in raw_comments:
+            comments.append({
+                "id": comment.get("id"),
+                "author": comment.get("user", {}).get("login", ""),
+                "body": comment.get("body", ""),
+                "created_at": comment.get("created_at", ""),
+                "updated_at": comment.get("updated_at"),
+            })
+        
+        return comments
 
 
 class TaskGetterFromGitHub(TaskGetter):
