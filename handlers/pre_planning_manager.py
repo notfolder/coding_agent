@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 # 日付フォーマット定数
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+# 文字列切り詰め制限定数
+SUMMARY_TRUNCATION_LIMIT = 500  # 収集データのサマリー切り詰め文字数
+TEXT_TRUNCATION_LIMIT = 100  # 通知用テキスト切り詰め文字数
+
 
 class PrePlanningManager:
     """計画前情報収集フェーズを管理するマネージャークラス.
@@ -624,7 +628,7 @@ class PrePlanningManager:
                 tool_result = mcp_client.call_tool(actual_tool, parameters)
                 result["status"] = "collected"
                 result["collected_data"] = {
-                    "summary": str(tool_result)[:500],
+                    "summary": str(tool_result)[:SUMMARY_TRUNCATION_LIMIT],
                     "details": tool_result,
                 }
                 self.logger.info("情報収集成功: %s (試行 %d)", info_id, attempt + 1)
@@ -994,8 +998,8 @@ class PrePlanningManager:
             assumption_details = []
             for assumption in self.assumptions:
                 info_id = assumption.get("info_id", "unknown")
-                value = assumption.get("assumed_value", "")[:100]
-                reasoning = assumption.get("reasoning", "")[:100]
+                value = assumption.get("assumed_value", "")[:TEXT_TRUNCATION_LIMIT]
+                reasoning = assumption.get("reasoning", "")[:TEXT_TRUNCATION_LIMIT]
                 assumption_details.append(f"- {info_id}: {value} (理由: {reasoning})")
 
             assumptions_section = f"""

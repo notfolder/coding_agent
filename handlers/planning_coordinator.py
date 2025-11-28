@@ -17,6 +17,9 @@ from handlers.replan_manager import ReplanManager
 # 共通の日付フォーマット定数
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+# JSON出力の切り詰め制限定数
+JSON_TRUNCATION_LIMIT = 1000
+
 if TYPE_CHECKING:
     from clients.llm_base import LLMClient
     from clients.mcp_tool_client import MCPToolClient
@@ -1236,7 +1239,12 @@ Maintain the same JSON format as before for action_plan.actions."""
                 for category, info in collected_info.items():
                     if info:
                         prompt_parts.append(f"{category}:")
-                        prompt_parts.append(json.dumps(info, indent=2, ensure_ascii=False)[:1000])
+                        # JSON構造を保持するため、truncationは避け、要約形式で表示
+                        json_str = json.dumps(info, indent=2, ensure_ascii=False)
+                        if len(json_str) > JSON_TRUNCATION_LIMIT:
+                            prompt_parts.append(f"{json_str[:JSON_TRUNCATION_LIMIT]}... (省略)")
+                        else:
+                            prompt_parts.append(json_str)
                         prompt_parts.append("")
             
             # 推測した内容
