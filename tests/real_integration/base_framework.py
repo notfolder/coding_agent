@@ -434,14 +434,14 @@ class RealIntegrationTestFramework:
 
         try:
             llm_client.send_user_message(prompt)
-            response = llm_client.get_response()
+            response, _, tokens = llm_client.get_response()
             response = self._process_think_tags(response)
 
             # 応答を解析
             lines = response.strip().split("\n")
             verdict = lines[0].strip().upper()
 
-            self.logger.info("LLM verification verdict: %s", verdict)
+            self.logger.info("LLM verification verdict: %s (tokens: %d)", verdict, tokens)
             if len(lines) > 1:
                 self.logger.info("LLM verification explanation: %s", lines[1])
             else:
