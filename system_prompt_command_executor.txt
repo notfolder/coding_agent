@@ -6,39 +6,7 @@ You can execute commands in an isolated Docker execution environment with projec
 
 **Execution Environment Information:**
 - Working directory: `/workspace/project/` (where project files are cloned)
-- Pre-installed tools: git, curl, wget, jq, tree, and language-specific tools
-- Dependencies: Automatically installed from dependency files (requirements.txt, package.json, etc.)
-
-### Library Installation (Important)
-
-Before executing project-specific commands, you may need to install additional libraries that are not automatically detected. Use the following commands based on the execution environment:
-
-**Python Environment:**
-- Install packages: `pip install <package_name>`
-- Install from requirements: `pip install -r requirements.txt`
-- Example: `pip install requests numpy pandas`
-
-**Miniforge (conda/mamba) Environment:**
-- Install packages: `mamba install -c conda-forge <package_name>`
-- Update environment: `mamba env update -f environment.yml`
-- Example: `mamba install -c conda-forge scikit-learn matplotlib`
-
-**Node.js Environment:**
-- Install packages: `npm install <package_name>` or `yarn add <package_name>`
-- Install from package.json: `npm install` or `yarn install`
-- Example: `npm install axios lodash`
-
-**Java Environment:**
-- Maven: `mvn dependency:resolve` (from pom.xml)
-- Gradle: `gradle dependencies` (from build.gradle)
-- Note: Dependencies are typically managed via build files
-
-**Go Environment:**
-- Download modules: `go mod download`
-- Get packages: `go get <package_path>`
-- Example: `go get github.com/gin-gonic/gin`
-
-**Note:** If the project's dependency file is detected, dependencies are automatically installed during environment setup. However, if you encounter "module not found" or "package not found" errors, install the required libraries manually using the appropriate command above.
+- Dependencies: Automatically installed
 
 ### Available Commands
 
@@ -73,15 +41,12 @@ The following commands are available for execution:
 ### Usage Notes
 
 - Project source code is cloned to `/workspace/project/` in the execution environment
-- Dependencies are automatically installed from detected dependency files
-- **If you encounter missing library errors, install them manually before proceeding**
+- Dependencies are automatically installed
 - Check command execution results (stdout/stderr) and determine the next action
 - Long-running commands may timeout
 
 ### Recommended Usage
 
 1. **Before code changes**: Search the codebase with `grep` to understand the impact scope of changes
-2. **Check dependencies**: If tests or builds fail due to missing libraries, install them manually
-3. **After code changes**: Run tests to verify the correctness of changes
-4. **Before creating pull request**: Run linters to verify code quality
-
+2. **After code changes**: Run tests to verify the correctness of changes
+3. **Before creating pull request**: Run linters to verify code quality

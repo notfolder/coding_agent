@@ -18,7 +18,7 @@
 
 1. Python、Miniforge（conda）、Node.js、Java、Goの各言語用Dockerイメージを事前に準備する
 2. 各イメージにはgitとCommand Executor MCP Serverの基盤機能をあらかじめインストールしておく
-3. 計画作成後にLLMがプロジェクトに適した実行環境を選択する
+3. 計画作成時にLLMがプロジェクトに適した実行環境を選択する
 4. 環境起動後すぐにコマンド実行が可能な状態にする
 5. システムプロンプトに各言語のライブラリ導入手順に関する注意事項を追加する
 
@@ -45,13 +45,13 @@ flowchart TD
     end
     
     subgraph PlanningPhase[計画フェーズ]
-        Task[タスク受信] --> Planning[計画作成]
-        Planning --> EnvSelection[環境選択プロンプト]
-        EnvSelection --> |LLMが選択|SelectedEnv[選択された環境]
+        Task[タスク受信] --> Planning[計画作成依頼]
+        Planning --> |環境リスト含む|LLM[LLM]
+        LLM --> |計画＋選択環境|Response[計画応答]
     end
     
     subgraph ExecutionPhase[実行フェーズ]
-        SelectedEnv --> Container[コンテナ起動]
+        Response --> |選択された環境|Container[コンテナ起動]
         Container --> Clone[プロジェクトクローン]
         Clone --> Execute[コマンド実行]
     end
@@ -78,15 +78,14 @@ flowchart TD
 既存のExecutionEnvironmentManagerを拡張し、以下の機能を追加します：
 
 - 利用可能な環境リストの取得
-- 計画フェーズからの環境選択受付
-- 選択されたイメージを使用したコンテナ起動
+- 計画応答から環境名を受け取り、対応するイメージでコンテナを起動
 
 #### 2.2.3 PlanningCoordinator（拡張）
 
-計画フェーズに環境選択ステップを追加します：
+計画プロンプトに環境選択情報を追加します：
 
-- 計画作成完了後に環境選択プロンプトを生成
-- LLMからの環境選択応答を処理
+- 計画作成依頼時に利用可能な環境リストをプロンプトに含める
+- LLMからの計画応答に含まれる選択環境を取得
 - 選択された環境でExecutionEnvironmentManagerを呼び出し
 
 ---
@@ -99,8 +98,7 @@ flowchart TD
 
 #### 3.1.1 ベース構成
 
-- ベースOS: Debian系またはAlpine（言語に応じて最適なものを選択）
-- 非rootユーザーでの実行
+- ベースイメージ: 各言語の公式標準イメージを使用
 - 作業ディレクトリ: `/workspace`
 - プロジェクト配置場所: `/workspace/project`
 
@@ -128,14 +126,6 @@ coding-agent-executor-python:latest
 #### 3.2.2 構成内容
 
 - ベースイメージ: `python:3.11-slim-bookworm`
-- Python: 3.11（安定版）
-- pip: 最新版
-- venv: 仮想環境サポート
-- 追加ツール:
-  - pytest: テスト実行
-  - black: コードフォーマッター
-  - flake8: リンター
-  - mypy: 型チェッカー
 
 #### 3.2.3 推奨用途
 
@@ -154,12 +144,6 @@ coding-agent-executor-miniforge:latest
 #### 3.3.2 構成内容
 
 - ベースイメージ: `condaforge/miniforge3:latest`
-- Python: 3.11（condaで管理）
-- conda / mamba: パッケージマネージャー
-- 追加ツール:
-  - pytest: テスト実行
-  - black: コードフォーマッター
-  - flake8: リンター
 
 #### 3.3.3 推奨用途
 
@@ -178,14 +162,6 @@ coding-agent-executor-node:latest
 #### 3.4.2 構成内容
 
 - ベースイメージ: `node:20-slim`
-- Node.js: 20 LTS
-- npm: 最新版
-- yarn: 最新版
-- pnpm: 最新版
-- 追加ツール:
-  - eslint: リンター
-  - prettier: コードフォーマッター
-  - typescript: TypeScriptコンパイラ
 
 #### 3.4.3 推奨用途
 
@@ -204,11 +180,6 @@ coding-agent-executor-java:latest
 #### 3.5.2 構成内容
 
 - ベースイメージ: `eclipse-temurin:21-jdk-jammy`
-- Java: 21 LTS（Eclipse Temurin）
-- Maven: 3.9.x
-- Gradle: 8.x
-- 追加ツール:
-  - JUnit: テストフレームワーク（プロジェクト依存）
 
 #### 3.5.3 推奨用途
 
@@ -227,11 +198,6 @@ coding-agent-executor-go:latest
 #### 3.6.2 構成内容
 
 - ベースイメージ: `golang:1.22-bookworm`
-- Go: 1.22（最新安定版）
-- go mod: モジュール管理
-- 追加ツール:
-  - golangci-lint: リンター
-  - gofmt: フォーマッター
 
 #### 3.6.3 推奨用途
 
@@ -241,13 +207,13 @@ coding-agent-executor-go:latest
 
 ### 3.7 イメージ一覧
 
-| イメージ名 | 説明 | 主な言語/ツール | 推奨プロジェクト |
-|-----------|------|----------------|-----------------|
-| coding-agent-executor-python | Python開発環境 | Python 3.11, pip | 純粋Pythonプロジェクト |
-| coding-agent-executor-miniforge | データサイエンス環境 | conda/mamba, Python | 科学計算、ML/AI |
-| coding-agent-executor-node | JavaScript/TypeScript環境 | Node.js 20, npm/yarn | フロントエンド、Node.jsバックエンド |
-| coding-agent-executor-java | Java/JVM環境 | Java 21, Maven/Gradle | Spring Boot、Java/Kotlin |
-| coding-agent-executor-go | Go環境 | Go 1.22 | Goプロジェクト、CLIツール |
+| 環境名 | イメージ名 | ベースイメージ |
+|--------|-----------|---------------|
+| python | coding-agent-executor-python:latest | python:3.11-slim-bookworm |
+| miniforge | coding-agent-executor-miniforge:latest | condaforge/miniforge3:latest |
+| node | coding-agent-executor-node:latest | node:20-slim |
+| java | coding-agent-executor-java:latest | eclipse-temurin:21-jdk-jammy |
+| go | coding-agent-executor-go:latest | golang:1.22-bookworm |
 
 ---
 
@@ -273,13 +239,10 @@ docker/
 
 各Dockerfileは以下の構造に従います：
 
-1. ベースイメージの指定
+1. 言語標準ベースイメージの指定
 2. 共通パッケージのインストール（git、curl等）
-3. 言語固有のツールインストール
-4. 開発ツール（リンター、フォーマッター等）のインストール
-5. 作業ディレクトリの設定
-6. 非rootユーザーの設定（任意）
-7. ENTRYPOINTの設定
+3. 作業ディレクトリの設定
+4. ENTRYPOINTの設定
 
 ---
 
@@ -287,7 +250,7 @@ docker/
 
 ### 5.1 プロファイルによるビルド管理
 
-docker-compose.ymlにダミープロファイルを使用してビルド専用の設定を追加します。これにより、実行せずにイメージのビルドのみを行うことができます。
+docker-compose.ymlにビルド専用プロファイルを使用してビルド専用の設定を追加します。これにより、実行せずにイメージのビルドのみを行うことができます。
 
 #### 5.1.1 プロファイル設計
 
@@ -322,42 +285,36 @@ docker compose --profile executor-build build executor-python
 
 ---
 
-## 6. 環境選択プロセス
+## 6. 計画プロンプトへの環境選択統合
 
-### 6.1 選択フロー
+### 6.1 概要
 
-```mermaid
-sequenceDiagram
-    participant TH as TaskHandler
-    participant PC as PlanningCoordinator
-    participant LLM as LLMClient
-    participant EM as ExecutionEnvironmentManager
+環境選択は独立したフェーズではなく、計画作成プロンプトに統合します。LLMは計画作成と同時に適切な実行環境を選択します。
 
-    TH->>PC: タスク処理開始
-    PC->>LLM: 計画作成依頼
-    LLM-->>PC: 計画（JSON）
-    PC->>EM: 利用可能環境リスト取得
-    EM-->>PC: 環境リスト
-    PC->>LLM: 環境選択プロンプト
-    Note over PC,LLM: プロジェクト情報と環境リストを提示
-    LLM-->>PC: 選択された環境
-    PC->>EM: prepare(task, selected_environment)
-    EM-->>PC: ContainerInfo
-    PC->>PC: 実行フェーズへ
+### 6.2 計画プロンプトへの追加内容
+
+計画作成依頼のプロンプトに以下の情報を追加します：
+
+#### 6.2.1 利用可能環境リスト
+
 ```
+## Execution Environment Selection
 
-### 6.2 環境選択プロンプト
+You must select an appropriate execution environment for this task. The following environments are available:
 
-計画作成後、LLMに環境選択を依頼するためのプロンプトを構築します。
+| Environment | Image | Recommended For |
+|------------|-------|-----------------|
+| python | coding-agent-executor-python:latest | Pure Python projects, Django/Flask |
+| miniforge | coding-agent-executor-miniforge:latest | Data science, conda environments |
+| node | coding-agent-executor-node:latest | JavaScript/TypeScript, React/Vue/Angular |
+| java | coding-agent-executor-java:latest | Java/Kotlin, Spring Boot |
+| go | coding-agent-executor-go:latest | Go projects, CLI tools |
 
-#### 6.2.1 プロンプト内容
-
-プロンプトには以下の情報を含めます：
-
-1. 利用可能な環境のリストと各環境の特徴
-2. プロジェクトの情報（検出されたファイル、言語等）
-3. 選択基準のガイドライン
-4. 応答形式の指定
+Select the environment based on:
+- Project's dependency files (requirements.txt → python, package.json → node, etc.)
+- The main programming language used in the project
+- The task requirements
+```
 
 #### 6.2.2 環境選択の判断基準
 
@@ -372,41 +329,38 @@ LLMは以下の情報を基に環境を選択します：
 - プロジェクトの説明やIssue/MRの内容
 - 必要なツールやライブラリ
 
-#### 6.2.3 応答形式
+### 6.3 計画応答形式の拡張
 
-LLMは以下のJSON形式で環境を選択します：
+既存の計画応答形式に`selected_environment`フィールドを追加します：
 
 ```json
 {
-  "phase": "environment_selection",
-  "selected_environment": "python",
-  "reasoning": "プロジェクトにrequirements.txtが存在し、Django Webアプリケーションであるため、Python環境を選択しました。",
-  "detected_files": ["requirements.txt", "manage.py", "setup.py"],
-  "comment": "Python環境（coding-agent-executor-python）を選択しました。"
+  "phase": "planning",
+  "goal_understanding": {
+    "main_objective": "...",
+    "success_criteria": ["..."],
+    "constraints": ["..."],
+    "context_analysis": "..."
+  },
+  "task_decomposition": {
+    "reasoning": "...",
+    "subtasks": [...]
+  },
+  "action_plan": {
+    "execution_order": ["..."],
+    "actions": [...]
+  },
+  "selected_environment": {
+    "name": "python",
+    "reasoning": "プロジェクトにrequirements.txtが存在し、Django Webアプリケーションであるため、Python環境を選択しました。"
+  },
+  "comment": "計画を作成しました。Python環境を使用します。"
 }
 ```
 
-### 6.3 環境選択の実装詳細
-
-#### 6.3.1 ExecutionEnvironmentManagerの拡張
-
-ExecutionEnvironmentManagerクラスに以下のメソッドを追加します：
-
-- `get_available_environments()`: 利用可能な環境リストを返す
-- `get_environment_image(environment_name)`: 環境名からイメージ名を取得
-- `prepare(task, environment)`: 指定された環境でコンテナを準備
-
-#### 6.3.2 PlanningCoordinatorの拡張
-
-PlanningCoordinatorクラスに以下の処理を追加します：
-
-- 計画フェーズ完了後に環境選択ステップを実行
-- 環境選択プロンプトの構築
-- 選択結果の検証とExecutionEnvironmentManagerへの委譲
-
 ---
 
-## 7. 処理シーケンス（変更後）
+## 7. 処理シーケンス
 
 ### 7.1 タスク処理全体フロー
 
@@ -423,18 +377,14 @@ sequenceDiagram
     TH->>PC: PlanningCoordinator作成
     
     rect rgb(200, 220, 255)
-        Note over PC,LLM: 計画フェーズ
-        PC->>LLM: 計画作成依頼
-        LLM-->>PC: 計画（JSON）
+        Note over PC,LLM: 計画フェーズ（環境選択含む）
+        PC->>LLM: 計画作成依頼（環境リスト含む）
+        LLM-->>PC: 計画（JSON）+ 選択環境
         PC->>PC: 計画をIssue/MRに投稿
     end
     
     rect rgb(255, 220, 200)
-        Note over PC,EM: 環境選択フェーズ（新規）
-        PC->>EM: 利用可能環境リスト取得
-        EM-->>PC: 環境リスト
-        PC->>LLM: 環境選択プロンプト
-        LLM-->>PC: 選択された環境
+        Note over PC,EM: 環境準備
         PC->>EM: prepare(task, selected_environment)
         EM-->>PC: ContainerInfo
     end
@@ -462,8 +412,9 @@ sequenceDiagram
 
 | 項目 | 変更前 | 変更後 |
 |------|--------|--------|
-| コンテナ作成タイミング | タスク作成時 | 計画作成後（環境選択後） |
+| コンテナ作成タイミング | タスク作成時 | 計画作成後 |
 | イメージ選択 | 固定（単一イメージ） | 計画フェーズでLLMが選択 |
+| 環境選択方式 | なし | 計画プロンプトに統合 |
 | git/ツールインストール | コンテナ起動後に実行 | イメージに事前インストール済み |
 | 環境種類 | 1種類 | 5種類（Python, Miniforge, Node.js, Java, Go） |
 
@@ -503,66 +454,17 @@ sequenceDiagram
 command_executor:
   enabled: true
   
-  # 利用可能な実行環境
+  # 利用可能な実行環境（環境名: イメージ名）
   environments:
-    python:
-      image: "coding-agent-executor-python:latest"
-      description: "Python 3.11 development environment with pip, pytest, black, flake8"
-      file_indicators:
-        - "requirements.txt"
-        - "setup.py"
-        - "pyproject.toml"
-        - "Pipfile"
-      
-    miniforge:
-      image: "coding-agent-executor-miniforge:latest"
-      description: "Data science environment with conda/mamba, Python, NumPy, pandas"
-      file_indicators:
-        - "environment.yml"
-        - "condaenv.yaml"
-        - "conda-lock.yml"
-      
-    node:
-      image: "coding-agent-executor-node:latest"
-      description: "Node.js 20 LTS with npm, yarn, pnpm, TypeScript, ESLint"
-      file_indicators:
-        - "package.json"
-        - "yarn.lock"
-        - "pnpm-lock.yaml"
-      
-    java:
-      image: "coding-agent-executor-java:latest"
-      description: "Java 21 LTS with Maven and Gradle"
-      file_indicators:
-        - "pom.xml"
-        - "build.gradle"
-        - "build.gradle.kts"
-      
-    go:
-      image: "coding-agent-executor-go:latest"
-      description: "Go 1.22 with go mod and golangci-lint"
-      file_indicators:
-        - "go.mod"
-        - "go.sum"
+    python: "coding-agent-executor-python:latest"
+    miniforge: "coding-agent-executor-miniforge:latest"
+    node: "coding-agent-executor-node:latest"
+    java: "coding-agent-executor-java:latest"
+    go: "coding-agent-executor-go:latest"
   
   # デフォルト環境（環境選択に失敗した場合）
   default_environment: "python"
-  
-  # 環境選択を有効にするか（falseの場合はdefault_environmentを使用）
-  enable_environment_selection: true
 ```
-
-### 9.2 環境変数
-
-| 環境変数名 | 説明 | デフォルト値 |
-|-----------|------|-------------|
-| EXECUTOR_ENV_SELECTION_ENABLED | 環境選択の有効/無効 | true |
-| EXECUTOR_DEFAULT_ENVIRONMENT | デフォルト環境名 | python |
-| EXECUTOR_PYTHON_IMAGE | Python環境イメージ名 | coding-agent-executor-python:latest |
-| EXECUTOR_MINIFORGE_IMAGE | Miniforge環境イメージ名 | coding-agent-executor-miniforge:latest |
-| EXECUTOR_NODE_IMAGE | Node.js環境イメージ名 | coding-agent-executor-node:latest |
-| EXECUTOR_JAVA_IMAGE | Java環境イメージ名 | coding-agent-executor-java:latest |
-| EXECUTOR_GO_IMAGE | Go環境イメージ名 | coding-agent-executor-go:latest |
 
 ---
 
@@ -576,20 +478,12 @@ classDiagram
         -docker_client
         -config
         -active_containers: Dict
-        -available_environments: Dict
-        +get_available_environments() List~EnvironmentInfo~
-        +get_environment_image(name) str
-        +prepare(task, environment) ContainerInfo
+        -environments: Dict~str, str~
+        +get_available_environments() Dict~str, str~
+        +prepare(task, environment_name) ContainerInfo
         +execute_command(command, working_directory) ExecutionResult
         +cleanup(task_uuid)
         +cleanup_stale_containers()
-    }
-    
-    class EnvironmentInfo {
-        +name: str
-        +image: str
-        +description: str
-        +file_indicators: List~str~
     }
     
     class ContainerInfo {
@@ -608,28 +502,31 @@ classDiagram
         -execution_manager
         +execute_with_planning()
         -_planning_phase()
-        -_environment_selection_phase()
         -_execution_phase()
+        -_extract_selected_environment(plan_response)
     }
     
-    ExecutionEnvironmentManager --> EnvironmentInfo
     ExecutionEnvironmentManager --> ContainerInfo
     PlanningCoordinator --> ExecutionEnvironmentManager
 ```
 
-### 10.2 新規データクラス
+### 10.2 ExecutionEnvironmentManager変更点
 
-#### EnvironmentInfo
+既存のExecutionEnvironmentManagerクラスに以下の変更を加えます：
 
-利用可能な実行環境の情報を保持するデータクラスです。
+- `environments`属性: 環境名からイメージ名へのマッピング（Dict[str, str]）
+- `get_available_environments()`: 環境名とイメージ名の辞書を返す
+- `prepare(task, environment_name)`: 環境名を受け取り、対応するイメージでコンテナを作成
 
-**属性:**
-- `name`: 環境の識別名（python, miniforge, node, java, go）
-- `image`: Dockerイメージ名
-- `description`: 環境の説明
-- `file_indicators`: この環境を推奨するファイルパターンのリスト
+### 10.3 PlanningCoordinator変更点
 
-### 10.3 ContainerInfo（拡張）
+既存のPlanningCoordinatorクラスに以下の変更を加えます：
+
+- 計画プロンプトに環境リストと選択指示を追加
+- `_extract_selected_environment(plan_response)`: 計画応答から選択された環境名を抽出
+- 計画フェーズ完了後、抽出した環境名でExecutionEnvironmentManager.prepareを呼び出し
+
+### 10.4 ContainerInfo（拡張）
 
 既存のContainerInfoクラスに`environment_name`属性を追加し、使用された環境を記録します。
 
@@ -660,77 +557,12 @@ LLMが存在しない環境名を選択した場合：
 
 以下の場合は環境選択をスキップし、デフォルト環境を使用します：
 
-- `enable_environment_selection`が`false`の場合
+- 計画応答に`selected_environment`が含まれない場合
 - LLMからの応答が不正な形式の場合
-- タイムアウトした場合
 
 ---
 
-## 12. 運用ガイドライン
-
-### 12.1 イメージのビルドと管理
-
-#### 12.1.1 初回セットアップ
-
-```bash
-# 全ての実行環境イメージをビルド
-docker compose --profile executor-build build
-
-# イメージの確認
-docker images | grep coding-agent-executor
-```
-
-#### 12.1.2 イメージの更新
-
-```bash
-# 特定の環境イメージを再ビルド
-docker compose --profile executor-build build --no-cache executor-python
-
-# 全イメージを再ビルド
-docker compose --profile executor-build build --no-cache
-```
-
-### 12.2 監視項目
-
-- 各環境イメージのビルド成功/失敗
-- 環境選択の成功率
-- 環境別のコンテナ使用率
-- イメージサイズの監視
-
-### 12.3 トラブルシューティング
-
-#### イメージが見つからない場合
-
-1. `docker images`でイメージの存在を確認
-2. 存在しない場合は`docker compose --profile executor-build build`でビルド
-3. ビルドが失敗する場合はDockerfileとベースイメージを確認
-
-#### 環境選択が正しく動作しない場合
-
-1. ログで環境選択プロンプトと応答を確認
-2. プロジェクトのファイル構成を確認
-3. 設定ファイルの`file_indicators`設定を確認
-
----
-
-## 13. 今後の拡張
-
-### 13.1 検討中の機能
-
-- **カスタム環境の追加**: プロジェクト固有のDockerイメージを登録可能にする
-- **マルチ言語環境**: 複数の言語ランタイムを含む統合環境
-- **環境キャッシュ**: 同一プロジェクトでの再利用時にイメージを再利用
-- **環境プリウォーム**: よく使われる環境を事前に起動しておく
-
-### 13.2 制限事項
-
-- GPUサポートは現時点では非対応
-- Windows/macOS固有のツールは非対応
-- コンテナ間の通信は非対応
-
----
-
-## 14. 関連ドキュメント
+## 12. 関連ドキュメント
 
 - [Command Executor MCP Server連携仕様](COMMAND_EXECUTOR_MCP_SPECIFICATION.md)
 - [プランニングプロセス仕様](PLANNING_SPECIFICATION.md)
@@ -738,6 +570,6 @@ docker compose --profile executor-build build --no-cache
 
 ---
 
-**文書バージョン:** 1.0  
+**文書バージョン:** 1.1  
 **最終更新日:** 2024-11-29  
 **ステータス:** 設計中

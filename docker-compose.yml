@@ -232,61 +232,6 @@ services:
       retries: 3
       start_period: 30s
 
-  # ============================================
-  # 実行環境イメージ（ビルド専用）
-  # docker compose --profile executor-build build でビルド
-  # ============================================
-
-  # Python実行環境
-  executor-python:
-    build:
-      context: ./docker/executor-python
-      dockerfile: Dockerfile
-    image: coding-agent-executor-python:latest
-    profiles:
-      - executor-build
-    command: ["echo", "Build only - not for running"]
-
-  # Miniforge（conda/mamba）実行環境
-  executor-miniforge:
-    build:
-      context: ./docker/executor-miniforge
-      dockerfile: Dockerfile
-    image: coding-agent-executor-miniforge:latest
-    profiles:
-      - executor-build
-    command: ["echo", "Build only - not for running"]
-
-  # Node.js実行環境
-  executor-node:
-    build:
-      context: ./docker/executor-node
-      dockerfile: Dockerfile
-    image: coding-agent-executor-node:latest
-    profiles:
-      - executor-build
-    command: ["echo", "Build only - not for running"]
-
-  # Java実行環境
-  executor-java:
-    build:
-      context: ./docker/executor-java
-      dockerfile: Dockerfile
-    image: coding-agent-executor-java:latest
-    profiles:
-      - executor-build
-    command: ["echo", "Build only - not for running"]
-
-  # Go実行環境
-  executor-go:
-    build:
-      context: ./docker/executor-go
-      dockerfile: Dockerfile
-    image: coding-agent-executor-go:latest
-    profiles:
-      - executor-build
-    command: ["echo", "Build only - not for running"]
-
 volumes:
   rabbitmq_data:
   user-config-data:
