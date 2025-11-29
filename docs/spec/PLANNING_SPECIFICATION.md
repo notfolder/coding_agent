@@ -10,7 +10,7 @@
 
 本仕様は以下をカバーします：
 
-- プランニングプロセスの5つのフェーズの詳細
+- プランニングプロセスの6つのフェーズの詳細
 - 各フェーズの入出力形式
 - アーキテクチャ設計と実装詳細設計
 - システムプロンプト拡張仕様
@@ -44,7 +44,17 @@ flowchart TD
         E -->|No| G[エラー処理]
         F --> H{完了?}
         H -->|No| D
-        H -->|Yes| I[完了報告]
+        H -->|Yes| I[検証フェーズへ]
+    end
+    
+    subgraph Verification[検証フェーズ]
+        V1[実装完全性チェック] --> V2{検証合格?}
+        V2 -->|Yes| V3[完了報告]
+        V2 -->|No| V4[追加作業特定]
+        V4 --> V5[追加アクション実行]
+        V5 --> V6{再検証?}
+        V6 -->|Yes| V1
+        V6 -->|No| V3
     end
     
     subgraph Reflection[振り返りフェーズ]
@@ -56,16 +66,18 @@ flowchart TD
     
     C --> D
     G --> J
-    I --> N[タスク完了]
+    I --> V1
+    V3 --> N[タスク完了]
 ```
 
-### 2.2 5つのフェーズ
+### 2.2 6つのフェーズ
 
 1. **目標の理解（Goal Understanding）**: ユーザーからの指示や達成すべき目標を理解
 2. **タスクの分解（Task Decomposition）**: 複雑な目標を実行可能な小さなサブタスクに分割
 3. **行動系列の生成（Action Sequence Generation）**: 実行順序とツール使用計画を策定
 4. **実行（Execution）**: 計画された行動を順番に実行
-5. **監視と修正（Monitoring and Reflection）**: 実行結果を評価し、必要に応じて計画を修正
+5. **検証（Verification）**: すべてのアクション完了後に実装の完全性を検証
+6. **監視と修正（Monitoring and Reflection）**: 実行結果を評価し、必要に応じて計画を修正
 
 ---
 
@@ -196,15 +208,108 @@ sequenceDiagram
 
 ---
 
-## 7. 監視と修正（Monitoring and Reflection）
+## 7. 検証（Verification）
 
-### 7.1 監視対象
+### 7.1 概要
+
+すべての計画アクション完了後、実装の完全性を検証するフェーズです。プレースホルダの検出、成功基準の達成度確認を行い、必要に応じて追加作業を実行します。
+
+### 7.2 検証内容
+
+#### 実装完全性チェック
+
+以下の項目を検証します：
+
+- すべての関数/メソッドが完全に実装されているか（プレースホルダなし）
+- すべてのコードパスが完成しているか
+- タスクで要求されたすべての機能が実装されているか
+- テスト（必要な場合）が実装され、合格しているか
+- ドキュメント（必要な場合）が完成しているか
+
+#### プレースホルダ検出
+
+以下のパターンを検出します：
+
+- `TODO`
+- `FIXME`
+- `'...'`
+- `'# implementation here'`
+- 実装が必要な`pass`文
+- `raise NotImplementedError`
+
+### 7.3 検証プロセス
+
+```mermaid
+flowchart TD
+    A[検証開始] --> B[ファイル再読み込み]
+    B --> C[プレースホルダ検出]
+    C --> D[成功基準チェック]
+    D --> E{検証合格?}
+    E -->|Yes| F[完了報告]
+    E -->|No| G[問題特定]
+    G --> H[追加アクション生成]
+    H --> I[追加作業実行]
+    I --> J{再検証?}
+    J -->|Yes| B
+    J -->|No| F
+```
+
+### 7.4 出力形式
+
+検証結果は以下のJSON形式で出力されます：
+
+```json
+{
+  "phase": "verification",
+  "verification_passed": true,
+  "issues_found": ["問題1", "問題2"],
+  "placeholder_detected": {
+    "count": 0,
+    "locations": []
+  },
+  "additional_work_needed": false,
+  "additional_actions": [
+    {
+      "task_id": "verification_fix_1",
+      "action_type": "tool_call",
+      "tool": "ツール名",
+      "parameters": {},
+      "purpose": "不完全な実装の修正",
+      "expected_outcome": "完全に実装された機能"
+    }
+  ],
+  "completion_confidence": 0.95,
+  "comment": "検証結果のサマリー"
+}
+```
+
+### 7.5 追加作業の実行
+
+検証で問題が検出された場合：
+
+1. 追加アクションを計画に追加
+2. チェックリストを更新（元の計画と追加作業を区別）
+3. 追加アクションを実行
+4. 最大検証ラウンド数まで再検証を繰り返し
+
+### 7.6 検証設定
+
+`config.yaml`の`planning.verification`セクションで以下を設定：
+
+- **enabled**: 検証フェーズの有効/無効（デフォルト: true）
+- **max_rounds**: 最大検証ラウンド数（デフォルト: 2）
+
+---
+
+## 8. 監視と修正（Monitoring and Reflection）
+
+### 8.1 監視対象
 
 - アクションの成功/失敗
 - 期待される結果との差異
 - 副作用や予期しない影響
 
-### 7.2 リフレクションタイプ
+### 8.2 リフレクションタイプ
 
 #### 自動リフレクション（Automatic Reflection）
 
@@ -223,7 +328,7 @@ sequenceDiagram
 - PRレビューでのフィードバック
 - 明示的な修正要求
 
-### 7.3 計画修正プロセス
+### 8.3 計画修正プロセス
 
 ```mermaid
 flowchart TD
@@ -241,9 +346,9 @@ flowchart TD
 
 ---
 
-## 8. アーキテクチャ
+## 9. アーキテクチャ
 
-### 8.1 クラス図
+### 9.1 クラス図
 
 ```mermaid
 classDiagram
@@ -255,6 +360,7 @@ classDiagram
         +execute_with_planning()
         -_planning_phase()
         -_execution_phase()
+        -_execute_verification_phase()
         -_reflection_phase()
     }
     
@@ -263,6 +369,7 @@ classDiagram
         +append_entry()
         +get_recent_entries()
         +load_full_history()
+        +save_verification()
     }
     
     class TaskHandler {
@@ -274,17 +381,25 @@ classDiagram
     PlanningCoordinator --> PlanningHistoryStore
 ```
 
-### 8.2 主要コンポーネント
+### 9.2 主要コンポーネント
 
 #### PlanningCoordinator
 
 プランニングプロセス全体を調整するコーディネータークラスです。
 
 **責務:**
-- 5つのフェーズの制御
+- 6つのフェーズの制御
 - LLMとの対話管理
 - 履歴の管理
 - Issue/MRへの進捗コメント投稿
+
+**検証フェーズ関連メソッド:**
+- `_execute_verification_phase()`: 検証フェーズを実行
+- `_build_verification_prompt()`: 検証プロンプトを構築
+- `_build_executed_actions_summary()`: 実行済みアクションのサマリー作成
+- `_extract_success_criteria()`: 成功基準の抽出
+- `_post_verification_result()`: 検証結果をIssue/MRに投稿
+- `_update_checklist_for_additional_work()`: 追加作業用にチェックリストを更新
 
 #### PlanningHistoryStore
 
@@ -294,10 +409,11 @@ classDiagram
 - 履歴のJSONL形式での保存
 - 履歴の読み込みと参照
 - 古い履歴の管理
+- 検証結果の保存
 
 ---
 
-## 9. チェックリスト機能
+## 10. チェックリスト機能
 
 ### 9.1 概要
 
@@ -317,6 +433,25 @@ classDiagram
 - 計画完了時: チェックリストを新規投稿
 - 各サブタスク完了時: チェックリストを更新（チェック済みに変更）
 - 計画修正時: チェックリストを再投稿
+- 検証フェーズで追加作業が必要な場合: 元の計画（完了）と追加作業（未完了）を区別してチェックリストを更新
+
+### 9.4 検証ラウンド時のチェックリスト
+
+検証フェーズで追加作業が必要になった場合、以下の形式でチェックリストを更新します：
+
+```markdown
+## 📋 Execution Plan (Verification Round)
+
+### Original Plan (Completed)
+- [x] **task_1**: 実装する
+- [x] **task_2**: テストを追加
+
+### Additional Work (From Verification)
+- [ ] **verification_fix_1**: プレースホルダを完全実装に置き換え
+- [ ] **verification_fix_2**: 不足しているテストを追加
+
+*Progress: 2/4 (50%) - Verification found 2 additional items*
+```
 
 ---
 
@@ -330,6 +465,10 @@ planningセクションで以下を設定します：
 - **max_reflection_count**: 最大リフレクション回数（デフォルト: 3）
 - **max_plan_revision_count**: 最大計画修正回数（デフォルト: 2）
 - **reflection_interval**: リフレクション間隔（アクション数、デフォルト: 5）
+
+**検証フェーズ設定（planning.verification）**:
+- **enabled**: 検証フェーズの有効/無効（デフォルト: true）
+- **max_rounds**: 最大検証ラウンド数（デフォルト: 2）
 
 ### 10.2 環境変数
 
@@ -361,6 +500,13 @@ planningセクションで以下を設定します：
 2. Issue/MRに警告コメントを投稿
 3. 現在の計画で実行を継続
 
+### 11.4 検証失敗
+
+検証フェーズで最大ラウンド数に達した場合：
+1. 検証結果をIssue/MRに投稿
+2. 特定された問題をリスト化
+3. タスクを完了として扱う（部分完了として記録）
+
 ---
 
 ## 12. 関連ドキュメント
@@ -368,9 +514,11 @@ planningセクションで以下を設定します：
 - [基本仕様](spec.md)
 - [クラス設計](class_spec.md)
 - [コンテキストファイル化仕様](context_file_spec.md)
+- [事前計画仕様](PRE_PLANNING_INFORMATION_GATHERING_SPECIFICATION.md)
+- [再計画仕様](REPLANNING_SPECIFICATION.md)
 
 ---
 
-**文書バージョン:** 2.0  
-**最終更新日:** 2024-11-28  
-**ステータス:** 実装済み
+**文書バージョン:** 3.0  
+**最終更新日:** 2025-01-17  
+**ステータス:** 実装済み（検証フェーズ追加）

@@ -128,6 +128,15 @@ planning:
     # 最大計画修正回数
     max_revisions: 3
 
+  # 検証フェーズ設定
+  verification:
+    # 検証フェーズの有効/無効(デフォルト: true)
+    enabled: true
+    
+    # 最大検証ラウンド数(デフォルト: 2)
+    # 追加作業実行後に再検証を何回まで繰り返すか
+    max_rounds: 2
+
   # 再計画(リプランニング)設定
   replanning:
     # 再計画機能の有効/無効(デフォルト: true)

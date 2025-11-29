@@ -375,6 +375,133 @@ class PlanningCoordinator:
                     self.logger.info("Task completed successfully")
                     break
             
+            # Step 4: Verification phase
+            verification_config = self.config.get("verification", {})
+            if verification_config.get("enabled", True):
+                self.logger.info("All planned actions executed, starting verification phase")
+                self._post_phase_comment("verification", "started", "Verifying task completion...")
+
+                max_verification_rounds = verification_config.get("max_rounds", 2)
+                verification_round = 0
+
+                while verification_round < max_verification_rounds:
+                    verification_round += 1
+
+                    # Check for pause/stop signals before verification
+                    if self._check_pause_signal():
+                        self.logger.info("Pause signal detected during verification")
+                        self._handle_pause()
+                        return True
+
+                    if self._check_stop_signal():
+                        self.logger.info("Stop signal detected during verification")
+                        self._handle_stop()
+                        return True
+
+                    # Check for new comments
+                    self._check_and_add_new_comments()
+
+                    verification_result = self._execute_verification_phase()
+
+                    if not verification_result:
+                        self._post_phase_comment("verification", "failed", "Could not parse verification result")
+                        break
+
+                    self._post_verification_result(verification_result)
+
+                    if verification_result.get("verification_passed"):
+                        self.logger.info("Verification passed!")
+                        self._post_phase_comment("verification", "completed", "All requirements verified ✅")
+                        break
+
+                    additional_actions = verification_result.get("additional_actions", [])
+
+                    if not additional_actions:
+                        issues_list = "\n".join(
+                            f"- {issue}" for issue in verification_result.get("issues_found", [])
+                        )
+                        self._post_phase_comment(
+                            "verification",
+                            "failed",
+                            f"Verification failed but no additional actions provided. Issues found:\n{issues_list}",
+                        )
+                        break
+
+                    # 追加アクションを計画に追加
+                    self.logger.info("Adding %d additional actions to plan", len(additional_actions))
+                    current_actions = self.current_plan.get("action_plan", {}).get("actions", [])
+                    current_actions.extend(additional_actions)
+
+                    # チェックリスト更新
+                    self._update_checklist_for_additional_work(verification_result, additional_actions)
+
+                    # 追加アクションを実行
+                    self._post_phase_comment(
+                        "execution",
+                        "started",
+                        f"Executing {len(additional_actions)} additional actions to address verification issues...",
+                    )
+
+                    # 追加アクション実行ループ用の別カウンター
+                    additional_work_iteration = 0
+                    max_additional_iterations = min(len(additional_actions) * 3, max_iterations)
+
+                    while not self._is_complete():
+                        if additional_work_iteration >= max_additional_iterations:
+                            self.logger.warning("Max iterations reached during additional work")
+                            break
+
+                        additional_work_iteration += 1
+
+                        # Check for pause/stop signals
+                        if self._check_pause_signal():
+                            self.logger.info("Pause signal detected during additional work")
+                            self._handle_pause()
+                            return True
+
+                        if self._check_stop_signal():
+                            self.logger.info("Stop signal detected during additional work")
+                            self._handle_stop()
+                            return True
+
+                        self._check_and_add_new_comments()
+
+                        result = self._execute_action()
+
+                        if result is None:
+                            break
+
+                        # エラーハンドリング
+                        if result.get("status") == "error":
+                            self.error_count += 1
+                            self.consecutive_errors += 1
+                            error_msg = result.get("error", "Unknown error occurred")
+                            self._post_phase_comment("execution", "failed", f"Action failed: {error_msg}")
+
+                            if self.replan_manager.enabled:
+                                decision = self._request_execution_replan_decision(
+                                    result.get("action", {}), result
+                                )
+                                if self._handle_replan(decision):
+                                    continue
+
+                            if not self.config.get("continue_on_error", False):
+                                return False
+                        else:
+                            self.consecutive_errors = 0
+
+                        self._update_checklist_progress(self.action_counter - 1)
+
+                        if result.get("done"):
+                            break
+
+                    # 次の検証ラウンドへ
+                    self.logger.info(
+                        "Completed additional work, re-verifying (round %d/%d)",
+                        verification_round + 1,
+                        max_verification_rounds,
+                    )
+
             # Mark all tasks complete
             self._mark_checklist_complete()
             self._post_phase_comment("execution", "completed", "All planned actions have been executed successfully.")
@@ -1557,6 +1684,322 @@ Maintain the same JSON format as before for action_plan.actions."""
         except Exception as e:
             self.logger.error("Failed to mark checklist complete: %s", str(e))
 
+    def _execute_verification_phase(self) -> dict[str, Any] | None:
+        """検証フェーズを実行する.
+
+        すべての計画アクション完了後に実行され、実装の完全性を検証します。
+        プレースホルダの検出、成功基準の達成度チェックを行います。
+
+        Returns:
+            検証結果の辞書、またはパース失敗時はNone
+
+        """
+        try:
+            # 検証プロンプトを構築
+            verification_prompt = self._build_verification_prompt()
+
+            # LLMに検証を依頼
+            self.llm_client.send_user_message(verification_prompt)
+            response, functions, tokens = self.llm_client.get_response()
+            self.logger.info("Verification phase LLM response (tokens: %d)", tokens)
+
+            # トークン数を記録
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
+
+            # 検証のためにツールを使用する可能性があるため、function callsを処理
+            error_state = {"last_tool": None, "tool_error_count": 0}
+            if functions:
+                if not isinstance(functions, list):
+                    functions = [functions]
+                for function in functions:
+                    self._execute_function_call(function, error_state)
+
+                # ツール実行後の追加応答を取得
+                response, _, additional_tokens = self.llm_client.get_response()
+                tokens += additional_tokens
+                self.context_manager.update_statistics(llm_calls=1, tokens=additional_tokens)
+
+            # 検証結果をパース
+            verification_result = self._parse_planning_response(response)
+
+            # 検証結果を履歴に保存
+            if verification_result:
+                self.history_store.save_verification(verification_result)
+
+            return verification_result
+
+        except Exception:
+            self.logger.exception("Verification phase execution failed")
+            return None
+
+    def _build_verification_prompt(self) -> str:
+        """検証フェーズ用のプロンプトを構築する.
+
+        Returns:
+            検証プロンプト文字列
+
+        """
+        # 実行済みアクションのサマリー
+        executed_actions_summary = self._build_executed_actions_summary()
+
+        # 成功基準を抽出
+        success_criteria = self._extract_success_criteria()
+
+        prompt_parts = [
+            "## Verification Phase",
+            "",
+            "All planned actions have been executed. Now verify the implementation completeness.",
+            "",
+            "### Executed Actions Summary",
+            executed_actions_summary,
+            "",
+            "### Success Criteria",
+            success_criteria,
+            "",
+            "### Implementation Completeness Checklist",
+            "Please verify the following:",
+            "1. All functions/methods are fully implemented (no placeholders)",
+            "2. All code paths are complete",
+            "3. All required features from the task are implemented",
+            "4. Tests (if required) are implemented and pass",
+            "5. Documentation (if required) is complete",
+            "",
+            "### Placeholder Detection",
+            "Search for the following placeholder patterns in the modified files:",
+            "- TODO",
+            "- FIXME",
+            "- '...'",
+            "- '# implementation here'",
+            "- 'pass' statements that should have implementation",
+            "- 'raise NotImplementedError'",
+            "",
+            "**IMPORTANT**: Use file reading tools to re-read the modified files and verify the implementation.",
+            "",
+            "### Response Format",
+            "Provide your verification result in the following JSON format:",
+            "```json",
+            "{",
+            '  "phase": "verification",',
+            '  "verification_passed": true/false,',
+            '  "issues_found": ["issue1", "issue2"],',
+            '  "placeholder_detected": {',
+            '    "count": 0,',
+            '    "locations": []',
+            "  },",
+            '  "additional_work_needed": true/false,',
+            '  "additional_actions": [',
+            "    {",
+            '      "task_id": "verification_fix_1",',
+            '      "action_type": "tool_call",',
+            '      "tool": "tool_name",',
+            '      "parameters": {},',
+            '      "purpose": "Fix incomplete implementation",',
+            '      "expected_outcome": "Fully implemented feature"',
+            "    }",
+            "  ],",
+            '  "completion_confidence": 0.95,',
+            '  "comment": "Summary of verification result"',
+            "}",
+            "```",
+        ]
+
+        return "\n".join(prompt_parts)
+
+    def _build_executed_actions_summary(self) -> str:
+        """実行済みアクションのサマリーを作成する.
+
+        Returns:
+            実行済みアクションのサマリー文字列
+
+        """
+        if not self.current_plan:
+            return "No plan available."
+
+        action_plan = self.current_plan.get("action_plan", {})
+        actions = action_plan.get("actions", [])
+
+        if not actions:
+            return "No actions were executed."
+
+        summary_lines = []
+        for i, action in enumerate(actions, 1):
+            task_id = action.get("task_id", f"task_{i}")
+            purpose = action.get("purpose", "Execute action")
+            tool = action.get("tool", "unknown")
+            summary_lines.append(f"- **{task_id}** ({tool}): {purpose}")
+
+        return "\n".join(summary_lines)
+
+    def _extract_success_criteria(self) -> str:
+        """current_planから成功基準を抽出する.
+
+        Returns:
+            成功基準の文字列
+
+        """
+        if not self.current_plan:
+            return "No success criteria available (no plan)."
+
+        goal_understanding = self.current_plan.get("goal_understanding", {})
+        success_criteria = goal_understanding.get("success_criteria", [])
+
+        if not success_criteria:
+            return "No explicit success criteria defined in the plan."
+
+        if isinstance(success_criteria, list):
+            criteria_lines = [f"- {criterion}" for criterion in success_criteria]
+            return "\n".join(criteria_lines)
+        return str(success_criteria)
+
+    def _post_verification_result(self, verification_result: dict[str, Any]) -> None:
+        """検証結果をIssue/MRにコメントとして投稿する.
+
+        Args:
+            verification_result: 検証結果の辞書
+
+        """
+        try:
+            verification_passed = verification_result.get("verification_passed", False)
+            issues_found = verification_result.get("issues_found", [])
+            placeholder_info = verification_result.get("placeholder_detected", {})
+            additional_actions = verification_result.get("additional_actions", [])
+            confidence = verification_result.get("completion_confidence", 0)
+            comment = verification_result.get("comment", "")
+
+            # 絵文字を決定
+            emoji = "✅" if verification_passed else "⚠️"
+
+            # コメントを構築
+            comment_lines = [
+                f"## 🔍 Verification Result - {emoji}",
+                "",
+                f"**Status**: {'Passed' if verification_passed else 'Issues Found'}",
+                f"**Confidence**: {confidence * 100:.0f}%",
+                "",
+            ]
+
+            # 検出された問題
+            if issues_found:
+                comment_lines.append("### Issues Found")
+                for issue in issues_found:
+                    comment_lines.append(f"- {issue}")
+                comment_lines.append("")
+
+            # プレースホルダ検出
+            placeholder_count = placeholder_info.get("count", 0)
+            if placeholder_count > 0:
+                comment_lines.append(f"### Placeholder Detection: {placeholder_count} found")
+                locations = placeholder_info.get("locations", [])
+                for loc in locations:
+                    comment_lines.append(f"- {loc}")
+                comment_lines.append("")
+
+            # 追加作業
+            if additional_actions:
+                comment_lines.append(f"### Additional Work Needed: {len(additional_actions)} actions")
+                for action in additional_actions:
+                    task_id = action.get("task_id", "unknown")
+                    purpose = action.get("purpose", "")
+                    comment_lines.append(f"- **{task_id}**: {purpose}")
+                comment_lines.append("")
+
+            # サマリーコメント
+            if comment:
+                comment_lines.append("### Summary")
+                comment_lines.append(comment)
+                comment_lines.append("")
+
+            # タイムスタンプ
+            timestamp = datetime.now().strftime(DATETIME_FORMAT)
+            comment_lines.append(f"*{timestamp}*")
+
+            comment_content = "\n".join(comment_lines)
+
+            # Issue/MRに投稿
+            if hasattr(self.task, "comment"):
+                self.task.comment(comment_content)
+                self.logger.info("Posted verification result to Issue/MR")
+            else:
+                self.logger.warning("Task does not support comment, cannot post verification result")
+
+        except Exception as e:
+            self.logger.error("Failed to post verification result: %s", str(e))
+
+    def _update_checklist_for_additional_work(
+        self,
+        verification_result: dict[str, Any],
+        additional_actions: list[dict[str, Any]],
+    ) -> None:
+        """追加作業用にチェックリストを更新する.
+
+        元の計画(完了済み)と追加作業を明確に区別して表示します。
+
+        Args:
+            verification_result: 検証結果の辞書
+            additional_actions: 追加アクションのリスト
+
+        """
+        try:
+            if not self.current_plan:
+                return
+
+            action_plan = self.current_plan.get("action_plan", {})
+            original_actions = action_plan.get("actions", [])
+
+            # チェックリストを構築
+            checklist_lines = [
+                "## 📋 Execution Plan (Verification Round)",
+                "",
+                "### Original Plan (Completed)",
+            ]
+
+            # 元の計画(すべて完了)
+            for i, action in enumerate(original_actions, 1):
+                task_id = action.get("task_id", f"task_{i}")
+                purpose = action.get("purpose", "Execute action")
+                checklist_lines.append(f"- [x] **{task_id}**: {purpose}")
+
+            checklist_lines.extend([
+                "",
+                "### Additional Work (From Verification)",
+            ])
+
+            # 追加作業(未完了)
+            for i, action in enumerate(additional_actions, 1):
+                task_id = action.get("task_id", f"verification_fix_{i}")
+                purpose = action.get("purpose", "Fix issue")
+                checklist_lines.append(f"- [ ] **{task_id}**: {purpose}")
+
+            checklist_lines.append("")
+
+            # 進捗情報
+            total_actions = len(original_actions) + len(additional_actions)
+            completed = len(original_actions)
+            # total_actionsが0の場合は100%(完了)とする
+            progress_pct = int(completed / total_actions * 100) if total_actions else 100
+            checklist_lines.append(
+                f"*Progress: {completed}/{total_actions} ({progress_pct}%) - "
+                f"Verification found {len(additional_actions)} additional items*"
+            )
+
+            checklist_content = "\n".join(checklist_lines)
+
+            # 既存のコメントを更新または新規投稿
+            if self.checklist_comment_id and hasattr(self.task, "update_comment"):
+                self.task.update_comment(self.checklist_comment_id, checklist_content)
+                self.logger.info(
+                    "Updated checklist for additional work (comment_id=%s)",
+                    self.checklist_comment_id,
+                )
+            elif hasattr(self.task, "comment"):
+                result = self.task.comment(checklist_content)
+                if isinstance(result, dict):
+                    self.checklist_comment_id = result.get("id")
+                self.logger.info("Posted new checklist for additional work")
+
+        except Exception as e:
+            self.logger.error("Failed to update checklist for additional work: %s", str(e))
+
     def _load_planning_system_prompt(self) -> None:
         """Load and send the planning-specific system prompt to LLM client."""
         try:
@@ -1604,7 +2047,7 @@ Maintain the same JSON format as before for action_plan.actions."""
         """Post a comment about the current phase status to Issue/MR.
         
         Args:
-            phase: The phase name (e.g., "planning", "execution", "reflection", "pre_planning")
+            phase: The phase name (e.g., "planning", "execution", "reflection", "pre_planning", "verification")
             status: The status (e.g., "started", "completed", "failed")
             details: Additional details to include in the comment
         """
@@ -1616,6 +2059,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                 "execution": "⚙️",
                 "reflection": "🔍",
                 "revision": "📝",
+                "verification": "🔍",
             }
             
             status_emoji_map = {
