@@ -148,6 +148,13 @@ Branch naming rules:
 5. Do not use spaces or special characters
 
 Output format: JSON with "branch_name" and "reasoning" fields.
+
+Examples:
+- feature/codingagent-123-add-user-auth
+- fix/codingagent-456-login-bug
+- docs/codingagent-789-update-readme
+- refactor/codingagent-101-cleanup-api
+- task/codingagent-202-misc-updates
 ```
 
 #### 3.5.2 メッセージ形式（英語）
@@ -204,8 +211,8 @@ LLM は以下の JSON 形式で応答することを期待します：
 - **本文**: Issue の内容を転記（詳細は 4.3 参照）
 - **ソースブランチ**: 作成した新規ブランチ
 - **ターゲットブランチ**: デフォルトブランチ
-- **アサイン**: Bot ユーザーにアサイン
-- **ラベル**: `coding agent` ラベルを付与
+
+**注意**: Bot ユーザーへのアサインと `coding agent` ラベルの付与は、Issue 内容の転記が完了した後に行う（4.4 参照）。
 
 ### 4.3 内容転記の詳細
 
@@ -254,10 +261,12 @@ MR/PR の本文には以下の情報を含めます：
 
 ### 4.4 自動タスク化の設定
 
-MR/PR に以下の設定を行うことで、自動的にタスクとして処理されるようにする：
+**Issue 内容とコメントの転記が完了した後**、MR/PR に以下の設定を行うことで、自動的にタスクとして処理されるようにする：
 
 1. **Bot ユーザーへのアサイン**: MR/PR を Bot ユーザーにアサインする
 2. **`coding agent` ラベルの付与**: エージェントによる処理対象を示すラベルを付与する
+
+**重要**: アサインとラベル付与は必ず内容転記完了後に行う。これにより、MR/PR が不完全な状態でタスク検知されることを防ぐ。
 
 これにより、MR/PR が作成されると、Producer の定期スキャンによって自動的にタスクとして検知され、処理が開始される。タスク検知は既存の TaskGetter の仕組み（`coding agent` ラベルでの検索）を利用する。
 
@@ -462,15 +471,16 @@ sequenceDiagram
     IC->>MCP: create_pull_request(pr_info with WIP prefix)
     MCP-->>IC: pr_data
     
-    IC->>MCP: assign_bot_and_add_label(pr)
-    MCP-->>IC: success
-    
     IC->>CTM: transfer_content(issue, pr)
     CTM->>MCP: update_pull_request(content)
     MCP-->>CTM: success
     CTM->>MCP: get_issue_comments()
     MCP-->>CTM: comments
     CTM-->>IC: success
+    
+    Note over IC,MCP: 内容転記完了後にアサイン・ラベル設定
+    IC->>MCP: assign_bot_and_add_label(pr)
+    MCP-->>IC: success
     
     IC->>MCP: add_issue_comment(creation_report)
     MCP-->>IC: success
