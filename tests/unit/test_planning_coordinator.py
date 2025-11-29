@@ -357,5 +357,310 @@ class TestPlanningCoordinator(unittest.TestCase):
         assert result is True
 
 
+class TestVerificationPhase(unittest.TestCase):
+    """検証フェーズ機能のテスト."""
+
+    def setUp(self) -> None:
+        """テスト環境をセットアップ."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.task_uuid = "test-uuid"
+        self.config = {
+            "enabled": True,
+            "strategy": "chain_of_thought",
+            "max_subtasks": 100,
+            "reflection": {
+                "enabled": True,
+                "trigger_on_error": True,
+                "trigger_interval": 3,
+            },
+            "revision": {
+                "max_revisions": 3,
+            },
+            "verification": {
+                "enabled": True,
+                "max_rounds": 2,
+            },
+            "main_config": {
+                "llm": {
+                    "provider": "openai",
+                    "model": "gpt-4",
+                    "context_length": 8000,
+                    "function_calling": False,
+                    "openai": {
+                        "api_key": "test-key",
+                        "model": "gpt-4",
+                    },
+                },
+            },
+        }
+        self.task = MockTask(task_uuid=self.task_uuid)
+        self.mcp_clients = {"github": MagicMock()}
+        self.context_manager = MockContextManager(self.task_uuid, self.temp_dir)
+
+    def tearDown(self) -> None:
+        """テスト環境をクリーンアップ."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_build_executed_actions_summary_with_actions(self) -> None:
+        """アクションがある場合の実行済みアクションサマリーのテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        # テスト用の計画を設定
+        coordinator.current_plan = {
+            "action_plan": {
+                "actions": [
+                    {"task_id": "task_1", "purpose": "Read file", "tool": "read_file"},
+                    {"task_id": "task_2", "purpose": "Write code", "tool": "write_file"},
+                ]
+            }
+        }
+
+        summary = coordinator._build_executed_actions_summary()
+        assert "task_1" in summary
+        assert "task_2" in summary
+        assert "Read file" in summary
+        assert "Write code" in summary
+        assert "read_file" in summary
+        assert "write_file" in summary
+
+    def test_build_executed_actions_summary_no_plan(self) -> None:
+        """計画がない場合の実行済みアクションサマリーのテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.current_plan = None
+        summary = coordinator._build_executed_actions_summary()
+        assert "No plan available" in summary
+
+    def test_build_executed_actions_summary_no_actions(self) -> None:
+        """アクションがない場合の実行済みアクションサマリーのテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.current_plan = {"action_plan": {"actions": []}}
+        summary = coordinator._build_executed_actions_summary()
+        assert "No actions were executed" in summary
+
+    def test_extract_success_criteria_with_criteria(self) -> None:
+        """成功基準がある場合の抽出テスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.current_plan = {
+            "goal_understanding": {
+                "success_criteria": [
+                    "All tests pass",
+                    "Code compiles without errors",
+                ]
+            }
+        }
+
+        criteria = coordinator._extract_success_criteria()
+        assert "All tests pass" in criteria
+        assert "Code compiles without errors" in criteria
+
+    def test_extract_success_criteria_no_plan(self) -> None:
+        """計画がない場合の成功基準抽出テスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.current_plan = None
+        criteria = coordinator._extract_success_criteria()
+        assert "No success criteria available" in criteria
+
+    def test_extract_success_criteria_no_criteria(self) -> None:
+        """成功基準がない場合の抽出テスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.current_plan = {"goal_understanding": {}}
+        criteria = coordinator._extract_success_criteria()
+        assert "No explicit success criteria" in criteria
+
+    def test_build_verification_prompt(self) -> None:
+        """検証プロンプトの構築テスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.current_plan = {
+            "goal_understanding": {
+                "success_criteria": ["Test criterion"]
+            },
+            "action_plan": {
+                "actions": [
+                    {"task_id": "task_1", "purpose": "Test", "tool": "test_tool"}
+                ]
+            }
+        }
+
+        prompt = coordinator._build_verification_prompt()
+        
+        # プロンプトに必要な要素が含まれているか確認
+        assert "Verification Phase" in prompt
+        assert "Success Criteria" in prompt
+        assert "Placeholder Detection" in prompt
+        assert "TODO" in prompt
+        assert "FIXME" in prompt
+        assert "verification_passed" in prompt
+        assert "additional_actions" in prompt
+
+    def test_post_verification_result_passed(self) -> None:
+        """検証成功時の結果投稿テスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        verification_result = {
+            "verification_passed": True,
+            "issues_found": [],
+            "placeholder_detected": {"count": 0, "locations": []},
+            "additional_work_needed": False,
+            "additional_actions": [],
+            "completion_confidence": 0.95,
+            "comment": "All implementations are complete."
+        }
+
+        # task.commentがMockになっていることを確認
+        coordinator.task.comment = MagicMock(return_value={"id": 456})
+        
+        coordinator._post_verification_result(verification_result)
+        
+        # commentが呼ばれたことを確認
+        coordinator.task.comment.assert_called_once()
+        call_args = coordinator.task.comment.call_args[0][0]
+        assert "✅" in call_args
+        assert "Passed" in call_args
+        assert "95%" in call_args
+
+    def test_post_verification_result_failed(self) -> None:
+        """検証失敗時の結果投稿テスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        verification_result = {
+            "verification_passed": False,
+            "issues_found": ["Missing implementation", "TODO found"],
+            "placeholder_detected": {"count": 2, "locations": ["file.py:10", "file.py:20"]},
+            "additional_work_needed": True,
+            "additional_actions": [
+                {"task_id": "fix_1", "purpose": "Complete implementation"}
+            ],
+            "completion_confidence": 0.5,
+            "comment": "Issues found in implementation."
+        }
+
+        coordinator.task.comment = MagicMock(return_value={"id": 456})
+        
+        coordinator._post_verification_result(verification_result)
+        
+        coordinator.task.comment.assert_called_once()
+        call_args = coordinator.task.comment.call_args[0][0]
+        assert "⚠️" in call_args
+        assert "Issues Found" in call_args
+        assert "Missing implementation" in call_args
+        assert "file.py:10" in call_args
+        assert "1 actions" in call_args
+
+    def test_update_checklist_for_additional_work(self) -> None:
+        """追加作業用チェックリスト更新のテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.current_plan = {
+            "action_plan": {
+                "actions": [
+                    {"task_id": "task_1", "purpose": "Original task 1"},
+                    {"task_id": "task_2", "purpose": "Original task 2"},
+                ]
+            }
+        }
+
+        verification_result = {"issues_found": ["Issue 1"]}
+        additional_actions = [
+            {"task_id": "verification_fix_1", "purpose": "Fix issue 1"},
+        ]
+
+        coordinator.checklist_comment_id = 123
+        coordinator.task.update_comment = MagicMock()
+
+        coordinator._update_checklist_for_additional_work(verification_result, additional_actions)
+
+        coordinator.task.update_comment.assert_called_once()
+        call_args = coordinator.task.update_comment.call_args[0]
+        assert call_args[0] == 123  # comment_id
+        checklist_content = call_args[1]
+        
+        # 元の計画が完了済みとして表示されていることを確認
+        assert "Original Plan (Completed)" in checklist_content
+        assert "[x]" in checklist_content
+        assert "task_1" in checklist_content
+        
+        # 追加作業が未完了として表示されていることを確認
+        assert "Additional Work (From Verification)" in checklist_content
+        assert "[ ]" in checklist_content
+        assert "verification_fix_1" in checklist_content
+
+
 if __name__ == "__main__":
     unittest.main()

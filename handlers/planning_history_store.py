@@ -92,6 +92,23 @@ class PlanningHistoryStore:
         self._append_to_file(entry)
         self.logger.debug("Saved reflection for task %s", self.task_uuid)
 
+    def save_verification(self, verification_result: dict[str, Any]) -> None:
+        """検証フェーズの結果をJSONLファイルに保存する.
+
+        Args:
+            verification_result: 検証結果（verification_passed, issues_found等を含む辞書）
+
+        """
+        entry = {
+            "type": "verification",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "verification_result": verification_result,
+            "issue_id": self.issue_id,
+            "task_uuid": self.task_uuid,
+        }
+        self._append_to_file(entry)
+        self.logger.debug("Saved verification result for task %s", self.task_uuid)
+
     def save_replan_decision(self, replan_entry: dict[str, Any]) -> None:
         """Save replan decision entry to JSONL file.
 

@@ -203,6 +203,55 @@ class TestPlanningHistoryStore(unittest.TestCase):
             assert "type" in data
             assert "timestamp" in data
 
+    def test_save_and_get_verification(self) -> None:
+        """Test saving and retrieving verification results."""
+        # 検証結果を保存
+        verification_result = {
+            "verification_passed": True,
+            "issues_found": [],
+            "placeholder_detected": {"count": 0, "locations": []},
+            "additional_work_needed": False,
+            "additional_actions": [],
+            "completion_confidence": 0.95,
+            "comment": "All implementations are complete.",
+        }
+
+        self.store.save_verification(verification_result)
+
+        # ファイルが存在することを確認
+        assert self.store.filepath.exists()
+
+        # JSONLファイルを読み込んで検証
+        entries = self.store._read_jsonl()
+        verification_entries = [e for e in entries if e.get("type") == "verification"]
+
+        assert len(verification_entries) == 1
+        assert verification_entries[0]["verification_result"] == verification_result
+        assert "timestamp" in verification_entries[0]
+        assert verification_entries[0]["task_uuid"] == self.task_uuid
+
+    def test_save_multiple_verifications(self) -> None:
+        """Test saving multiple verification results (for multiple rounds)."""
+        # 複数ラウンドの検証結果を保存
+        for i in range(3):
+            verification_result = {
+                "verification_passed": i == 2,  # 3回目のみ成功
+                "issues_found": [] if i == 2 else [f"Issue {i}"],
+                "completion_confidence": 0.5 + i * 0.2,
+            }
+            self.store.save_verification(verification_result)
+
+        # JSONLファイルを読み込んで検証
+        entries = self.store._read_jsonl()
+        verification_entries = [e for e in entries if e.get("type") == "verification"]
+
+        assert len(verification_entries) == 3
+        
+        # 最後の検証結果のみ成功
+        assert verification_entries[0]["verification_result"]["verification_passed"] is False
+        assert verification_entries[1]["verification_result"]["verification_passed"] is False
+        assert verification_entries[2]["verification_result"]["verification_passed"] is True
+
 
 if __name__ == "__main__":
     unittest.main()
