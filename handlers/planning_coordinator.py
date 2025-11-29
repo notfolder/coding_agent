@@ -442,13 +442,16 @@ class PlanningCoordinator:
                         f"Executing {len(additional_actions)} additional actions to address verification issues...",
                     )
 
-                    # 追加アクション実行ループ
+                    # 追加アクション実行ループ用の別カウンター
+                    additional_work_iteration = 0
+                    max_additional_iterations = min(len(additional_actions) * 3, max_iterations)
+
                     while not self._is_complete():
-                        if iteration >= max_iterations:
+                        if additional_work_iteration >= max_additional_iterations:
                             self.logger.warning("Max iterations reached during additional work")
                             break
 
-                        iteration += 1
+                        additional_work_iteration += 1
 
                         # Check for pause/stop signals
                         if self._check_pause_signal():
@@ -1972,7 +1975,8 @@ Maintain the same JSON format as before for action_plan.actions."""
             # 進捗情報
             total_actions = len(original_actions) + len(additional_actions)
             completed = len(original_actions)
-            progress_pct = int(completed / total_actions * 100) if total_actions else 0
+            # total_actionsが0の場合は100%(完了)とする
+            progress_pct = int(completed / total_actions * 100) if total_actions else 100
             checklist_lines.append(
                 f"*Progress: {completed}/{total_actions} ({progress_pct}%) - "
                 f"Verification found {len(additional_actions)} additional items*"
