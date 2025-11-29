@@ -77,6 +77,17 @@ class OpenAIClient(LLMClient):
         output_message = f"output: {result}"
         self.message_store.add_message("user", output_message)
 
+    def add_assistant_message(self, message: str) -> None:
+        """アシスタントメッセージをメッセージ履歴に追加する.
+
+        過去コンテキスト引き継ぎ機能で使用します。
+
+        Args:
+            message: アシスタントメッセージの内容
+
+        """
+        self.message_store.add_message("assistant", message)
+
     def get_response(self) -> tuple[str, list, int]:
         """OpenAI APIから応答を取得する.
 

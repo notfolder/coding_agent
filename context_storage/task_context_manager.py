@@ -80,8 +80,42 @@ class TaskContextManager:
         from handlers.planning_history_store import PlanningHistoryStore
         self.planning_store = PlanningHistoryStore(task_uuid, self.planning_dir)
         
+        # 引き継ぎコンテキストの初期化（リジュームでない新規タスクの場合のみ）
+        self.inheritance_context = None
+        self.inheritance_manager = None
+        if not is_resumed:
+            self._init_context_inheritance(task_key, config)
+        
         # Register task in database (or update if resumed)
         self._register_or_update_task()
+
+    def _init_context_inheritance(self, task_key: TaskKey, config: dict[str, Any]) -> None:
+        """過去コンテキスト引き継ぎを初期化する.
+
+        Args:
+            task_key: タスクキー
+            config: 設定辞書
+
+        """
+        import logging
+        from .context_inheritance_manager import ContextInheritanceManager
+
+        logger = logging.getLogger(__name__)
+
+        try:
+            self.inheritance_manager = ContextInheritanceManager(self.base_dir, config)
+            
+            # 引き継ぎコンテキストを検索
+            inheritance = self.inheritance_manager.get_inheritance_context(task_key)
+            
+            if inheritance:
+                self.inheritance_context = inheritance
+                logger.info(
+                    "過去コンテキストを引き継ぎます: uuid=%s",
+                    inheritance.previous_context.uuid[:8],
+                )
+        except Exception as e:
+            logger.warning("過去コンテキスト引き継ぎの初期化に失敗: %s", e)
 
     def get_message_store(self) -> MessageStore:
         """Get MessageStore instance.
@@ -118,6 +152,57 @@ class TaskContextManager:
 
         """
         return self.planning_store
+
+    def get_inheritance_context(self) -> Any | None:
+        """Get inheritance context if available.
+
+        Returns:
+            InheritanceContext instance or None if no inheritance
+
+        """
+        return self.inheritance_context
+
+    def has_inheritance_context(self) -> bool:
+        """Check if inheritance context is available.
+
+        Returns:
+            True if inheritance context exists
+
+        """
+        return self.inheritance_context is not None
+
+    def get_inheritance_notification_comment(self) -> str | None:
+        """Generate notification comment for inheritance.
+
+        Returns:
+            Notification comment string or None if no inheritance
+
+        """
+        if self.inheritance_context is None or self.inheritance_manager is None:
+            return None
+
+        return self.inheritance_manager.generate_notification_comment(
+            self.inheritance_context
+        )
+
+    def create_initial_context_with_inheritance(
+        self, user_request: str
+    ) -> list[dict[str, Any]] | None:
+        """Create initial context with inheritance if available.
+
+        Args:
+            user_request: Current user request (Issue/MR/PR content)
+
+        Returns:
+            Initial context messages or None if no inheritance
+
+        """
+        if self.inheritance_context is None or self.inheritance_manager is None:
+            return None
+
+        return self.inheritance_manager.create_initial_context(
+            self.inheritance_context, user_request
+        )
 
     def update_status(self, status: str, error_message: str | None = None) -> None:
         """Update task status in database.

@@ -230,6 +230,9 @@ class PlanningCoordinator:
             # Check for new comments before starting
             self._check_and_add_new_comments()
             
+            # Step 0.5: Check for inheritance context and post notification
+            self._handle_context_inheritance()
+            
             # Step 0: Execute pre-planning phase (計画前情報収集フェーズ)
             if self.pre_planning_manager is not None:
                 self._post_phase_comment("pre_planning", "started", "タスク内容を分析し、必要な情報を収集しています...")
@@ -545,6 +548,110 @@ class PlanningCoordinator:
         
         # Pause the task with planning state
         self.pause_manager.pause_task(self.task, self.task.uuid, planning_state=planning_state)
+
+    def _handle_context_inheritance(self) -> None:
+        """過去コンテキスト引き継ぎを処理する.
+
+        TaskContextManagerから引き継ぎコンテキストを取得し、
+        通知コメントを投稿し、初期コンテキストをLLMに設定します。
+        """
+        # context_managerから引き継ぎコンテキストを確認
+        if not self.context_manager.has_inheritance_context():
+            return
+
+        try:
+            # 引き継ぎ通知コメントを投稿
+            notification = self.context_manager.get_inheritance_notification_comment()
+            if notification and hasattr(self.task, "comment"):
+                self.task.comment(notification)
+                self.logger.info("過去コンテキスト引き継ぎ通知を投稿しました")
+
+            # 引き継ぎコンテキストを取得
+            inheritance_context = self.context_manager.get_inheritance_context()
+            if inheritance_context is None:
+                return
+
+            # 初期コンテキストメッセージを作成してLLMに追加
+            # （user_requestは既にget_prompt()で取得済みのため、ここでは最終要約のみを追加）
+            summary_with_prefix = self._format_inherited_summary(inheritance_context)
+            if summary_with_prefix:
+                # LLMにアシスタントロールで引き継ぎ情報を追加
+                # Note: send_user_message/send_system_promptではなく、
+                # コンテキストの最初に履歴として追加する形式を使用
+                if hasattr(self.llm_client, "add_assistant_message"):
+                    self.llm_client.add_assistant_message(summary_with_prefix)
+                    self.logger.info("引き継ぎコンテキストをLLMに追加しました")
+                else:
+                    # add_assistant_messageがない場合はログのみ
+                    self.logger.debug(
+                        "LLMクライアントがadd_assistant_messageをサポートしていません"
+                    )
+
+        except Exception as e:
+            self.logger.warning("過去コンテキスト引き継ぎの処理に失敗: %s", e)
+
+    def _format_inherited_summary(self, inheritance_context: Any) -> str | None:
+        """引き継ぎコンテキストから要約テキストをフォーマットする.
+
+        Args:
+            inheritance_context: InheritanceContextインスタンス
+
+        Returns:
+            フォーマットされた要約テキスト、または None
+
+        """
+        if inheritance_context is None:
+            return None
+
+        try:
+            prev = inheritance_context.previous_context
+            final_summary = inheritance_context.final_summary
+            planning_summary = inheritance_context.planning_summary
+
+            if not final_summary:
+                return None
+
+            completed_at_str = (
+                prev.completed_at.strftime("%Y-%m-%d %H:%M:%S")
+                if prev.completed_at
+                else "不明"
+            )
+
+            lines = [
+                "前回の処理要約:",
+                f"(引き継ぎ元: {prev.uuid[:8]}, 処理日時: {completed_at_str})",
+                "",
+                final_summary,
+            ]
+
+            # Planning Modeサマリーがある場合は追加
+            if planning_summary:
+                lines.extend([
+                    "",
+                    "=== Previous Plan Summary ===",
+                ])
+
+                plan_summary = planning_summary.get("previous_plan_summary", {})
+                if plan_summary:
+                    goal = plan_summary.get("goal", "")
+                    if goal:
+                        lines.append(f"Goal: {goal}")
+                    subtasks = plan_summary.get("subtasks", [])
+                    if subtasks:
+                        lines.append(f"Subtasks: {', '.join(subtasks[:5])}")
+
+                recommendations = planning_summary.get("recommendations", [])
+                if recommendations:
+                    lines.append("")
+                    lines.append("=== Recommendations ===")
+                    for rec in recommendations:
+                        lines.append(f"- {rec}")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            self.logger.warning("引き継ぎ要約のフォーマットに失敗: %s", e)
+            return None
 
 
     def _execute_pre_planning_phase(self) -> dict[str, Any] | None:
