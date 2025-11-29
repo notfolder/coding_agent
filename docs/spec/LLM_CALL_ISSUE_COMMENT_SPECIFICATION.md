@@ -169,8 +169,8 @@ LLMがツール（function call）を呼び出す際、呼び出し前と呼び�
 ```
 
 **引数の切り捨て処理**:
-- 引数を文字列化し、40文字を超える場合は先頭40文字 + "..." として表示
-- 例: `{"path": "/home/user/project/src/very_long_filename_that_exceeds...`
+- 引数オブジェクト全体をJSON文字列化し、40文字を超える場合は先頭40文字 + "..." として表示
+- 例: `{"path": "/home/user/project/src/ver...`
 
 #### 4.5.2 ツール呼び出し後のコメント形式
 
