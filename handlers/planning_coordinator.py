@@ -20,6 +20,9 @@ DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 # JSON出力の切り詰め制限定数
 JSON_TRUNCATION_LIMIT = 1000
 
+# ツール引数表示の最大文字数
+TOOL_ARGS_MAX_LENGTH = 40
+
 if TYPE_CHECKING:
     from clients.llm_base import LLMClient
     from clients.mcp_tool_client import MCPToolClient
@@ -121,6 +124,24 @@ class PlanningCoordinator:
 
         # 計画リビジョン番号(チェックリスト表示用)
         self.plan_revision_number = 0
+
+        # LLM呼び出し回数カウンター（LLM呼び出しコメント機能用）
+        self.llm_call_count = 0
+
+        # LLM呼び出しコメント機能の有効/無効
+        llm_call_comments_config = config.get("llm_call_comments", {})
+        self.llm_call_comments_enabled = llm_call_comments_config.get("enabled", True)
+
+        # フェーズ別のデフォルトメッセージ
+        self.phase_default_messages: dict[str, str] = {
+            "pre_planning": "タスク内容の分析と情報収集が完了しました",
+            "planning": "実行計画の作成が完了しました",
+            "execution": "アクションの実行が完了しました",
+            "reflection": "実行結果の分析が完了しました",
+            "revision": "計画の修正が完了しました",
+            "verification": "実装の検証が完了しました",
+            "replan_decision": "再計画の判断が完了しました",
+        }
 
         # Pause/resume support
         self.pause_manager = None  # Will be set by TaskHandler
@@ -571,11 +592,16 @@ class PlanningCoordinator:
             
             # Parse response
             plan = self._parse_planning_response(response)
+
+            # LLM呼び出し完了コメントを投稿
+            self._post_llm_call_comment("planning", plan)
             
             return plan
             
-        except Exception:
+        except Exception as e:
             self.logger.exception("Planning phase execution failed")
+            # LLMエラーコメントを投稿
+            self._post_llm_error_comment("planning", str(e))
             return None
 
     def _execute_action(self) -> dict[str, Any] | None:
@@ -597,6 +623,7 @@ class PlanningCoordinator:
                 return {"done": True, "status": "completed"}
             
             current_action = actions[self.action_counter]
+            task_id = current_action.get("task_id", f"task_{self.action_counter + 1}")
             self.action_counter += 1
             
             # Execute the action via LLM
@@ -620,7 +647,7 @@ class PlanningCoordinator:
                 
                 # Execute all function calls
                 for function in functions:
-                    if self._execute_function_call(function, error_state):
+                    if self._execute_function_call(function, error_state, task_id):
                         # Critical error occurred
                         return {
                             "status": "error",
@@ -632,30 +659,38 @@ class PlanningCoordinator:
             try:
                 data = json.loads(resp) if isinstance(resp, str) else resp
                 
-                # Post comment to Issue/MR if provided
-                if isinstance(data, dict) and data.get("comment"):
-                    self.task.comment(data["comment"])
-                    self.logger.info("Posted comment to Issue/MR from action response")
+                # LLM呼び出し完了コメントを投稿
+                # Note: commentフィールドの投稿はここで統一的に処理される
+                self._post_llm_call_comment("execution", data, task_id)
                 
                 # Check if done
-                if data.get("done"):
+                if isinstance(data, dict) and data.get("done"):
                     return {"done": True, "status": "completed", "result": data}
                 
                 return {"status": "success", "result": data, "action": current_action}
             except (json.JSONDecodeError, ValueError):
-                # If not JSON, treat as text response
+                # テキスト応答の場合もLLM呼び出しコメントを投稿
+                self._post_llm_call_comment("execution", None, task_id)
                 return {"status": "success", "result": resp, "action": current_action}
             
         except Exception as e:
             self.logger.exception("Action execution failed: %s", e)
+            # LLMエラーコメントを投稿
+            self._post_llm_error_comment("execution", str(e))
             return {"status": "error", "error": str(e)}
 
-    def _execute_function_call(self, function: dict[str, Any], error_state: dict[str, Any]) -> bool:
+    def _execute_function_call(
+        self,
+        function: dict[str, Any],
+        error_state: dict[str, Any],
+        task_id: str | None = None,
+    ) -> bool:
         """Execute a single function call.
         
         Args:
             function: Function call information (dict or object with name/arguments)
             error_state: Error state tracking dictionary
+            task_id: 現在実行中のアクションID（エラーコメント用）
             
         Returns:
             True if critical error occurred (should abort), False otherwise
@@ -684,6 +719,9 @@ class PlanningCoordinator:
                     return False
             
             self.logger.info("Executing function: %s with args: %s", name, args)
+
+            # ツール呼び出し前のコメントを投稿
+            self._post_tool_call_before_comment(name, args)
             
             # Check if this is a command-executor tool
             if mcp_server == "command-executor":
@@ -711,6 +749,9 @@ class PlanningCoordinator:
                     
                     # Send result back to LLM
                     self.llm_client.send_function_result(name, json.dumps(result, ensure_ascii=False))
+
+                    # ツール完了コメントを投稿（成功）
+                    self._post_tool_call_after_comment(name, success=True)
                     
                     return False
                     
@@ -718,8 +759,10 @@ class PlanningCoordinator:
                     error_msg = str(e)
                     self.logger.exception("Command execution failed: %s", error_msg)
                     
-                    # Post error to task
-                    self.task.comment(f"コマンド実行エラー ({name}): {error_msg}")
+                    # ツール完了コメントを投稿（失敗）
+                    self._post_tool_call_after_comment(name, success=False)
+                    # ツールエラーコメントを投稿
+                    self._post_tool_error_comment(name, error_msg, task_id)
                     
                     # Update error count
                     if error_state["last_tool"] == tool_name:
@@ -750,6 +793,9 @@ class PlanningCoordinator:
                 
                 # Send result back to LLM
                 self.llm_client.send_function_result(name, str(result))
+
+                # ツール完了コメントを投稿（成功）
+                self._post_tool_call_after_comment(name, success=True)
                 
                 return False
                 
@@ -765,8 +811,10 @@ class PlanningCoordinator:
                 
                 self.logger.exception("Tool execution failed: %s", error_msg)
                 
-                # Post error to task
-                self.task.comment(f"ツール実行エラー ({name}): {error_msg}")
+                # ツール完了コメントを投稿（失敗）
+                self._post_tool_call_after_comment(name, success=False)
+                # ツールエラーコメントを投稿
+                self._post_tool_error_comment(name, error_msg, task_id)
                 
                 # Update error count
                 if error_state["last_tool"] == tool_name:
@@ -839,6 +887,9 @@ class PlanningCoordinator:
             
             # Parse reflection
             reflection = self._parse_reflection_response(response)
+
+            # LLM呼び出し完了コメントを投稿
+            self._post_llm_call_comment("reflection", reflection)
             
             # Save reflection
             if reflection:
@@ -848,6 +899,8 @@ class PlanningCoordinator:
             
         except Exception as e:
             self.logger.exception(f"Reflection phase failed: {e}")
+            # LLMエラーコメントを投稿
+            self._post_llm_error_comment("reflection", str(e))
             return None
 
     def _revise_plan(self, reflection: dict[str, Any]) -> dict[str, Any] | None:
@@ -884,14 +937,19 @@ class PlanningCoordinator:
             # Parse revised plan
             revised_plan = self._parse_planning_response(response)
 
+            # LLM呼び出し完了コメントを投稿
+            self._post_llm_call_comment("revision", revised_plan)
+
             # Save revision
             if revised_plan:
                 self.history_store.save_revision(revised_plan, reflection)
 
             return revised_plan
 
-        except Exception:
+        except Exception as e:
             self.logger.exception("Plan revision failed")
+            # LLMエラーコメントを投稿
+            self._post_llm_error_comment("revision", str(e))
             return None
 
     def _request_execution_replan_decision(
@@ -1353,10 +1411,15 @@ Maintain the same JSON format as before for action_plan.actions."""
                 if ambiguities:
                     prompt_parts.append("曖昧な点と選択した解釈:")
                     for amb in ambiguities:
-                        item = amb.get("item", "")
-                        selected = amb.get("selected_interpretation", "")
-                        reasoning = amb.get("reasoning", "")
-                        prompt_parts.append(f"  - {item}: {selected} (理由: {reasoning})")
+                        # ambが辞書か文字列かを判定
+                        if isinstance(amb, dict):
+                            item = amb.get("item", "")
+                            selected = amb.get("selected_interpretation", "")
+                            reasoning = amb.get("reasoning", "")
+                            prompt_parts.append(f"  - {item}: {selected} (理由: {reasoning})")
+                        elif isinstance(amb, str):
+                            # 文字列の場合はそのまま使用
+                            prompt_parts.append(f"  - {amb}")
                     prompt_parts.append("")
             
             # 収集した情報
@@ -1722,14 +1785,19 @@ Maintain the same JSON format as before for action_plan.actions."""
             # 検証結果をパース
             verification_result = self._parse_planning_response(response)
 
+            # LLM呼び出し完了コメントを投稿
+            self._post_llm_call_comment("verification", verification_result)
+
             # 検証結果を履歴に保存
             if verification_result:
                 self.history_store.save_verification(verification_result)
 
             return verification_result
 
-        except Exception:
+        except Exception as e:
             self.logger.exception("Verification phase execution failed")
+            # LLMエラーコメントを投稿
+            self._post_llm_error_comment("verification", str(e))
             return None
 
     def _build_verification_prompt(self) -> str:
@@ -2102,6 +2170,333 @@ Maintain the same JSON format as before for action_plan.actions."""
         except Exception as e:
             self.logger.error("Failed to post phase comment: %s", str(e))
 
+    def _post_llm_call_comment(
+        self,
+        phase: str,
+        llm_response: dict[str, Any] | str | None = None,
+        task_id: str | None = None,
+    ) -> None:
+        """LLM呼び出し完了時にコメントをIssue/MRに投稿する.
+
+        仕様書に従い、以下のルールでコメント内容を決定:
+        1. LLM応答にcommentフィールドがある場合: その内容を使用（常に優先）
+        2. commentフィールドがない場合: フェーズ名+LLM呼び出し回数のデフォルトメッセージ
+
+        Args:
+            phase: 現在のフェーズ名
+            llm_response: LLM応答（dictまたはstr）
+            task_id: 実行中のアクションID（executionフェーズ用）
+
+        """
+        # LLM呼び出しコメント機能が無効の場合は何もしない
+        if not self.llm_call_comments_enabled:
+            return
+
+        try:
+            # LLM呼び出し回数をインクリメント
+            self.llm_call_count += 1
+
+            # フェーズ名の日本語表示用マッピング
+            phase_names: dict[str, str] = {
+                "pre_planning": "計画前情報収集",
+                "planning": "計画作成",
+                "execution": "アクション実行",
+                "reflection": "リフレクション",
+                "revision": "計画修正",
+                "verification": "検証",
+                "replan_decision": "再計画判断",
+            }
+
+            phase_display_name = phase_names.get(phase, phase.replace("_", " ").title())
+
+            # LLM応答からcommentフィールドを取得
+            comment_content: str | None = None
+            if isinstance(llm_response, dict):
+                comment_content = llm_response.get("comment")
+            elif isinstance(llm_response, str):
+                # JSON文字列の場合、パースしてcommentフィールドを探す
+                try:
+                    parsed = json.loads(llm_response)
+                    if isinstance(parsed, dict):
+                        comment_content = parsed.get("comment")
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+            # コメント内容の決定
+            if comment_content:
+                # commentフィールドがある場合: その内容を使用
+                comment_lines = [
+                    f"## ✅ {phase_display_name} - LLM呼び出し #{self.llm_call_count}",
+                    "",
+                    comment_content,
+                    "",
+                ]
+            else:
+                # commentフィールドがない場合: デフォルトメッセージ
+                default_message = self.phase_default_messages.get(
+                    phase, "処理が完了しました"
+                )
+                # executionフェーズの場合はtask_idを含める
+                if phase == "execution" and task_id:
+                    default_message = f"アクション「{task_id}」の実行が完了しました"
+
+                comment_lines = [
+                    f"## ✅ {phase_display_name} - LLM呼び出し #{self.llm_call_count} 完了",
+                    "",
+                    default_message,
+                    "",
+                ]
+
+            # タイムスタンプを追加
+            timestamp = datetime.now().strftime(DATETIME_FORMAT)
+            comment_lines.append(f"*{timestamp}*")
+
+            comment_text = "\n".join(comment_lines)
+
+            # Issue/MRにコメント投稿
+            if hasattr(self.task, "comment"):
+                self.task.comment(comment_text)
+                self.logger.info(
+                    "LLM呼び出しコメントを投稿: phase=%s, call_count=%d",
+                    phase,
+                    self.llm_call_count,
+                )
+            else:
+                self.logger.warning("タスクがcommentをサポートしていません")
+
+        except Exception as e:
+            # コメント投稿失敗はメイン処理に影響させない
+            self.logger.warning("LLM呼び出しコメントの投稿に失敗: %s", e)
+
+    def _post_tool_call_before_comment(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any] | str,
+    ) -> None:
+        """ツール呼び出し前にコメントをIssue/MRに投稿する.
+
+        仕様書に従い、以下の形式でコメント:
+        ## 🔧 ツール呼び出し - {ツール名}
+        **引数**: {引数（40文字を超える場合は切り捨て）}
+        *{タイムスタンプ}*
+
+        Args:
+            tool_name: 呼び出すツール名
+            arguments: ツール引数（dictまたはJSON文字列）
+
+        """
+        # LLM呼び出しコメント機能が無効の場合は何もしない
+        if not self.llm_call_comments_enabled:
+            return
+
+        try:
+            # 引数をJSON文字列に変換
+            if isinstance(arguments, dict):
+                args_str = json.dumps(arguments, ensure_ascii=False)
+            else:
+                args_str = str(arguments)
+
+            # 最大文字数を超える場合は切り捨て
+            if len(args_str) > TOOL_ARGS_MAX_LENGTH:
+                args_str = args_str[:TOOL_ARGS_MAX_LENGTH] + "..."
+
+            # コメント構築
+            timestamp = datetime.now().strftime(DATETIME_FORMAT)
+            comment_lines = [
+                f"## 🔧 ツール呼び出し - {tool_name}",
+                "",
+                f"**引数**: {args_str}",
+                "",
+                f"*{timestamp}*",
+            ]
+
+            comment_text = "\n".join(comment_lines)
+
+            # Issue/MRにコメント投稿
+            if hasattr(self.task, "comment"):
+                self.task.comment(comment_text)
+                self.logger.info("ツール呼び出し前コメントを投稿: %s", tool_name)
+            else:
+                self.logger.warning("タスクがcommentをサポートしていません")
+
+        except Exception as e:
+            # コメント投稿失敗はメイン処理に影響させない
+            self.logger.warning("ツール呼び出し前コメントの投稿に失敗: %s", e)
+
+    def _post_tool_call_after_comment(
+        self,
+        tool_name: str,
+        success: bool,
+    ) -> None:
+        """ツール呼び出し後にコメントをIssue/MRに投稿する.
+
+        仕様書に従い、以下の形式でコメント:
+        成功時: ## ✅ ツール完了 - {ツール名}
+        失敗時: ## ❌ ツール失敗 - {ツール名}
+
+        Args:
+            tool_name: 呼び出したツール名
+            success: 成功したかどうか
+
+        """
+        # LLM呼び出しコメント機能が無効の場合は何もしない
+        if not self.llm_call_comments_enabled:
+            return
+
+        try:
+            timestamp = datetime.now().strftime(DATETIME_FORMAT)
+
+            if success:
+                comment_lines = [
+                    f"## ✅ ツール完了 - {tool_name}",
+                    "",
+                    "結果: 成功",
+                    "",
+                    f"*{timestamp}*",
+                ]
+            else:
+                comment_lines = [
+                    f"## ❌ ツール失敗 - {tool_name}",
+                    "",
+                    "結果: 失敗",
+                    "",
+                    f"*{timestamp}*",
+                ]
+
+            comment_text = "\n".join(comment_lines)
+
+            # Issue/MRにコメント投稿
+            if hasattr(self.task, "comment"):
+                self.task.comment(comment_text)
+                self.logger.info(
+                    "ツール呼び出し後コメントを投稿: %s, success=%s", tool_name, success
+                )
+            else:
+                self.logger.warning("タスクがcommentをサポートしていません")
+
+        except Exception as e:
+            # コメント投稿失敗はメイン処理に影響させない
+            self.logger.warning("ツール呼び出し後コメントの投稿に失敗: %s", e)
+
+    def _post_llm_error_comment(
+        self,
+        phase: str,
+        error_message: str,
+    ) -> None:
+        """LLM呼び出しエラー時にコメントをIssue/MRに投稿する.
+
+        仕様書に従い、以下の形式でコメント:
+        ## ⚠️ LLM呼び出しエラー - {フェーズ名}
+        **エラー内容**: {エラーメッセージ}
+        リトライを試みます...
+        *{タイムスタンプ}*
+
+        Args:
+            phase: 現在のフェーズ名
+            error_message: エラーメッセージ
+
+        """
+        # LLM呼び出しコメント機能が無効の場合は何もしない
+        if not self.llm_call_comments_enabled:
+            return
+
+        try:
+            # フェーズ名の日本語表示用マッピング
+            phase_names: dict[str, str] = {
+                "pre_planning": "計画前情報収集",
+                "planning": "計画作成",
+                "execution": "アクション実行",
+                "reflection": "リフレクション",
+                "revision": "計画修正",
+                "verification": "検証",
+                "replan_decision": "再計画判断",
+            }
+
+            phase_display_name = phase_names.get(phase, phase.replace("_", " ").title())
+            timestamp = datetime.now().strftime(DATETIME_FORMAT)
+
+            comment_lines = [
+                f"## ⚠️ LLM呼び出しエラー - {phase_display_name}",
+                "",
+                f"**エラー内容**: {error_message}",
+                "",
+                "リトライを試みます...",
+                "",
+                f"*{timestamp}*",
+            ]
+
+            comment_text = "\n".join(comment_lines)
+
+            # Issue/MRにコメント投稿
+            if hasattr(self.task, "comment"):
+                self.task.comment(comment_text)
+                self.logger.info("LLMエラーコメントを投稿: phase=%s", phase)
+            else:
+                self.logger.warning("タスクがcommentをサポートしていません")
+
+        except Exception as e:
+            # コメント投稿失敗はメイン処理に影響させない
+            self.logger.warning("LLMエラーコメントの投稿に失敗: %s", e)
+
+    def _post_tool_error_comment(
+        self,
+        tool_name: str,
+        error_message: str,
+        task_id: str | None = None,
+    ) -> None:
+        """ツール実行エラー時にコメントをIssue/MRに投稿する.
+
+        仕様書に従い、以下の形式でコメント:
+        ## ❌ エラー発生 - {ツール名}
+        **エラー内容**: {エラーメッセージ}
+        **発生したアクション**: {task_id}
+        *{タイムスタンプ}*
+
+        Args:
+            tool_name: ツール名
+            error_message: エラーメッセージ
+            task_id: 発生したアクションのID（オプション）
+
+        """
+        # LLM呼び出しコメント機能が無効の場合は何もしない
+        if not self.llm_call_comments_enabled:
+            return
+
+        try:
+            timestamp = datetime.now().strftime(DATETIME_FORMAT)
+
+            comment_lines = [
+                f"## ❌ エラー発生 - {tool_name}",
+                "",
+                f"**エラー内容**: {error_message}",
+            ]
+
+            if task_id:
+                comment_lines.append("")
+                comment_lines.append(f"**発生したアクション**: {task_id}")
+
+            comment_lines.extend([
+                "",
+                f"*{timestamp}*",
+            ])
+
+            comment_text = "\n".join(comment_lines)
+
+            # Issue/MRにコメント投稿
+            if hasattr(self.task, "comment"):
+                self.task.comment(comment_text)
+                self.logger.info(
+                    "ツールエラーコメントを投稿: tool=%s, task_id=%s",
+                    tool_name,
+                    task_id,
+                )
+            else:
+                self.logger.warning("タスクがcommentをサポートしていません")
+
+        except Exception as e:
+            # コメント投稿失敗はメイン処理に影響させない
+            self.logger.warning("ツールエラーコメントの投稿に失敗: %s", e)
+
     def restore_planning_state(self, planning_state: dict[str, Any]) -> None:
         """Restore planning state from paused task.
         
@@ -2115,6 +2510,9 @@ Maintain the same JSON format as before for action_plan.actions."""
         self.current_phase = planning_state.get("current_phase", "planning")
         self.action_counter = planning_state.get("action_counter", 0)
         self.revision_counter = planning_state.get("revision_counter", 0)
+
+        # LLM呼び出し回数を復元
+        self.llm_call_count = planning_state.get("llm_call_count", 0)
         
         # Restore checklist comment ID if available
         saved_checklist_id = planning_state.get("checklist_comment_id")
@@ -2133,10 +2531,12 @@ Maintain the same JSON format as before for action_plan.actions."""
             self.pre_planning_manager.restore_pre_planning_state(saved_pre_planning_state)
         
         self.logger.info(
-            "Planning状態を復元しました: phase=%s, action_counter=%d, revision_counter=%d, checklist_id=%s",
+            "Planning状態を復元しました: phase=%s, action_counter=%d, revision_counter=%d, "
+            "llm_call_count=%d, checklist_id=%s",
             self.current_phase,
             self.action_counter,
             self.revision_counter,
+            self.llm_call_count,
             self.checklist_comment_id,
         )
         
@@ -2164,6 +2564,7 @@ Maintain the same JSON format as before for action_plan.actions."""
             "current_phase": self.current_phase,
             "action_counter": self.action_counter,
             "revision_counter": self.revision_counter,
+            "llm_call_count": self.llm_call_count,
             "checklist_comment_id": self.plan_comment_id,
             "total_actions": total_actions,
             "pre_planning_result": self.pre_planning_result,

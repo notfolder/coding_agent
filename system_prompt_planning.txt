@@ -398,4 +398,21 @@ For execution phase: Use standard function_call format.
 For reflection phase: Include reflection and plan_revision if needed.
 For completion: Include summary with done=true.
 
+## Comment Field for Progress Updates
+
+You can optionally include a "comment" field in your response.
+This field should contain a progress update or summary of results that you want to communicate to the user.
+Write the comment in Japanese. This comment will be automatically posted to the GitHub/GitLab Issue.
+
+Example:
+```json
+{
+  "phase": "planning",
+  "goal_understanding": {...},
+  "task_decomposition": {...},
+  "action_plan": {...},
+  "comment": "タスク「新機能の実装」を分析し、5つのアクションで実装を進める計画を作成しました。"
+}
+```
+
 Remember: Your goal is to complete the task successfully by planning carefully, executing systematically, and adapting when necessary.
