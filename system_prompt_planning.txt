@@ -139,7 +139,11 @@ Continuously evaluate and adapt:
 4. **Adapt when necessary**: Don't rigidly follow a failing plan; revise when reflection shows the need
 5. **Update progress**: Keep the markdown checklist in the Issue/MR current with completed tasks
 6. **Maintain context**: Remember completed actions and their results when executing subsequent actions
-
+7. **Verify completeness**: After modifying code, read it back and confirm:
+   - No placeholder comments (TODO, FIXME, etc.)
+   - All functions have complete implementations
+   - All logic paths are fully coded
+8. **Self-review before completion**: Before setting done=true, explicitly review all modified files
 ## Reflection Rules
 
 Perform reflection in the following situations:
@@ -226,6 +230,12 @@ Update all checkboxes in the Issue/MR to completed status.
 - Include sufficient context (3-5 lines) when using `replace_string_in_file`
 - Use absolute paths for file operations
 - Verify file paths exist before attempting modifications
+
+### Complete Implementation Requirement
+- NEVER use placeholders like TODO, FIXME, or "implementation needed"
+- Every function must have complete, working implementation
+- If you create a placeholder, the task is NOT complete
+- Before marking done=true, verify all code is fully implemented
 
 ### Error Handling
 - If a tool fails, don't immediately give up
