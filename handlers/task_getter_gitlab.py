@@ -28,7 +28,15 @@ class TaskGitLabIssue(Task):
         self.gitlab_client = gitlab_client
         self.config = config
 
+    def _refresh_issue(self) -> None:
+        """最新のIssue情報を取得してself.issueを更新する."""
+        args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid}
+        self.issue = self.mcp_client.call_tool("get_issue", args)
+
     def prepare(self) -> None:
+        # 最新のIssue情報を取得
+        self._refresh_issue()
+        
         # ラベル付け変更: bot_label → processing_label
         labels = self.issue.get("labels", [])
         if self.config["gitlab"]["bot_label"] in labels:
@@ -40,9 +48,8 @@ class TaskGitLabIssue(Task):
         self.mcp_client.call_tool("update_issue", args)
 
     def get_prompt(self) -> str:
-        # issue本体取得
-        args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid}
-        self.mcp_client.call_tool("get_issue", args)
+        # issue本体取得（最新情報を取得してself.issueに代入）
+        self._refresh_issue()
         comments = []
         note_args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid}
         comments = self.mcp_client.call_tool("list_issue_discussions", note_args)
@@ -81,6 +88,8 @@ class TaskGitLabIssue(Task):
         )
 
     def finish(self) -> None:
+        # 最新のIssue情報を取得
+        self._refresh_issue()
         # ラベル付け変更: processing_label → done_label
         labels = self.issue.get("labels", [])
         if self.config["gitlab"]["processing_label"] in labels:
@@ -95,6 +104,8 @@ class TaskGitLabIssue(Task):
         return GitLabIssueTaskKey(self.project_id, self.issue_iid)
 
     def check(self) -> bool:
+        # 最新のIssue情報を取得
+        self._refresh_issue()
         return self.config["gitlab"]["processing_label"] in self.issue.get("labels", [])
 
     def add_label(self, label: str) -> None:
@@ -196,7 +207,15 @@ class TaskGitLabMergeRequest(Task):
         self.config = config
         self.labels = list(mr.get("labels", []))
 
+    def _refresh_mr(self) -> None:
+        """最新のMR情報を取得してself.mrを更新する."""
+        args = {"project_id": f"{self.project_id}", "merge_request_iid": self.merge_request_iid}
+        self.mr = self.mcp_client.call_tool("get_merge_request", args)
+        self.labels = list(self.mr.get("labels", []))
+
     def prepare(self) -> None:
+        # 最新のMR情報を取得
+        self._refresh_mr()
         # ラベル付け変更: bot_label → processing_label
         if self.config["gitlab"]["bot_label"] in self.labels:
             self.labels.remove(self.config["gitlab"]["bot_label"])
@@ -212,6 +231,8 @@ class TaskGitLabMergeRequest(Task):
 
     def get_prompt(self) -> str:
         """GitLabからコメント情報を取得してプロンプトを生成する."""
+        # 最新のMR情報を取得
+        self._refresh_mr()
         comments = self.gitlab_client.list_merge_request_notes(
             project_id=self.project_id, merge_request_iid=self.merge_request_iid,
         )
@@ -245,6 +266,8 @@ class TaskGitLabMergeRequest(Task):
         )
 
     def finish(self) -> None:
+        # 最新のMR情報を取得
+        self._refresh_mr()
         # ラベル付け変更: processing_label → done_label
         if self.config["gitlab"]["processing_label"] in self.labels:
             self.labels.remove(self.config["gitlab"]["processing_label"])
@@ -262,6 +285,8 @@ class TaskGitLabMergeRequest(Task):
         return GitLabMergeRequestTaskKey(self.project_id, self.merge_request_iid)
 
     def check(self) -> bool:
+        # 最新のMR情報を取得
+        self._refresh_mr()
         return self.config["gitlab"]["processing_label"] in self.labels
 
     def add_label(self, label: str) -> None:

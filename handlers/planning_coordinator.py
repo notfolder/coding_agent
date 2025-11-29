@@ -65,9 +65,13 @@ class PlanningCoordinator:
         self.history_store = context_manager.get_planning_store()
         message_store = context_manager.get_message_store()
 
-        # Set issue_id for cross-task history tracking
-        if hasattr(task, "number"):
-            self.history_store.issue_id = str(task.number)
+        # Set issue_id for cross-task history tracking from TaskKey
+        task_key = task.get_task_key()
+        task_dict = task_key.to_dict()
+        # GitHub: number, GitLab: issue_iid or mr_iid
+        issue_id = task_dict.get("number") or task_dict.get("issue_iid") or task_dict.get("mr_iid")
+        if issue_id:
+            self.history_store.issue_id = str(issue_id)
 
         # Track checklist comment ID for updates
         self.checklist_comment_id: int | str | None = None
@@ -131,6 +135,7 @@ class PlanningCoordinator:
         # LLM呼び出しコメント機能の有効/無効
         llm_call_comments_config = config.get("llm_call_comments", {})
         self.llm_call_comments_enabled = llm_call_comments_config.get("enabled", True)
+        self.logger.info("LLM呼び出しコメント機能: %s", "有効" if self.llm_call_comments_enabled else "無効")
 
         # フェーズ別のデフォルトメッセージ
         self.phase_default_messages: dict[str, str] = {
@@ -229,6 +234,9 @@ class PlanningCoordinator:
             
             # Check for new comments before starting
             self._check_and_add_new_comments()
+            
+            # Step 0.5: Check for inheritance context and post notification
+            self._handle_context_inheritance()
             
             # Step 0: Execute pre-planning phase (計画前情報収集フェーズ)
             if self.pre_planning_manager is not None:
@@ -546,6 +554,105 @@ class PlanningCoordinator:
         # Pause the task with planning state
         self.pause_manager.pause_task(self.task, self.task.uuid, planning_state=planning_state)
 
+    def _handle_context_inheritance(self) -> None:
+        """過去コンテキスト引き継ぎを処理する.
+
+        TaskContextManagerから引き継ぎコンテキストを取得し、
+        通知コメントを投稿し、初期コンテキストをLLMに設定します。
+        """
+        # context_managerから引き継ぎコンテキストを確認
+        if not self.context_manager.has_inheritance_context():
+            return
+
+        try:
+            # 引き継ぎ通知コメントを投稿
+            notification = self.context_manager.get_inheritance_notification_comment()
+            if notification and hasattr(self.task, "comment"):
+                self.task.comment(notification)
+                self.logger.info("過去コンテキスト引き継ぎ通知を投稿しました")
+
+            # 引き継ぎコンテキストを取得
+            inheritance_context = self.context_manager.get_inheritance_context()
+            if inheritance_context is None:
+                return
+
+            # 初期コンテキストメッセージを作成してLLMに追加
+            # （user_requestは既にget_prompt()で取得済みのため、ここでは最終要約のみを追加）
+            summary_with_prefix = self._format_inherited_summary(inheritance_context)
+            if summary_with_prefix:
+                # LLMにアシスタントロールで引き継ぎ情報を追加
+                # Note: send_user_message/send_system_promptではなく、
+                # コンテキストの最初に履歴として追加する形式を使用
+                # add_assistant_messageはLLMClient基底クラスで定義済み
+                self.llm_client.add_assistant_message(summary_with_prefix)
+                self.logger.info("引き継ぎコンテキストをLLMに追加しました")
+
+        except Exception as e:
+            self.logger.warning("過去コンテキスト引き継ぎの処理に失敗: %s", e)
+
+    def _format_inherited_summary(self, inheritance_context: Any) -> str | None:
+        """引き継ぎコンテキストから要約テキストをフォーマットする.
+
+        Args:
+            inheritance_context: InheritanceContextインスタンス
+
+        Returns:
+            フォーマットされた要約テキスト、または None
+
+        """
+        if inheritance_context is None:
+            return None
+
+        try:
+            prev = inheritance_context.previous_context
+            final_summary = inheritance_context.final_summary
+            planning_summary = inheritance_context.planning_summary
+
+            if not final_summary:
+                return None
+
+            completed_at_str = (
+                prev.completed_at.strftime("%Y-%m-%d %H:%M:%S")
+                if prev.completed_at
+                else "不明"
+            )
+
+            lines = [
+                "前回の処理要約:",
+                f"(引き継ぎ元: {prev.uuid[:8]}, 処理日時: {completed_at_str})",
+                "",
+                final_summary,
+            ]
+
+            # Planning Modeサマリーがある場合は追加
+            if planning_summary:
+                lines.extend([
+                    "",
+                    "=== Previous Plan Summary ===",
+                ])
+
+                plan_summary = planning_summary.get("previous_plan_summary", {})
+                if plan_summary:
+                    goal = plan_summary.get("goal", "")
+                    if goal:
+                        lines.append(f"Goal: {goal}")
+                    subtasks = plan_summary.get("subtasks", [])
+                    if subtasks:
+                        lines.append(f"Subtasks: {', '.join(subtasks[:5])}")
+
+                recommendations = planning_summary.get("recommendations", [])
+                if recommendations:
+                    lines.append("")
+                    lines.append("=== Recommendations ===")
+                    for rec in recommendations:
+                        lines.append(f"- {rec}")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            self.logger.warning("引き継ぎ要約のフォーマットに失敗: %s", e)
+            return None
+
 
     def _execute_pre_planning_phase(self) -> dict[str, Any] | None:
         """計画前情報収集フェーズを実行する.
@@ -573,8 +680,11 @@ class PlanningCoordinator:
             Planning result dictionary or None if planning failed
         """
         try:
-            # Get past executions for context
-            issue_id = getattr(self.task, 'number', None)
+            # Get past executions for context from TaskKey
+            task_key = self.task.get_task_key()
+            task_dict = task_key.to_dict()
+            # GitHub: number, GitLab: issue_iid or mr_iid
+            issue_id = task_dict.get("number") or task_dict.get("issue_iid") or task_dict.get("mr_iid")
             past_history = []
             if issue_id:
                 past_history = self.history_store.get_past_executions_for_issue(str(issue_id))
@@ -2611,10 +2721,12 @@ Maintain the same JSON format as before for action_plan.actions."""
         # Get current planning state with total actions
         planning_state = self.get_planning_state()
         
-        # Stop the task with planning state
-        self.stop_manager.stop_task(
+        # 最終要約を作成してコンテキストをcompletedに移動
+        self.context_manager.stop()
+        
+        # コメントとラベル更新
+        self.stop_manager.post_stop_notification(
             self.task,
-            self.task.uuid,
             planning_state=planning_state,
         )
 

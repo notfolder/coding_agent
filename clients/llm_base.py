@@ -40,3 +40,17 @@ class LLMClient(ABC):
             タプル: (LLMが生成したレスポンス文字列, function callsのリスト, トークン数)
 
         """
+
+    def add_assistant_message(self, message: str) -> None:  # noqa: B027
+        """アシスタントメッセージをメッセージ履歴に追加する.
+
+        過去コンテキスト引き継ぎ機能で使用します。
+        この実装はデフォルトで何もしません。
+        サブクラスでmessage_storeがある場合はオーバーライドしてください。
+
+        Args:
+            message: アシスタントメッセージの内容
+
+        """
+        # デフォルト実装は何もしない
+        # message_storeを持つサブクラスでオーバーライド

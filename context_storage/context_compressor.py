@@ -114,6 +114,135 @@ class ContextCompressor:
         
         return summary_id
 
+    def create_final_summary(self) -> int:
+        """タスク完了時に全メッセージから最終要約を生成する.
+
+        compress()とは異なり、全メッセージを要約対象とします。
+        current.jsonlは変更せず、summaries.jsonlにのみ要約を追加します。
+
+        Returns:
+            Summary ID
+
+        """
+        context_dir = self.message_store.context_dir
+        
+        # 1. 全メッセージを抽出
+        all_messages_file = context_dir / "final_summary_input.jsonl"
+        original_tokens = self._extract_all_messages(all_messages_file)
+        
+        if original_tokens == 0:
+            # メッセージがない場合はスキップ
+            all_messages_file.unlink(missing_ok=True)
+            return -1
+        
+        # 2. 最終要約リクエスト作成
+        summary_request_file = context_dir / "final_summary_request.txt"
+        self._create_final_summary_request(all_messages_file, summary_request_file)
+        
+        # 3. LLMから要約取得
+        summary_text = self._get_summary_from_llm(summary_request_file)
+        summary_tokens = len(summary_text) // 4
+        
+        # 4. 要約を保存
+        summary_id = self.summary_store.add_summary(
+            start_seq=1,
+            end_seq=self.message_store.count_messages(),
+            summary_text=summary_text,
+            original_tokens=original_tokens,
+            summary_tokens=summary_tokens,
+        )
+        
+        # 5. 一時ファイルを削除
+        all_messages_file.unlink(missing_ok=True)
+        summary_request_file.unlink(missing_ok=True)
+        
+        return summary_id
+
+    def _extract_all_messages(self, output_file: Path) -> int:
+        """全メッセージをcurrent.jsonlから抽出する（最終要約用）.
+
+        Args:
+            output_file: 出力ファイルパス
+
+        Returns:
+            総トークン数
+
+        """
+        current_file = self.message_store.current_file
+        if not current_file.exists():
+            return 0
+        
+        # 全メッセージを読み込み
+        messages = []
+        total_tokens = 0
+        with current_file.open() as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    messages.append(line)
+                    msg = json.loads(line)
+                    total_tokens += len(msg.get("content", "")) // 4
+        
+        if not messages:
+            return 0
+        
+        # 出力ファイルに書き込み
+        with output_file.open("w") as f:
+            for msg in messages:
+                f.write(msg + "\n")
+        
+        return total_tokens
+
+    def _create_final_summary_request(self, messages_file: Path, output_file: Path) -> None:
+        """最終要約リクエストを作成する.
+
+        Args:
+            messages_file: メッセージファイルパス
+            output_file: 出力ファイルパス
+
+        """
+        # メッセージを読み込んでフォーマット
+        messages_text = ""
+        with messages_file.open() as f:
+            for line in f:
+                msg = json.loads(line.strip())
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                messages_text += f"\n[{role}]: {content}\n"
+        
+        # 最終要約用のプロンプトを使用
+        prompt = self._final_summary_prompt().replace("{messages}", messages_text)
+        
+        # ファイルに書き込み
+        with output_file.open("w") as f:
+            f.write(prompt)
+
+    def _final_summary_prompt(self) -> str:
+        """最終要約用のプロンプトを取得する.
+
+        Returns:
+            最終要約プロンプトテンプレート
+
+        """
+        return """あなたはタスク完了時の最終要約を作成するアシスタントです。
+以下のタスク実行の全会話履歴を、次回同じIssue/MR/PRが処理される際に引き継ぐための要約にしてください。
+
+要約には以下を含めてください：
+1. タスクの目的と要件
+2. 実施した変更内容（ファイル名と変更概要）
+3. 発生した問題とその解決方法
+4. 重要な決定事項や制約条件
+5. 残存タスクや今後の課題（あれば）
+
+次回の処理者がこの要約を読んだだけで、前回の処理内容を把握できるように記述してください。
+元の会話の20-30%の長さを目標としてください。
+
+=== 全会話履歴 ===
+{messages}
+
+=== 指示 ===
+上記の会話履歴全体を要約してください。要約のみを出力し、前置きや説明は不要です。"""
+
     def _extract_recent_messages(self, output_file: Path) -> None:
         """Extract recent N messages from current.jsonl.
 
@@ -217,22 +346,30 @@ class ContextCompressor:
         with request_file.open() as f:
             prompt = f.read()
         
-        # For actual summarization, we would need to use the LLM client
-        # However, the current LLM client interface doesn't support
-        # one-off requests without affecting the message history.
-        # This is a simplified implementation that would need enhancement
-        # for production use.
-        
-        # TODO: Implement proper LLM-based summarization
-        # This requires either:
-        # 1. Adding a separate summarization method to LLM client
-        # 2. Creating a temporary LLM client instance for summarization
-        # 3. Using a dedicated summarization service
-        
-        # For now, return a placeholder to indicate compression occurred
-        summary = f"[Context Summary: {len(prompt)} chars of conversation history compressed]"
-        
-        return summary
+        # LLMクライアントを使用して要約を生成
+        try:
+            # ユーザーメッセージとして要約リクエストを送信
+            self.llm_client.send_user_message(prompt)
+            
+            # LLMから応答を取得
+            response_text, _, _ = self.llm_client.get_response()
+            
+            summary = response_text.strip()
+            
+            if not summary:
+                # フォールバック: レスポンスが空の場合
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning("LLMから空の要約が返されました")
+                summary = "[要約生成失敗: LLMから空のレスポンス]"
+            
+            return summary
+        except Exception as e:
+            # エラー時のフォールバック
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.exception("LLMによる要約生成に失敗しました: %s", e)
+            return f"[要約生成失敗: {e!s}]"
 
     def _default_summary_prompt(self) -> str:
         """Get default summary prompt.

@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from handlers.planning_coordinator import PlanningCoordinator
+from handlers.task_key import GitHubIssueTaskKey
 
 
 class MockTask:
@@ -22,6 +23,7 @@ class MockTask:
         self.title = title
         self.body = body
         self.number = number
+        self._task_key = GitHubIssueTaskKey("test-owner", "test-repo", number)
         
     def comment(self, text):
         """Mock comment method."""
@@ -34,6 +36,10 @@ class MockTask:
     def get_prompt(self):
         """Mock get_prompt method."""
         return f"TASK: {self.title}\nDESCRIPTION: {self.body}\nNUMBER: {self.number}"
+    
+    def get_task_key(self):
+        """Get task key."""
+        return self._task_key
 
 
 class MockContextManager:

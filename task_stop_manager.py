@@ -154,7 +154,7 @@ class TaskStopManager:
         planning_state: dict[str, Any] | None = None,
         llm_call_count: int | None = None,
     ) -> None:
-        """Stop a task due to assignee removal.
+        """非推奨: stop_taskは直接使用せず、TaskContextManager.stop()を使用してください.
 
         Args:
             task: Task object to stop
@@ -163,9 +163,38 @@ class TaskStopManager:
             llm_call_count: Number of LLM calls made (for Context Storage mode)
 
         """
+        self.logger.warning(
+            "stop_task()は非推奨です。TaskContextManager.stop()とpost_stop_notification()を使用してください"
+        )
         self.logger.info("タスクを停止します: %s", task_uuid)
         
-        # Build stop comment based on mode
+        # Post stop notification
+        self.post_stop_notification(task, planning_state=planning_state, llm_call_count=llm_call_count)
+        
+        # Move context to completed directory (legacy behavior)
+        try:
+            self._move_to_completed(task_uuid)
+        except Exception as e:
+            self.logger.exception("コンテキスト移動中にエラー: %s", e)
+        
+        self.logger.info("タスク停止完了: %s", task_uuid)
+
+    def post_stop_notification(
+        self,
+        task: Task,
+        *,
+        planning_state: dict[str, Any] | None = None,
+        llm_call_count: int | None = None,
+    ) -> None:
+        """タスク停止の通知を投稿し、ラベルを更新する.
+
+        Args:
+            task: Task object
+            planning_state: Planning state (if Planning mode is enabled)
+            llm_call_count: Number of LLM calls made (for Context Storage mode)
+
+        """
+        # Build stop comment
         stop_comment = self._build_stop_comment(planning_state, llm_call_count)
         
         # Post stop comment
@@ -179,14 +208,6 @@ class TaskStopManager:
             self._update_label_to_stopped(task)
         except Exception as e:
             self.logger.exception("ラベル更新中にエラー: %s", e)
-        
-        # Move context to completed directory
-        try:
-            self._move_to_completed(task_uuid)
-        except Exception as e:
-            self.logger.exception("コンテキスト移動中にエラー: %s", e)
-        
-        self.logger.info("タスク停止完了: %s", task_uuid)
 
     def _build_stop_comment(
         self,

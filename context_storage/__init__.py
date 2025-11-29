@@ -6,6 +6,11 @@ instead of keeping them in memory.
 """
 
 from .context_compressor import ContextCompressor
+from .context_inheritance_manager import (
+    ContextInheritanceManager,
+    InheritanceContext,
+    PreviousContext,
+)
 from .message_store import MessageStore
 from .summary_store import SummaryStore
 from .task_context_manager import TaskContextManager
@@ -17,4 +22,7 @@ __all__ = [
     "SummaryStore",
     "ToolStore",
     "ContextCompressor",
+    "ContextInheritanceManager",
+    "PreviousContext",
+    "InheritanceContext",
 ]
