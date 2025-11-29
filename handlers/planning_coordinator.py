@@ -578,14 +578,9 @@ class PlanningCoordinator:
                 # LLMにアシスタントロールで引き継ぎ情報を追加
                 # Note: send_user_message/send_system_promptではなく、
                 # コンテキストの最初に履歴として追加する形式を使用
-                if hasattr(self.llm_client, "add_assistant_message"):
-                    self.llm_client.add_assistant_message(summary_with_prefix)
-                    self.logger.info("引き継ぎコンテキストをLLMに追加しました")
-                else:
-                    # add_assistant_messageがない場合はログのみ
-                    self.logger.debug(
-                        "LLMクライアントがadd_assistant_messageをサポートしていません"
-                    )
+                # add_assistant_messageはLLMClient基底クラスで定義済み
+                self.llm_client.add_assistant_message(summary_with_prefix)
+                self.logger.info("引き継ぎコンテキストをLLMに追加しました")
 
         except Exception as e:
             self.logger.warning("過去コンテキスト引き継ぎの処理に失敗: %s", e)

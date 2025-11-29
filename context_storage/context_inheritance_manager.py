@@ -214,6 +214,10 @@ class ContextInheritanceManager:
                 if retry == self.MAX_DB_RETRIES - 1:
                     self.logger.error("データベース接続に失敗しました")
                     return []
+                # 指数バックオフで待機
+                import time
+                wait_time = 0.1 * (2 ** retry)  # 0.1秒、0.2秒、0.4秒
+                time.sleep(wait_time)
 
         return previous_contexts
 
