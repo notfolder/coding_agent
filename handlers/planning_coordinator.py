@@ -1411,10 +1411,15 @@ Maintain the same JSON format as before for action_plan.actions."""
                 if ambiguities:
                     prompt_parts.append("曖昧な点と選択した解釈:")
                     for amb in ambiguities:
-                        item = amb.get("item", "")
-                        selected = amb.get("selected_interpretation", "")
-                        reasoning = amb.get("reasoning", "")
-                        prompt_parts.append(f"  - {item}: {selected} (理由: {reasoning})")
+                        # ambが辞書か文字列かを判定
+                        if isinstance(amb, dict):
+                            item = amb.get("item", "")
+                            selected = amb.get("selected_interpretation", "")
+                            reasoning = amb.get("reasoning", "")
+                            prompt_parts.append(f"  - {item}: {selected} (理由: {reasoning})")
+                        elif isinstance(amb, str):
+                            # 文字列の場合はそのまま使用
+                            prompt_parts.append(f"  - {amb}")
                     prompt_parts.append("")
             
             # 収集した情報
