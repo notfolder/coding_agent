@@ -310,24 +310,7 @@ You must select an appropriate execution environment for this task. The followin
 | java | coding-agent-executor-java:latest | Java/Kotlin, Spring Boot |
 | go | coding-agent-executor-go:latest | Go projects, CLI tools |
 
-Select the environment based on:
-- Project's dependency files (requirements.txt → python, package.json → node, etc.)
-- The main programming language used in the project
-- The task requirements
 ```
-
-#### 6.2.2 環境選択の判断基準
-
-LLMは以下の情報を基に環境を選択します：
-
-- プロジェクトのルートディレクトリに存在するファイル
-  - `package.json`: Node.js環境を推奨
-  - `requirements.txt`: Python環境を推奨
-  - `condaenv.yaml` / `environment.yml`: Miniforge環境を推奨
-  - `go.mod`: Go環境を推奨
-  - `pom.xml` / `build.gradle`: Java環境を推奨
-- プロジェクトの説明やIssue/MRの内容
-- 必要なツールやライブラリ
 
 ### 6.3 計画応答形式の拡張
 
@@ -549,9 +532,8 @@ LLMが存在しない環境名を選択した場合：
 指定されたイメージが存在しない場合：
 
 1. エラーログを記録
-2. `docker pull`を試行
-3. 失敗した場合はタスクをエラー終了
-4. Issue/MRにエラーコメントを投稿
+2. タスクをエラー終了
+3. Issue/MRにエラーコメントを投稿
 
 ### 11.2 環境選択スキップ
 
