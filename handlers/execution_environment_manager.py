@@ -354,7 +354,7 @@ class ExecutionEnvironmentManager:
             self.logger.warning("既存コンテナの削除に失敗: %s", e)
 
         # コンテナを作成（選択された環境のイメージを使用）
-        container_id = self._create_container(task, selected_env)
+        container_id, is_custom_image = self._create_container(task, selected_env)
 
         # コンテナ情報を作成（environment_name属性を含める）
         container_info = ContainerInfo(
@@ -364,9 +364,9 @@ class ExecutionEnvironmentManager:
             status="created",
         )
 
-        # 事前にgitインストール済みのイメージを使用するため、インストールはスキップ
-        # ただし、従来のフォールバックイメージ（base_image）の場合はインストールが必要
-        if selected_env not in self._environments:
+        # プレビルドイメージ（coding-agent-executor-*）にはgitが含まれているためスキップ
+        # base_imageへフォールバックした場合のみgitをインストール
+        if not is_custom_image:
             try:
                 self._install_git(container_id)
             except RuntimeError:
@@ -394,8 +394,8 @@ class ExecutionEnvironmentManager:
         self._active_containers[task_uuid] = container_info
 
         self.logger.info(
-            "実行環境の準備が完了しました: %s (環境: %s)", 
-            container_id, 
+            "実行環境の準備が完了しました: %s (環境: %s)",
+            container_id,
             selected_env,
         )
         return container_info
@@ -427,16 +427,19 @@ class ExecutionEnvironmentManager:
 
         return environment_name
 
-    def _create_container(self, task: Task, environment_name: str | None = None) -> str:
+    def _create_container(
+        self, task: Task, environment_name: str | None = None,
+    ) -> tuple[str, bool]:
         """Dockerコンテナを作成する.
-        
+
         Args:
             task: タスクオブジェクト
             environment_name: 使用する環境名。指定された場合は対応するイメージを使用
-            
+
         Returns:
-            コンテナID
-            
+            (コンテナID, カスタムイメージ使用フラグ) のタプル
+            カスタムイメージ使用フラグは、environments設定のイメージを使用した場合True
+
         Raises:
             RuntimeError: コンテナ作成に失敗した場合
 
@@ -445,8 +448,10 @@ class ExecutionEnvironmentManager:
         container_name = self._get_container_name(task_uuid)
 
         # 環境名に基づいてイメージを選択
+        is_custom_image = False
         if environment_name and environment_name in self._environments:
             image = self._environments[environment_name]
+            is_custom_image = True
             self.logger.info("環境 '%s' のイメージを使用: %s", environment_name, image)
         else:
             # フォールバック: base_imageを使用
@@ -487,7 +492,7 @@ class ExecutionEnvironmentManager:
             self._run_docker_command(["rm", "-f", container_id], check=False)
             raise RuntimeError(error_msg) from e
 
-        return container_id
+        return container_id, is_custom_image
 
     def _install_git(self, container_id: str) -> None:
         """コンテナ内にgitをインストールする.

@@ -199,7 +199,7 @@ class TestExecutionEnvironmentManager(unittest.TestCase):
         )
         
         result = self.manager._run_docker_command(["ps"])
-        
+
         mock_run.assert_called_once()
         assert result.returncode == 0
         assert result.stdout == "container list"
@@ -222,14 +222,15 @@ class TestExecutionEnvironmentManager(unittest.TestCase):
                 stderr="",
             ),
         ]
-        
+
         # タスクのモックを作成
         mock_task = MagicMock()
         mock_task.uuid = "test-uuid-123"
-        
-        container_id = self.manager._create_container(mock_task)
-        
+
+        container_id, is_custom = self.manager._create_container(mock_task)
+
         assert container_id == "container-id-123"
+        assert is_custom is False  # 環境名指定なしなのでFalse
         assert mock_run.call_count == 2
 
     @patch("subprocess.run")
@@ -514,14 +515,15 @@ class TestMultiLanguageEnvironment(unittest.TestCase):
                 stderr="",
             ),
         ]
-        
+
         mock_task = MagicMock()
         mock_task.uuid = "test-uuid-123"
-        
-        container_id = self.manager._create_container(mock_task, "node")
-        
+
+        container_id, is_custom = self.manager._create_container(mock_task, "node")
+
         assert container_id == "container-id-123"
-        
+        assert is_custom is True  # 有効な環境名指定なのでTrue
+
         # docker create コマンドにnode用イメージが含まれることを確認
         create_call = mock_run.call_args_list[0]
         cmd = create_call[0][0]
@@ -544,15 +546,16 @@ class TestMultiLanguageEnvironment(unittest.TestCase):
                 stderr="",
             ),
         ]
-        
+
         mock_task = MagicMock()
         mock_task.uuid = "test-uuid-456"
-        
+
         # 無効な環境名を渡す
-        container_id = self.manager._create_container(mock_task, "invalid_env")
-        
+        container_id, is_custom = self.manager._create_container(mock_task, "invalid_env")
+
         assert container_id == "container-id-456"
-        
+        assert is_custom is False  # 無効な環境名なのでFalse
+
         # docker create コマンドにbase_imageが含まれることを確認
         create_call = mock_run.call_args_list[0]
         cmd = create_call[0][0]
@@ -565,7 +568,7 @@ class TestMultiLanguageEnvironment(unittest.TestCase):
             task_uuid="test-uuid",
             environment_name="node",
         )
-        
+
         assert info.environment_name == "node"
         assert info.container_id == "test-container-id"
         assert info.task_uuid == "test-uuid"
@@ -573,7 +576,7 @@ class TestMultiLanguageEnvironment(unittest.TestCase):
     def test_default_environments_constant(self) -> None:
         """デフォルト環境定数のテスト."""
         from handlers.execution_environment_manager import DEFAULT_ENVIRONMENTS
-        
+
         # すべての環境が定義されていることを確認
         assert len(DEFAULT_ENVIRONMENTS) == 5
         assert "python" in DEFAULT_ENVIRONMENTS

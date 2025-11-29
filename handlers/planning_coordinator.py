@@ -1675,21 +1675,20 @@ Maintain the same JSON format as before for action_plan.actions."""
 
         """
         # ExecutionEnvironmentManagerから環境リストを取得（利用可能な場合）
+        from handlers.execution_environment_manager import (
+            DEFAULT_ENVIRONMENT_NAME,
+            DEFAULT_ENVIRONMENTS,
+        )
+
         environments = {}
-        default_env = "python"
+        default_env = DEFAULT_ENVIRONMENT_NAME
 
         if self.execution_manager is not None:
             environments = self.execution_manager.get_available_environments()
             default_env = self.execution_manager.get_default_environment()
         else:
-            # デフォルトの環境リスト
-            environments = {
-                "python": "coding-agent-executor-python:latest",
-                "miniforge": "coding-agent-executor-miniforge:latest",
-                "node": "coding-agent-executor-node:latest",
-                "java": "coding-agent-executor-java:latest",
-                "go": "coding-agent-executor-go:latest",
-            }
+            # ExecutionEnvironmentManagerの定数を使用
+            environments = DEFAULT_ENVIRONMENTS.copy()
 
         # 環境ごとの推奨用途
         env_recommendations = {
