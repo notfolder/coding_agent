@@ -322,7 +322,40 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 
 ---
 
-## 13. 外部API仕様
+## 13. IssueからMR/PR変換機能
+
+### 13.1 概要
+
+GitHub/GitLabのIssueで依頼された内容を自動的にMerge Request (MR) / Pull Request (PR) として作成する機能です。Issueの内容に基づいてLLMがブランチ名を決定し、新しいタスクとしてMR/PRを作成・処理します。
+
+### 13.2 主要機能
+
+- **ブランチ名自動生成**: LLMがIssue内容を分析し、適切なブランチ名を決定
+- **内容転記**: Issue本文とコメントをMR/PRに転記
+- **新規タスク開始**: 作成されたMR/PRを新規タスクとして処理開始
+- **元Issueへの通知**: 作成されたMR/PRへのリンクを元Issueにコメント
+
+### 13.3 処理フロー
+
+1. 特定ラベル（例: `create-mr`）が付与されたIssueを検知
+2. Issue内容をLLMに送信し、ブランチ名を生成
+3. 新規ブランチを作成
+4. MR/PRを作成し、Issue内容とコメントを転記
+5. 元Issueにリンクコメントを投稿
+6. MR/PRを新規タスクとして処理開始
+
+### 13.4 トリガー方式
+
+- **ラベルベース**: 特定ラベル付与でトリガー
+- **コメントベース**: `/create-mr` コマンドでトリガー
+
+### 13.5 詳細仕様
+
+→ 詳細は [ISSUE_TO_MR_CONVERSION_SPECIFICATION.md](spec/ISSUE_TO_MR_CONVERSION_SPECIFICATION.md) を参照
+
+---
+
+## 14. 外部API仕様
 
 本プロジェクトで使用する外部APIの仕様については、以下を参照してください。
 
@@ -335,7 +368,7 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 
 ---
 
-## 14. 仕様書一覧
+## 15. 仕様書一覧
 
 | ファイル名 | 内容 |
 |-----------|------|
@@ -353,9 +386,10 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 | [USER_CONFIG_WEB_SPECIFICATION.md](spec/USER_CONFIG_WEB_SPECIFICATION.md) | ユーザー設定Web仕様 |
 | [user_management_api_spec.md](spec/user_management_api_spec.md) | ユーザー管理API仕様 |
 | [COMMAND_EXECUTOR_MCP_SPECIFICATION.md](spec/COMMAND_EXECUTOR_MCP_SPECIFICATION.md) | Command Executor MCP Server連携仕様 |
+| [ISSUE_TO_MR_CONVERSION_SPECIFICATION.md](spec/ISSUE_TO_MR_CONVERSION_SPECIFICATION.md) | IssueからMR/PR変換仕様 |
 
 ---
 
 **文書バージョン:** 1.0  
-**最終更新日:** 2024-11-28  
+**最終更新日:** 2025-11-29  
 **ステータス:** 統合ドキュメント
