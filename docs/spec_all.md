@@ -322,15 +322,43 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 
 ---
 
-## 13. 過去コンテキスト引き継ぎ機能
+## 13. IssueからMR/PR変換機能
 
 ### 13.1 概要
+
+GitHub/GitLabのIssueで依頼された内容を自動的にMerge Request (MR) / Pull Request (PR) として作成する機能です。Issueの内容に基づいてLLMがブランチ名を決定し、新しいタスクとしてMR/PRを作成・処理します。
+
+### 13.2 主要機能
+
+- **ブランチ名自動生成**: LLMがIssue内容を分析し、Bot名とIssue番号を含む適切なブランチ名を決定
+- **内容転記**: Issue本文とコメントをMR/PRに転記
+- **自動タスク化**: MR/PRにBotをアサイン・ラベル付与することで自動的にタスク処理開始
+- **元Issueへの報告**: 作成されたMR/PRへのリンクを元Issueにコメント
+
+### 13.3 処理フロー
+
+1. `coding agent`ラベルが付与されたIssueを検知
+2. Issue内容をLLMに送信し、ブランチ名を生成（Bot名+Issue番号を含む）
+3. 新規ブランチを作成（空コミット）
+4. WIP付きのMR/PRを作成し、Issue内容とコメントを転記
+5. MR/PRにBotアサインと`coding agent`ラベルを付与
+6. 元Issueに作成報告をコメント
+7. 元Issueを`coding agent done`に更新
+8. MR/PRが自動的にタスクとして処理開始
+
+### 13.4 詳細仕様
+
+→ 詳細は [ISSUE_TO_MR_CONVERSION_SPECIFICATION.md](spec/ISSUE_TO_MR_CONVERSION_SPECIFICATION.md) を参照
+
+## 14. 過去コンテキスト引き継ぎ機能
+
+### 14.1 概要
 
 同一のIssue、Merge Request、Pull Requestに対して、過去にコーディングエージェントが処理した際のコンテキストを引き継ぎ、処理の継続性と効率性を向上させる機能です。
 
 本機能は、通常モードと計画実行モード（Planning Mode）の両方で動作します。
 
-### 13.2 主要機能
+### 14.2 主要機能
 
 - **過去コンテキスト検索**: TaskKeyのハッシュ値を使用した高速検索
 - **引き継ぎデータ管理**: 要約、計画履歴、ツール実行履歴の引き継ぎ
@@ -338,7 +366,7 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 - **トークン制限対応**: 引き継ぎコンテキストのトークン数制御
 - **ユーザー制御**: コメントコマンドによる引き継ぎ動作の制御
 
-### 13.3 引き継ぎ対象
+### 14.3 引き継ぎ対象
 
 通常モードとPlanning Modeで以下のデータを引き継ぎます：
 
@@ -352,13 +380,13 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 | リフレクション | - | ✅ |
 | 再計画判断 | - | ✅ |
 
-### 13.4 詳細仕様
+### 14.4 詳細仕様
 
 → 詳細は [CONTEXT_INHERITANCE_SPECIFICATION.md](spec/CONTEXT_INHERITANCE_SPECIFICATION.md) を参照
 
 ---
 
-## 14. 外部API仕様
+## 15. 外部API仕様
 
 本プロジェクトで使用する外部APIの仕様については、以下を参照してください。
 
@@ -371,7 +399,7 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 
 ---
 
-## 15. 仕様書一覧
+## 16. 仕様書一覧
 
 | ファイル名 | 内容 |
 |-----------|------|
@@ -390,6 +418,7 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 | [USER_CONFIG_WEB_SPECIFICATION.md](spec/USER_CONFIG_WEB_SPECIFICATION.md) | ユーザー設定Web仕様 |
 | [user_management_api_spec.md](spec/user_management_api_spec.md) | ユーザー管理API仕様 |
 | [COMMAND_EXECUTOR_MCP_SPECIFICATION.md](spec/COMMAND_EXECUTOR_MCP_SPECIFICATION.md) | Command Executor MCP Server連携仕様 |
+| [ISSUE_TO_MR_CONVERSION_SPECIFICATION.md](spec/ISSUE_TO_MR_CONVERSION_SPECIFICATION.md) | IssueからMR/PR変換仕様 |
 
 ---
 
