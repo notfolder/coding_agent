@@ -50,12 +50,10 @@ class TaskGitLabIssue(Task):
     def get_prompt(self) -> str:
         # issue本体取得（最新情報を取得してself.issueに代入）
         self._refresh_issue()
-        comments = []
-        note_args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid}
-        comments = self.mcp_client.call_tool("list_issue_discussions", note_args)
+        discussions = self._fetch_issue_discussions()
         comments = [
-            [note.get("body", "") for note in item.get("notes", [])]
-            for item in comments.get("items", [])
+            [note.get("body", "") for note in discussion.get("notes", [])]
+            for discussion in discussions
         ]
         return (
             f"ISSUE: {{'title': '{self.issue.get('title', '')}', "
@@ -172,12 +170,11 @@ class TaskGitLabIssue(Task):
         Returns:
             コメント情報のリスト
         """
-        note_args = {"project_id": f"{self.project_id}", "issue_iid": self.issue_iid}
-        discussions = self.mcp_client.call_tool("list_issue_discussions", note_args)
-        
+        discussions = self._fetch_issue_discussions()
+
         # GitLabのdiscussion構造からコメントを抽出し、標準形式に変換
-        comments = []
-        for discussion in discussions.get("items", []):
+        comments: list[dict[str, Any]] = []
+        for discussion in discussions:
             for note in discussion.get("notes", []):
                 comments.append({
                     "id": note.get("id"),
@@ -186,8 +183,92 @@ class TaskGitLabIssue(Task):
                     "created_at": note.get("created_at", ""),
                     "updated_at": note.get("updated_at"),
                 })
-        
+
         return comments
+
+    def _fetch_issue_discussions(self, *, per_page: int = 100, max_pages: int = 200) -> list[dict[str, Any]]:
+        """Issueに紐づくディスカッションを全ページ取得する."""
+        configured_per_page = self.config.get("gitlab", {}).get("discussion_per_page")
+        if isinstance(configured_per_page, int) and configured_per_page > 0:
+            per_page = configured_per_page
+
+        configured_max_pages = self.config.get("gitlab", {}).get("discussion_max_pages")
+        if isinstance(configured_max_pages, int) and configured_max_pages > 0:
+            max_pages = configured_max_pages
+
+        all_discussions: list[dict[str, Any]] = []
+        page: int = 1
+        visited_pages: set[int] = set()
+
+        # GitLab MCPツールのページネーションを辿りながら全ディスカッションを収集
+        while page not in visited_pages and page <= max_pages:
+            visited_pages.add(page)
+            note_args = {
+                "project_id": f"{self.project_id}",
+                "issue_iid": self.issue_iid,
+                "page": page,
+                "per_page": per_page,
+            }
+            response = self.mcp_client.call_tool("list_issue_discussions", note_args)
+            discussions: list[dict[str, Any]] = []
+
+            if isinstance(response, dict):
+                discussions = response.get("items", []) or []
+            elif isinstance(response, list):
+                discussions = response
+
+            if not discussions:
+                break
+
+            all_discussions.extend(discussions)
+
+            next_page = self._determine_next_page(response, page)
+            if next_page is None:
+                if len(discussions) < per_page:
+                    break
+                page += 1
+                continue
+            if next_page <= page:
+                break
+            page = next_page
+
+        return all_discussions
+
+    @staticmethod
+    def _determine_next_page(response: object, current_page: int) -> int | None:
+        """レスポンスに含まれるページ情報から次ページを判定する."""
+
+        def _parse_page(value: object) -> int | None:
+            if isinstance(value, int):
+                return value if value > 0 else None
+            if isinstance(value, str) and value.isdigit():
+                page_value = int(value)
+                return page_value if page_value > 0 else None
+            return None
+
+        if isinstance(response, dict):
+            pagination = response.get("pagination")
+            if isinstance(pagination, dict):
+                next_page = _parse_page(pagination.get("next_page"))
+                if next_page is not None:
+                    return next_page
+                has_next = pagination.get("has_next_page")
+                if isinstance(has_next, bool):
+                    return current_page + 1 if has_next else None
+
+            next_page = _parse_page(response.get("next_page"))
+            if next_page is not None:
+                return next_page
+
+            has_next_page = response.get("has_next_page")
+            if isinstance(has_next_page, bool):
+                return current_page + 1 if has_next_page else None
+
+            total_pages = _parse_page(response.get("total_pages"))
+            if total_pages is not None and current_page < total_pages:
+                return current_page + 1
+
+        return None
 
 
 class TaskGitLabMergeRequest(Task):
@@ -233,9 +314,7 @@ class TaskGitLabMergeRequest(Task):
         """GitLabからコメント情報を取得してプロンプトを生成する."""
         # 最新のMR情報を取得
         self._refresh_mr()
-        comments = self.gitlab_client.list_merge_request_notes(
-            project_id=self.project_id, merge_request_iid=self.merge_request_iid,
-        )
+        comments = self._fetch_merge_request_notes()
         comments = [note.get("body", "") for note in comments]
         return (
             f"MERGE_REQUEST: {{'title': '{self.mr.get('title', '')}', "
@@ -359,10 +438,7 @@ class TaskGitLabMergeRequest(Task):
         Returns:
             コメント情報のリスト
         """
-        raw_notes = self.gitlab_client.list_merge_request_notes(
-            project_id=self.project_id,
-            merge_request_iid=self.merge_request_iid,
-        )
+        raw_notes = self._fetch_merge_request_notes()
         
         # 標準形式に変換
         comments = []
@@ -376,6 +452,27 @@ class TaskGitLabMergeRequest(Task):
             })
         
         return comments
+
+    def _fetch_merge_request_notes(self) -> list[dict[str, Any]]:
+        """MRに紐づくノートを設定に応じて全件取得する."""
+        per_page: int = 100
+        max_pages: int = 200
+
+        gitlab_config = self.config.get("gitlab", {})
+        configured_per_page = gitlab_config.get("mr_notes_per_page")
+        if isinstance(configured_per_page, int) and configured_per_page > 0:
+            per_page = configured_per_page
+
+        configured_max_pages = gitlab_config.get("mr_notes_max_pages")
+        if isinstance(configured_max_pages, int) and configured_max_pages > 0:
+            max_pages = configured_max_pages
+
+        return self.gitlab_client.list_merge_request_notes(
+            project_id=self.project_id,
+            merge_request_iid=self.merge_request_iid,
+            per_page=per_page,
+            max_pages=max_pages,
+        )
 
 
 class TaskGetterFromGitLab(TaskGetter):
