@@ -150,11 +150,10 @@ Branch naming rules:
 Output format: JSON with "branch_name" and "reasoning" fields.
 
 Examples:
-- feature/codingagent-123-add-user-auth
-- fix/codingagent-456-login-bug
-- docs/codingagent-789-update-readme
-- refactor/codingagent-101-cleanup-api
-- task/codingagent-202-misc-updates
+{
+  "branch_name": "feature/codingagent-123-add-user-authentication",
+  "reasoning": "Issue #123 requests adding user authentication feature. Using feature/ prefix with bot name and issue number as required."
+}
 ```
 
 #### 3.5.2 メッセージ形式（英語）
