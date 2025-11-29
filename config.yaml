@@ -364,6 +364,18 @@ command_executor:
   # 環境変数 COMMAND_EXECUTOR_ENABLED で上書き可能
   enabled: true
   
+  # 利用可能な実行環境（環境名: イメージ名）
+  # 計画フェーズでLLMがプロジェクトに適した環境を選択します
+  environments:
+    python: "coding-agent-executor-python:latest"
+    miniforge: "coding-agent-executor-miniforge:latest"
+    node: "coding-agent-executor-node:latest"
+    java: "coding-agent-executor-java:latest"
+    go: "coding-agent-executor-go:latest"
+  
+  # デフォルト環境（環境選択に失敗した場合）
+  default_environment: "python"
+  
   # MCP Server設定
   mcp_server:
     # サーバー名
@@ -376,6 +388,7 @@ command_executor:
   # Docker実行環境設定
   docker:
     # ベースイメージ（環境変数 EXECUTOR_BASE_IMAGE で上書き可能）
+    # ※environments設定が優先されます。環境選択に失敗した場合のフォールバック用
     base_image: "ubuntu:25.04"
     
     # リソース制限

@@ -232,6 +232,60 @@ services:
       retries: 3
       start_period: 30s
 
+  # === 実行環境イメージ（ビルド専用、executor-buildプロファイル） ===
+  # 計画フェーズでLLMが選択する実行環境イメージ
+  # ビルドコマンド: docker compose --profile executor-build build
+
+  # Python実行環境イメージ
+  executor-python:
+    build:
+      context: ./docker/executor-python
+      dockerfile: Dockerfile
+    image: coding-agent-executor-python:latest
+    profiles:
+      - executor-build
+    command: ["echo", "Build only"]
+
+  # Miniforge（conda）実行環境イメージ
+  executor-miniforge:
+    build:
+      context: ./docker/executor-miniforge
+      dockerfile: Dockerfile
+    image: coding-agent-executor-miniforge:latest
+    profiles:
+      - executor-build
+    command: ["echo", "Build only"]
+
+  # Node.js実行環境イメージ
+  executor-node:
+    build:
+      context: ./docker/executor-node
+      dockerfile: Dockerfile
+    image: coding-agent-executor-node:latest
+    profiles:
+      - executor-build
+    command: ["echo", "Build only"]
+
+  # Java実行環境イメージ
+  executor-java:
+    build:
+      context: ./docker/executor-java
+      dockerfile: Dockerfile
+    image: coding-agent-executor-java:latest
+    profiles:
+      - executor-build
+    command: ["echo", "Build only"]
+
+  # Go実行環境イメージ
+  executor-go:
+    build:
+      context: ./docker/executor-go
+      dockerfile: Dockerfile
+    image: coding-agent-executor-go:latest
+    profiles:
+      - executor-build
+    command: ["echo", "Build only"]
+
 volumes:
   rabbitmq_data:
   user-config-data:

@@ -166,6 +166,9 @@ class PlanningCoordinator:
         # 計画前情報収集フェーズの結果
         self.pre_planning_result: dict[str, Any] | None = None
 
+        # 計画で選択された実行環境名
+        self.selected_environment: str | None = None
+
         # PrePlanningManagerの初期化（有効な場合）
         self.pre_planning_manager: Any = None
         pre_planning_config = config.get("pre_planning", {})
@@ -225,28 +228,28 @@ class PlanningCoordinator:
                 self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
                 self._handle_pause()
                 return True  # Return success to avoid marking as failed
-            
+
             # Check for stop signal before starting
             if self._check_stop_signal():
                 self.logger.info("アサイン解除を検出、タスクを停止します")
                 self._handle_stop()
                 return True  # Return success to avoid marking as failed
-            
+
             # Check for new comments before starting
             self._check_and_add_new_comments()
-            
+
             # Step 0.5: Check for inheritance context and post notification
             self._handle_context_inheritance()
-            
+
             # Step 0: Execute pre-planning phase (計画前情報収集フェーズ)
             if self.pre_planning_manager is not None:
                 self._post_phase_comment("pre_planning", "started", "タスク内容を分析し、必要な情報を収集しています...")
                 self.pre_planning_result = self._execute_pre_planning_phase()
                 self._post_phase_comment("pre_planning", "completed", "計画前情報収集が完了しました")
-            
+
             # Post planning start comment
             self._post_phase_comment("planning", "started", "Beginning task analysis and planning...")
-            
+
             # Step 1: Check for existing plan
             if self.history_store.has_plan():
                 self.logger.info("Found existing plan, loading...")
@@ -275,13 +278,13 @@ class PlanningCoordinator:
                 self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
                 self._handle_pause()
                 return True
-            
+
             # Check for stop signal after planning
             if self._check_stop_signal():
                 self.logger.info("アサイン解除を検出、タスクを停止します")
                 self._handle_stop()
                 return True
-            
+
             # Check for new comments after planning phase
             self._check_and_add_new_comments()
 
@@ -291,25 +294,25 @@ class PlanningCoordinator:
             # Step 3: Execution loop
             max_iterations = self.config.get("max_subtasks", 100)
             iteration = 0
-            
+
             while iteration < max_iterations and not self._is_complete():
                 iteration += 1
-                
+
                 # Check for pause signal before each action
                 if self._check_pause_signal():
                     self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
                     self._handle_pause()
                     return True
-                
+
                 # Check for stop signal before each action
                 if self._check_stop_signal():
                     self.logger.info("アサイン解除を検出、タスクを停止します")
                     self._handle_stop()
                     return True
-                
+
                 # Check for new comments before each action
                 self._check_and_add_new_comments()
-                
+
                 # Execute next action
                 result = self._execute_action()
 
@@ -325,13 +328,13 @@ class PlanningCoordinator:
 
                     error_msg = result.get("error", "Unknown error occurred")
                     self._post_phase_comment(
-                        "execution", "failed", f"Action failed: {error_msg}"
+                        "execution", "failed", f"Action failed: {error_msg}",
                     )
 
                     # 再計画判断をLLMに依頼
                     if self.replan_manager.enabled:
                         decision = self._request_execution_replan_decision(
-                            current_action, result
+                            current_action, result,
                         )
                         if self._handle_replan(decision):
                             # 再計画が実行された場合、ループを継続
@@ -346,7 +349,7 @@ class PlanningCoordinator:
 
                 # Update progress checklist
                 self._update_checklist_progress(self.action_counter - 1)
-                
+
                 # Check if reflection is needed
                 if self._should_reflect(result):
                     # Check for pause signal before reflection
@@ -354,36 +357,36 @@ class PlanningCoordinator:
                         self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
                         self._handle_pause()
                         return True
-                    
+
                     # Check for stop signal before reflection
                     if self._check_stop_signal():
                         self.logger.info("アサイン解除を検出、タスクを停止します")
                         self._handle_stop()
                         return True
-                    
+
                     # Check for new comments before reflection
                     self._check_and_add_new_comments()
-                    
+
                     self._post_phase_comment("reflection", "started", f"Analyzing results after {self.action_counter} actions...")
                     self.current_phase = "reflection"
                     reflection = self._execute_reflection_phase(result)
-                    
+
                     if reflection and reflection.get("plan_revision_needed"):
                         # Check for pause signal before revision
                         if self._check_pause_signal():
                             self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
                             self._handle_pause()
                             return True
-                        
+
                         # Check for stop signal before revision
                         if self._check_stop_signal():
                             self.logger.info("アサイン解除を検出、タスクを停止します")
                             self._handle_stop()
                             return True
-                        
+
                         # Check for new comments before revision
                         self._check_and_add_new_comments()
-                        
+
                         # Revise plan if needed
                         self._post_phase_comment("revision", "started", "Plan revision needed based on reflection.")
                         self.current_phase = "revision"
@@ -395,15 +398,15 @@ class PlanningCoordinator:
                             self._post_phase_comment("revision", "failed", "Could not revise plan.")
                     else:
                         self._post_phase_comment("reflection", "completed", "Reflection complete, continuing with current plan.")
-                    
+
                     # Reset to execution phase
                     self.current_phase = "execution"
-                
+
                 # Check for completion
                 if result.get("done"):
                     self.logger.info("Task completed successfully")
                     break
-            
+
             # Step 4: Verification phase
             verification_config = self.config.get("verification", {})
             if verification_config.get("enabled", True):
@@ -509,7 +512,7 @@ class PlanningCoordinator:
 
                             if self.replan_manager.enabled:
                                 decision = self._request_execution_replan_decision(
-                                    result.get("action", {}), result
+                                    result.get("action", {}), result,
                                 )
                                 if self._handle_replan(decision):
                                     continue
@@ -534,9 +537,9 @@ class PlanningCoordinator:
             # Mark all tasks complete
             self._mark_checklist_complete()
             self._post_phase_comment("execution", "completed", "All planned actions have been executed successfully.")
-            
+
             return True
-            
+
         except Exception as e:
             self.logger.exception("Planning execution failed: %s", e)
             self._post_phase_comment("execution", "failed", f"Error during execution: {str(e)}")
@@ -547,10 +550,10 @@ class PlanningCoordinator:
         if self.pause_manager is None:
             self.logger.warning("Pause manager not set, cannot pause")
             return
-        
+
         # Get current planning state
         planning_state = self.get_planning_state()
-        
+
         # Pause the task with planning state
         self.pause_manager.pause_task(self.task, self.task.uuid, planning_state=planning_state)
 
@@ -676,6 +679,8 @@ class PlanningCoordinator:
     def _execute_planning_phase(self) -> dict[str, Any] | None:
         """Execute the planning phase.
         
+        計画作成と同時に実行環境を選択します。
+        
         Returns:
             Planning result dictionary or None if planning failed
         """
@@ -688,31 +693,77 @@ class PlanningCoordinator:
             past_history = []
             if issue_id:
                 past_history = self.history_store.get_past_executions_for_issue(str(issue_id))
-            
+
             # Prepare planning prompt
             planning_prompt = self._build_planning_prompt(past_history)
-            
+
             # Request plan from LLM
             self.llm_client.send_user_message(planning_prompt)
             response, _, tokens = self.llm_client.get_response()  # Unpack tuple with tokens
             self.logger.info("Planning LLM response (tokens: %d)", tokens)
-            
+
             # トークン数を記録
             self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
-            
+
             # Parse response
             plan = self._parse_planning_response(response)
 
+            # 計画応答から選択された環境を抽出
+            if plan:
+                self.selected_environment = self._extract_selected_environment(plan)
+                self.logger.info("選択された実行環境: %s", self.selected_environment)
+
             # LLM呼び出し完了コメントを投稿
             self._post_llm_call_comment("planning", plan)
-            
+
             return plan
-            
+
         except Exception as e:
             self.logger.exception("Planning phase execution failed")
             # LLMエラーコメントを投稿
             self._post_llm_error_comment("planning", str(e))
             return None
+
+    def _extract_selected_environment(self, plan: dict[str, Any]) -> str | None:
+        """計画応答から選択された実行環境を抽出する.
+
+        仕様書に従い、計画応答のselected_environmentフィールドから
+        環境名を抽出します。
+
+        Args:
+            plan: 計画応答の辞書
+
+        Returns:
+            選択された環境名、または見つからない場合はNone
+
+        """
+        if not isinstance(plan, dict):
+            return None
+
+        selected_env = plan.get("selected_environment")
+
+        if selected_env is None:
+            self.logger.info("計画応答にselected_environmentが含まれていません")
+            return None
+
+        # selected_environmentが辞書形式の場合
+        if isinstance(selected_env, dict):
+            env_name = selected_env.get("name")
+            reasoning = selected_env.get("reasoning", "理由なし")
+            if env_name:
+                self.logger.info(
+                    "環境 '%s' が選択されました。理由: %s",
+                    env_name,
+                    reasoning[:100] if len(reasoning) > 100 else reasoning,
+                )
+                return env_name
+            return None
+
+        # selected_environmentが文字列形式の場合
+        if isinstance(selected_env, str):
+            return selected_env
+
+        return None
 
     def _execute_action(self) -> dict[str, Any] | None:
         """Execute the next action from the plan.
@@ -723,38 +774,38 @@ class PlanningCoordinator:
         try:
             if not self.current_plan:
                 return None
-            
+
             # Get next action from plan
             action_plan = self.current_plan.get("action_plan", {})
             actions = action_plan.get("actions", [])
-            
+
             if self.action_counter >= len(actions):
                 # No more actions
                 return {"done": True, "status": "completed"}
-            
+
             current_action = actions[self.action_counter]
             task_id = current_action.get("task_id", f"task_{self.action_counter + 1}")
             self.action_counter += 1
-            
+
             # Execute the action via LLM
             action_prompt = self._build_action_prompt(current_action)
             self.llm_client.send_user_message(action_prompt)
-            
+
             # Get LLM response with function calls
             resp, functions, tokens = self.llm_client.get_response()
             self.logger.info("Action execution LLM response: %s", resp)
-            
+
             # トークン数を記録
             self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
-            
+
             # Initialize error state for tool execution
             error_state = {"last_tool": None, "tool_error_count": 0}
-            
+
             # Process function calls if any
             if functions:
                 if not isinstance(functions, list):
                     functions = [functions]
-                
+
                 # Execute all function calls
                 for function in functions:
                     if self._execute_function_call(function, error_state, task_id):
@@ -764,25 +815,25 @@ class PlanningCoordinator:
                             "error": "Too many consecutive tool errors",
                             "action": current_action,
                         }
-            
+
             # Try to parse JSON response
             try:
                 data = json.loads(resp) if isinstance(resp, str) else resp
-                
+
                 # LLM呼び出し完了コメントを投稿
                 # Note: commentフィールドの投稿はここで統一的に処理される
                 self._post_llm_call_comment("execution", data, task_id)
-                
+
                 # Check if done
                 if isinstance(data, dict) and data.get("done"):
                     return {"done": True, "status": "completed", "result": data}
-                
+
                 return {"status": "success", "result": data, "action": current_action}
             except (json.JSONDecodeError, ValueError):
                 # テキスト応答の場合もLLM呼び出しコメントを投稿
                 self._post_llm_call_comment("execution", None, task_id)
                 return {"status": "success", "result": resp, "action": current_action}
-            
+
         except Exception as e:
             self.logger.exception("Action execution failed: %s", e)
             # LLMエラーコメントを投稿
@@ -807,18 +858,18 @@ class PlanningCoordinator:
         """
         # Maximum consecutive tool errors before aborting
         MAX_CONSECUTIVE_TOOL_ERRORS = 3
-        
+
         try:
             # Get function name
             name = function["name"] if isinstance(function, dict) else function.name
-            
+
             # Parse MCP server and tool name
             if "_" not in name:
                 self.logger.error("Invalid function name format: %s", name)
                 return False
-            
+
             mcp_server, tool_name = name.split("_", 1)
-            
+
             # Get arguments
             args = function["arguments"] if isinstance(function, dict) else function.arguments
             if isinstance(args, str):
@@ -827,12 +878,12 @@ class PlanningCoordinator:
                 except json.JSONDecodeError:
                     self.logger.error("Failed to parse arguments JSON: %s", args)
                     return False
-            
+
             self.logger.info("Executing function: %s with args: %s", name, args)
 
             # ツール呼び出し前のコメントを投稿
             self._post_tool_call_before_comment(name, args)
-            
+
             # Check if this is a command-executor tool
             if mcp_server == "command-executor":
                 # Handle command execution through ExecutionEnvironmentManager
@@ -841,7 +892,7 @@ class PlanningCoordinator:
                     self.logger.error(error_msg)
                     self.llm_client.send_function_result(name, f"error: {error_msg}")
                     return False
-                
+
                 try:
                     # Execute command through execution manager
                     if tool_name == "execute_command":
@@ -852,63 +903,63 @@ class PlanningCoordinator:
                     else:
                         error_msg = f"Unknown command-executor tool: {tool_name}"
                         raise ValueError(error_msg)
-                    
+
                     # Reset error count on success
                     if error_state["last_tool"] == tool_name:
                         error_state["tool_error_count"] = 0
-                    
+
                     # Send result back to LLM
                     self.llm_client.send_function_result(name, json.dumps(result, ensure_ascii=False))
 
                     # ツール完了コメントを投稿（成功）
                     self._post_tool_call_after_comment(name, success=True)
-                    
+
                     return False
-                    
+
                 except Exception as e:
                     error_msg = str(e)
                     self.logger.exception("Command execution failed: %s", error_msg)
-                    
+
                     # ツール完了コメントを投稿（失敗）
                     self._post_tool_call_after_comment(name, success=False)
                     # ツールエラーコメントを投稿
                     self._post_tool_error_comment(name, error_msg, task_id)
-                    
+
                     # Update error count
                     if error_state["last_tool"] == tool_name:
                         error_state["tool_error_count"] += 1
                     else:
                         error_state["tool_error_count"] = 1
                         error_state["last_tool"] = tool_name
-                    
+
                     # Send error result to LLM
                     self.llm_client.send_function_result(name, f"error: {error_msg}")
-                    
+
                     # Check if we should abort
                     if error_state["tool_error_count"] >= MAX_CONSECUTIVE_TOOL_ERRORS:
                         self.task.comment(
-                            f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。"
+                            f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。",
                         )
                         return True
-                    
+
                     return False
-            
+
             # Execute the tool through MCP client
             try:
                 result = self.mcp_clients[mcp_server].call_tool(tool_name, args)
-                
+
                 # Reset error count on success
                 if error_state["last_tool"] == tool_name:
                     error_state["tool_error_count"] = 0
-                
+
                 # Send result back to LLM
                 self.llm_client.send_function_result(name, str(result))
 
                 # ツール完了コメントを投稿（成功）
                 self._post_tool_call_after_comment(name, success=True)
-                
+
                 return False
-                
+
             except Exception as e:
                 # Handle tool execution error
                 error_msg = str(e)
@@ -918,33 +969,33 @@ class PlanningCoordinator:
                         error_msg = str(e.exceptions[0].exceptions[0])
                     else:
                         error_msg = str(e.exceptions[0])
-                
+
                 self.logger.exception("Tool execution failed: %s", error_msg)
-                
+
                 # ツール完了コメントを投稿（失敗）
                 self._post_tool_call_after_comment(name, success=False)
                 # ツールエラーコメントを投稿
                 self._post_tool_error_comment(name, error_msg, task_id)
-                
+
                 # Update error count
                 if error_state["last_tool"] == tool_name:
                     error_state["tool_error_count"] += 1
                 else:
                     error_state["tool_error_count"] = 1
                     error_state["last_tool"] = tool_name
-                
+
                 # Send error result to LLM
                 self.llm_client.send_function_result(name, f"error: {error_msg}")
-                
+
                 # Check if we should abort
                 if error_state["tool_error_count"] >= MAX_CONSECUTIVE_TOOL_ERRORS:
                     self.task.comment(
-                        f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。"
+                        f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。",
                     )
                     return True
-                
+
                 return False
-                
+
         except Exception as e:
             self.logger.exception("Function call execution failed: %s", e)
             return False
@@ -961,17 +1012,17 @@ class PlanningCoordinator:
         # Reflect on error
         if result.get("status") == "error":
             return True
-        
+
         # Reflect at configured intervals
         reflection_config = self.config.get("reflection", {})
         if not reflection_config.get("enabled", True):
             return False
-        
+
         interval = reflection_config.get("trigger_interval", 3)
         # Only reflect at intervals after at least one action has been executed
         if interval > 0 and self.action_counter > 0 and self.action_counter % interval == 0:
             return True
-        
+
         return False
 
     def _execute_reflection_phase(self, result: dict[str, Any]) -> dict[str, Any] | None:
@@ -986,27 +1037,27 @@ class PlanningCoordinator:
         try:
             # Build reflection prompt
             reflection_prompt = self._build_reflection_prompt(result)
-            
+
             # Get reflection from LLM
             self.llm_client.send_user_message(reflection_prompt)
             response, _, tokens = self.llm_client.get_response()  # Unpack tuple with tokens
             self.logger.info("Reflection LLM response (tokens: %d)", tokens)
-            
+
             # トークン数を記録
             self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
-            
+
             # Parse reflection
             reflection = self._parse_reflection_response(response)
 
             # LLM呼び出し完了コメントを投稿
             self._post_llm_call_comment("reflection", reflection)
-            
+
             # Save reflection
             if reflection:
                 self.history_store.save_reflection(reflection)
-            
+
             return reflection
-            
+
         except Exception as e:
             self.logger.exception(f"Reflection phase failed: {e}")
             # LLMエラーコメントを投稿
@@ -1025,25 +1076,25 @@ class PlanningCoordinator:
         try:
             # Check revision limit
             max_revisions = self.config.get("revision", {}).get("max_revisions", 3)
-            
+
             if self.revision_counter >= max_revisions:
                 self.logger.error("Maximum plan revisions exceeded")
                 return None
-            
+
             # Increment counter after check
             self.revision_counter += 1
-            
+
             # Build revision prompt
             revision_prompt = self._build_revision_prompt(reflection)
-            
+
             # Get revised plan from LLM
             self.llm_client.send_user_message(revision_prompt)
             response, _, tokens = self.llm_client.get_response()  # Unpack tuple with tokens
             self.logger.info("Plan revision LLM response (tokens: %d)", tokens)
-            
+
             # トークン数を記録
             self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
-            
+
             # Parse revised plan
             revised_plan = self._parse_planning_response(response)
 
@@ -1242,12 +1293,12 @@ Please reply to this comment with your answers."""
         # 完了済みアクションを保持しつつ、残りのアクションを再生成
         if self.current_plan:
             completed_actions = self.current_plan.get("action_plan", {}).get(
-                "actions", []
+                "actions", [],
             )[: self.action_counter]
 
             # LLMに残りのアクションの再生成を依頼
             remaining_prompt = self._build_partial_replan_prompt(
-                completed_actions, decision
+                completed_actions, decision,
             )
             self.llm_client.send_user_message(remaining_prompt)
             response, _, tokens = self.llm_client.get_response()
@@ -1280,7 +1331,7 @@ Please reply to this comment with your answers."""
         completed_actions = []
         if self.current_plan:
             completed_actions = self.current_plan.get("action_plan", {}).get(
-                "actions", []
+                "actions", [],
             )[:completed_count]
 
         # 新しい計画を生成
@@ -1422,7 +1473,7 @@ Maintain the same JSON format as before for action_plan.actions."""
         checklist_lines.append(
             f"*Progress: {self.action_counter}/{len(actions)} ({progress_pct}%) complete "
             f"| Revision: #{self.plan_revision_number} "
-            f"at {datetime.now().strftime(DATETIME_FORMAT)}*"
+            f"at {datetime.now().strftime(DATETIME_FORMAT)}*",
         )
 
         checklist_content = "\n".join(checklist_lines)
@@ -1448,11 +1499,11 @@ Maintain the same JSON format as before for action_plan.actions."""
         """
         if not self.current_plan:
             return False
-        
+
         # Check if all actions are executed
         action_plan = self.current_plan.get("action_plan", {})
         actions = action_plan.get("actions", [])
-        
+
         return self.action_counter >= len(actions)
 
     def _build_planning_prompt(self, past_history: list[dict[str, Any]]) -> str:
@@ -1466,18 +1517,18 @@ Maintain the same JSON format as before for action_plan.actions."""
         """
         # Get task information including comments/discussions
         task_info = self.task.get_prompt()
-        
+
         prompt_parts = [
             "Create a comprehensive plan for the following task:",
             "",
             task_info,  # This includes issue/MR details and all comments
             "",
         ]
-        
+
         # 計画前情報収集フェーズの結果を追加
         if self.pre_planning_result:
             pre_planning = self.pre_planning_result.get("pre_planning_result", {})
-            
+
             # 理解した依頼内容のサマリー
             request_understanding = pre_planning.get("request_understanding", {})
             if request_understanding:
@@ -1488,7 +1539,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                     f"理解の確信度: {request_understanding.get('understanding_confidence', 0):.0%}",
                     "",
                 ])
-                
+
                 # 成果物
                 deliverables = request_understanding.get("expected_deliverables", [])
                 if deliverables:
@@ -1496,7 +1547,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                     for d in deliverables:
                         prompt_parts.append(f"  - {d}")
                     prompt_parts.append("")
-                
+
                 # 制約
                 constraints = request_understanding.get("constraints", [])
                 if constraints:
@@ -1504,7 +1555,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                     for c in constraints:
                         prompt_parts.append(f"  - {c}")
                     prompt_parts.append("")
-                
+
                 # スコープ
                 scope = request_understanding.get("scope", {})
                 if scope:
@@ -1515,7 +1566,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                     if out_of_scope:
                         prompt_parts.append(f"スコープ外: {', '.join(out_of_scope)}")
                     prompt_parts.append("")
-                
+
                 # 曖昧な点と選択した解釈
                 ambiguities = request_understanding.get("ambiguities", [])
                 if ambiguities:
@@ -1531,7 +1582,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                             # 文字列の場合はそのまま使用
                             prompt_parts.append(f"  - {amb}")
                     prompt_parts.append("")
-            
+
             # 収集した情報
             collected_info = pre_planning.get("collected_information", {})
             if collected_info:
@@ -1546,7 +1597,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                         else:
                             prompt_parts.append(json_str)
                         prompt_parts.append("")
-            
+
             # 推測した内容
             assumptions = pre_planning.get("assumptions", [])
             if assumptions:
@@ -1557,7 +1608,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                     confidence = assumption.get("confidence", 0)
                     prompt_parts.append(f"  - {info_id}: {value} (確信度: {confidence:.0%})")
                 prompt_parts.append("")
-            
+
             # 情報ギャップ
             gaps = pre_planning.get("information_gaps", [])
             if gaps:
@@ -1567,7 +1618,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                     impact = gap.get("impact", "")
                     prompt_parts.append(f"  - {desc} (影響: {impact})")
                 prompt_parts.append("")
-            
+
             # 計画への推奨事項
             recommendations = pre_planning.get("recommendations_for_planning", [])
             if recommendations:
@@ -1575,7 +1626,11 @@ Maintain the same JSON format as before for action_plan.actions."""
                 for rec in recommendations:
                     prompt_parts.append(f"  - {rec}")
                 prompt_parts.append("")
-        
+
+        # 実行環境選択情報を追加
+        environment_selection_prompt = self._build_environment_selection_prompt()
+        prompt_parts.append(environment_selection_prompt)
+
         prompt_parts.extend([
             "IMPORTANT - Task Complexity Assessment:",
             "Before creating your plan, evaluate the task complexity:",
@@ -1586,25 +1641,98 @@ Maintain the same JSON format as before for action_plan.actions."""
             "Default to SIMPLER plans. Most tasks are simpler than they appear.",
             "Combine related operations. Don't over-decompose simple tasks.",
         ])
-        
+
         if past_history:
             prompt_parts.extend([
                 "",
                 "Past execution history for this issue:",
                 json.dumps(past_history, indent=2),
             ])
-        
+
         prompt_parts.extend([
             "",
             "Please provide a plan in the following JSON format:",
             "{",
             '  "goal_understanding": {...},',
             '  "task_decomposition": {...},',
-            '  "action_plan": {...}',
+            '  "action_plan": {...},',
+            '  "selected_environment": {',
+            '    "name": "python",',
+            '    "reasoning": "選択理由..."',
+            '  }',
             "}",
         ])
-        
+
         return "\n".join(prompt_parts)
+
+    def _build_environment_selection_prompt(self) -> str:
+        """実行環境選択プロンプトを構築する.
+
+        利用可能な環境リストと選択指示を含むプロンプトを生成します。
+
+        Returns:
+            環境選択プロンプト文字列
+
+        """
+        # ExecutionEnvironmentManagerから環境リストを取得（利用可能な場合）
+        environments = {}
+        default_env = "python"
+
+        if self.execution_manager is not None:
+            environments = self.execution_manager.get_available_environments()
+            default_env = self.execution_manager.get_default_environment()
+        else:
+            # デフォルトの環境リスト
+            environments = {
+                "python": "coding-agent-executor-python:latest",
+                "miniforge": "coding-agent-executor-miniforge:latest",
+                "node": "coding-agent-executor-node:latest",
+                "java": "coding-agent-executor-java:latest",
+                "go": "coding-agent-executor-go:latest",
+            }
+
+        # 環境ごとの推奨用途
+        env_recommendations = {
+            "python": "Pure Python projects, Django/Flask web frameworks, data processing scripts",
+            "miniforge": "Data science, scientific computing, NumPy/pandas/scikit-learn, conda environments (condaenv.yaml, environment.yml)",
+            "node": "JavaScript/TypeScript, React/Vue/Angular, Node.js backend (Express, NestJS)",
+            "java": "Java/Kotlin, Spring Boot, Quarkus, Maven/Gradle projects",
+            "go": "Go projects, CLI tools, microservices",
+        }
+
+        prompt_lines = [
+            "",
+            "## Execution Environment Selection",
+            "",
+            "You must select an appropriate execution environment for this task. The following environments are available:",
+            "",
+            "| Environment | Image | Recommended For |",
+            "|-------------|-------|-----------------|",
+        ]
+
+        for env_name, image in environments.items():
+            recommendation = env_recommendations.get(env_name, "General purpose")
+            prompt_lines.append(f"| {env_name} | {image} | {recommendation} |")
+
+        prompt_lines.extend([
+            "",
+            f"**Default Environment**: {default_env}",
+            "",
+            "**Selection Criteria:**",
+            "- Check the project's dependency files (requirements.txt, package.json, go.mod, pom.xml, condaenv.yaml, environment.yml)",
+            "- Consider the main programming language of the task",
+            "- For data science projects with conda environments, select 'miniforge'",
+            "- For pure Python projects without conda, select 'python'",
+            "",
+            "Include your selection in the response with 'selected_environment' field:",
+            '  "selected_environment": {',
+            '    "name": "environment_name",',
+            '    "reasoning": "Why this environment was selected"',
+            '  }',
+            "",
+        ])
+
+        return "\n".join(prompt_lines)
 
     def _build_action_prompt(self, action: dict[str, Any]) -> str:
         """Build prompt for action execution.
@@ -1619,7 +1747,7 @@ Maintain the same JSON format as before for action_plan.actions."""
         tool_name = action.get("tool", "unknown")
         parameters = action.get("parameters", {})
         purpose = action.get("purpose", "")
-        
+
         prompt_parts = [
             f"Execute the following action using the `{tool_name}` tool:",
             "",
@@ -1630,7 +1758,7 @@ Maintain the same JSON format as before for action_plan.actions."""
             "",
             "Please use function calling to execute this tool with the exact parameters provided above.",
         ]
-        
+
         return "\n".join(prompt_parts)
 
     def _build_reflection_prompt(self, result: dict[str, Any]) -> str:
@@ -1668,14 +1796,14 @@ Maintain the same JSON format as before for action_plan.actions."""
             # Try to extract JSON from response
             if isinstance(response, dict):
                 return response
-            
+
             # Remove <think></think> tags if present
             response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
             response = response.strip()
-            
+
             # Log the response for debugging
             self.logger.debug("Planning response: %s", response[:500])
-            
+
             # Try to parse as JSON
             try:
                 return json.loads(response)
@@ -1684,14 +1812,14 @@ Maintain the same JSON format as before for action_plan.actions."""
                 json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)
                 if json_match:
                     return json.loads(json_match.group(1))
-                
+
                 # Try to find JSON object in text
                 json_match = re.search(r"\{.*\}", response, re.DOTALL)
                 if json_match:
                     return json.loads(json_match.group(0))
-                
+
                 raise
-                
+
         except (json.JSONDecodeError, AttributeError):
             self.logger.warning("Failed to parse planning response as JSON. Response: %s", response[:200])
             return None
@@ -1708,11 +1836,11 @@ Maintain the same JSON format as before for action_plan.actions."""
         try:
             if isinstance(response, dict):
                 return response
-            
+
             # Remove <think></think> tags if present
             response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
             response = response.strip()
-            
+
             # Try to parse as JSON
             try:
                 return json.loads(response)
@@ -1721,13 +1849,13 @@ Maintain the same JSON format as before for action_plan.actions."""
                 json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)
                 if json_match:
                     return json.loads(json_match.group(1))
-                
+
                 json_match = re.search(r"\{.*\}", response, re.DOTALL)
                 if json_match:
                     return json.loads(json_match.group(0))
-                
+
                 raise
-                
+
         except (json.JSONDecodeError, AttributeError):
             self.logger.warning("Failed to parse reflection response as JSON. Response: %s", response[:200])
             return None
@@ -1742,24 +1870,24 @@ Maintain the same JSON format as before for action_plan.actions."""
             # Extract actions from the plan
             action_plan = plan.get("action_plan", {})
             actions = action_plan.get("actions", [])
-            
+
             if not actions:
                 self.logger.warning("No actions found in plan, skipping checklist posting")
                 return
-            
+
             # Build markdown checklist
             checklist_lines = ["## 📋 Execution Plan", ""]
-            
+
             for i, action in enumerate(actions, 1):
                 task_id = action.get("task_id", f"task_{i}")
                 purpose = action.get("purpose", "Execute action")
                 checklist_lines.append(f"- [ ] **{task_id}**: {purpose}")
-            
+
             checklist_lines.append("")
             checklist_lines.append("*Progress will be updated as tasks complete.*")
-            
+
             checklist_content = "\n".join(checklist_lines)
-            
+
             # Post to Issue/MR using task's comment method and save comment ID
             if hasattr(self.task, "comment"):
                 result = self.task.comment(checklist_content)
@@ -1770,7 +1898,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                 self.logger.info("Posted execution plan checklist to Issue/MR (comment_id=%s)", self.checklist_comment_id)
             else:
                 self.logger.warning("Task does not support comment, cannot post checklist")
-                
+
         except Exception as e:
             self.logger.error("Failed to post plan as checklist: %s", str(e))
 
@@ -1783,30 +1911,30 @@ Maintain the same JSON format as before for action_plan.actions."""
         try:
             if not self.current_plan:
                 return
-            
+
             action_plan = self.current_plan.get("action_plan", {})
             actions = action_plan.get("actions", [])
-            
+
             if completed_action_index >= len(actions):
                 return
-            
+
             # Build updated checklist
             checklist_lines = ["## 📋 Execution Plan", ""]
-            
+
             for i, action in enumerate(actions, 1):
                 task_id = action.get("task_id", f"task_{i}")
                 purpose = action.get("purpose", "Execute action")
-                
+
                 # Mark completed actions with [x]
                 checkbox = "[x]" if i <= completed_action_index + 1 else "[ ]"
                 checklist_lines.append(f"- {checkbox} **{task_id}**: {purpose}")
-            
+
             checklist_lines.append("")
             progress_pct = int((completed_action_index + 1) / len(actions) * 100)
             checklist_lines.append(f"*Progress: {completed_action_index + 1}/{len(actions)} ({progress_pct}%) complete*")
-            
+
             checklist_content = "\n".join(checklist_lines)
-            
+
             # Update the existing comment instead of posting a new one
             if self.checklist_comment_id and hasattr(self.task, "update_comment"):
                 self.task.update_comment(self.checklist_comment_id, checklist_content)
@@ -1817,7 +1945,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                 if isinstance(result, dict):
                     self.checklist_comment_id = result.get("id")
                 self.logger.info("Posted new checklist progress comment")
-            
+
         except Exception as e:
             self.logger.error("Failed to update checklist progress: %s", str(e))
 
@@ -1826,23 +1954,23 @@ Maintain the same JSON format as before for action_plan.actions."""
         try:
             if not self.current_plan:
                 return
-            
+
             action_plan = self.current_plan.get("action_plan", {})
             actions = action_plan.get("actions", [])
-            
+
             # Build completed checklist
             checklist_lines = ["## 📋 Execution Plan", ""]
-            
+
             for i, action in enumerate(actions, 1):
                 task_id = action.get("task_id", f"task_{i}")
                 purpose = action.get("purpose", "Execute action")
                 checklist_lines.append(f"- [x] **{task_id}**: {purpose}")
-            
+
             checklist_lines.append("")
             checklist_lines.append(f"*✅ All {len(actions)} tasks completed successfully!*")
-            
+
             checklist_content = "\n".join(checklist_lines)
-            
+
             # Update the existing comment instead of posting a new one
             if self.checklist_comment_id and hasattr(self.task, "update_comment"):
                 self.task.update_comment(self.checklist_comment_id, checklist_content)
@@ -1853,7 +1981,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                 if isinstance(result, dict):
                     self.checklist_comment_id = result.get("id")
                 self.logger.info("Posted new completion checklist comment")
-            
+
         except Exception as e:
             self.logger.error("Failed to mark checklist complete: %s", str(e))
 
@@ -2157,7 +2285,7 @@ Maintain the same JSON format as before for action_plan.actions."""
             progress_pct = int(completed / total_actions * 100) if total_actions else 100
             checklist_lines.append(
                 f"*Progress: {completed}/{total_actions} ({progress_pct}%) - "
-                f"Verification found {len(additional_actions)} additional items*"
+                f"Verification found {len(additional_actions)} additional items*",
             )
 
             checklist_content = "\n".join(checklist_lines)
@@ -2183,41 +2311,41 @@ Maintain the same JSON format as before for action_plan.actions."""
         try:
             # Read system_prompt_planning.txt
             prompt_path = Path("system_prompt_planning.txt")
-            
+
             if not prompt_path.exists():
                 self.logger.warning("system_prompt_planning.txt not found, using default behavior")
                 return
-            
+
             with prompt_path.open("r", encoding="utf-8") as f:
                 planning_prompt = f.read()
-            
+
             # Get MCP client system prompts (function calling definitions)
             mcp_prompt = ""
             for client in self.mcp_clients.values():
                 mcp_prompt += client.system_prompt + "\n"
-            
+
             # Replace placeholder with MCP prompts
             planning_prompt = planning_prompt.replace("{mcp_prompt}", mcp_prompt)
-            
+
             # プロジェクト固有のエージェントルールを読み込み
             project_rules = self._load_project_agent_rules()
             if project_rules:
                 planning_prompt = planning_prompt + "\n" + project_rules
                 self.logger.info("Added project-specific agent rules to planning prompt")
-            
+
             # プロジェクトファイル一覧を読み込み
             file_list_context = self._load_file_list_context()
             if file_list_context:
                 planning_prompt = planning_prompt + "\n" + file_list_context
                 self.logger.info("Added project file list to planning prompt")
-            
+
             # Send system prompt to LLM client
             if hasattr(self.llm_client, "send_system_prompt"):
                 self.llm_client.send_system_prompt(planning_prompt)
                 self.logger.info("Loaded planning system prompt with MCP function definitions")
             else:
                 self.logger.warning("LLM client does not support send_system_prompt")
-                
+
         except Exception as e:
             self.logger.error("Failed to load planning system prompt: %s", str(e))
 
@@ -2239,26 +2367,26 @@ Maintain the same JSON format as before for action_plan.actions."""
                 "revision": "📝",
                 "verification": "🔍",
             }
-            
+
             status_emoji_map = {
                 "started": "▶️",
                 "completed": "✅",
                 "failed": "❌",
                 "in_progress": "🔄",
             }
-            
+
             phase_emoji = emoji_map.get(phase, "📌")
             status_emoji = status_emoji_map.get(status, "ℹ️")
-            
+
             # Build comment title
             phase_title = phase.replace("_", " ").title()
             status_title = status.replace("_", " ").title()
-            
+
             comment_lines = [
                 f"## {phase_emoji} {phase_title} Phase - {status_emoji} {status_title}",
                 "",
             ]
-            
+
             # Add details if provided
             if details:
                 comment_lines.append(details)
@@ -2269,14 +2397,14 @@ Maintain the same JSON format as before for action_plan.actions."""
             comment_lines.append(f"*{timestamp}*")
 
             comment_content = "\n".join(comment_lines)
-            
+
             # Post comment to Issue/MR using Task.comment method
             if hasattr(self.task, "comment"):
                 self.task.comment(comment_content)
                 self.logger.info(f"Posted {phase} phase {status} comment to Issue/MR")
             else:
                 self.logger.warning("Task does not support comment, cannot post phase comment")
-                
+
         except Exception as e:
             self.logger.error("Failed to post phase comment: %s", str(e))
 
@@ -2344,7 +2472,7 @@ Maintain the same JSON format as before for action_plan.actions."""
             else:
                 # commentフィールドがない場合: デフォルトメッセージ
                 default_message = self.phase_default_messages.get(
-                    phase, "処理が完了しました"
+                    phase, "処理が完了しました",
                 )
                 # executionフェーズの場合はtask_idを含める
                 if phase == "execution" and task_id:
@@ -2479,7 +2607,7 @@ Maintain the same JSON format as before for action_plan.actions."""
             if hasattr(self.task, "comment"):
                 self.task.comment(comment_text)
                 self.logger.info(
-                    "ツール呼び出し後コメントを投稿: %s, success=%s", tool_name, success
+                    "ツール呼び出し後コメントを投稿: %s, success=%s", tool_name, success,
                 )
             else:
                 self.logger.warning("タスクがcommentをサポートしていません")
@@ -2615,7 +2743,7 @@ Maintain the same JSON format as before for action_plan.actions."""
         """
         if not planning_state or not planning_state.get("enabled"):
             return
-        
+
         # Restore planning state
         self.current_phase = planning_state.get("current_phase", "planning")
         self.action_counter = planning_state.get("action_counter", 0)
@@ -2623,33 +2751,39 @@ Maintain the same JSON format as before for action_plan.actions."""
 
         # LLM呼び出し回数を復元
         self.llm_call_count = planning_state.get("llm_call_count", 0)
-        
+
         # Restore checklist comment ID if available
         saved_checklist_id = planning_state.get("checklist_comment_id")
         if saved_checklist_id is not None:
             self.checklist_comment_id = saved_checklist_id
             self.plan_comment_id = saved_checklist_id
-        
+
         # Restore pre-planning result if available
         saved_pre_planning_result = planning_state.get("pre_planning_result")
         if saved_pre_planning_result is not None:
             self.pre_planning_result = saved_pre_planning_result
-        
+
+        # Restore selected environment if available
+        saved_selected_environment = planning_state.get("selected_environment")
+        if saved_selected_environment is not None:
+            self.selected_environment = saved_selected_environment
+
         # Restore pre-planning manager state if available
         saved_pre_planning_state = planning_state.get("pre_planning_state")
         if saved_pre_planning_state and self.pre_planning_manager:
             self.pre_planning_manager.restore_pre_planning_state(saved_pre_planning_state)
-        
+
         self.logger.info(
             "Planning状態を復元しました: phase=%s, action_counter=%d, revision_counter=%d, "
-            "llm_call_count=%d, checklist_id=%s",
+            "llm_call_count=%d, checklist_id=%s, selected_environment=%s",
             self.current_phase,
             self.action_counter,
             self.revision_counter,
             self.llm_call_count,
             self.checklist_comment_id,
+            self.selected_environment,
         )
-        
+
         # Load existing plan from history
         if self.history_store.has_plan():
             plan_entry = self.history_store.get_latest_plan()
@@ -2668,7 +2802,7 @@ Maintain the same JSON format as before for action_plan.actions."""
         if self.current_plan:
             action_plan = self.current_plan.get("action_plan", {})
             total_actions = len(action_plan.get("actions", []))
-        
+
         state = {
             "enabled": True,
             "current_phase": self.current_phase,
@@ -2678,12 +2812,13 @@ Maintain the same JSON format as before for action_plan.actions."""
             "checklist_comment_id": self.plan_comment_id,
             "total_actions": total_actions,
             "pre_planning_result": self.pre_planning_result,
+            "selected_environment": self.selected_environment,
         }
-        
+
         # Add pre-planning manager state if available
         if self.pre_planning_manager:
             state["pre_planning_state"] = self.pre_planning_manager.get_pre_planning_state()
-        
+
         return state
 
     def _check_pause_signal(self) -> bool:
@@ -2694,7 +2829,7 @@ Maintain the same JSON format as before for action_plan.actions."""
         """
         if self.pause_manager is None:
             return False
-        
+
         return self.pause_manager.check_pause_signal()
 
     def _check_stop_signal(self) -> bool:
@@ -2705,11 +2840,11 @@ Maintain the same JSON format as before for action_plan.actions."""
         """
         if self.stop_manager is None:
             return False
-        
+
         # Check if it's time to check and if bot is unassigned
         if self.stop_manager.should_check_now():
             return not self.stop_manager.check_assignee_status(self.task)
-        
+
         return False
 
     def _handle_stop(self) -> None:
@@ -2717,13 +2852,13 @@ Maintain the same JSON format as before for action_plan.actions."""
         if self.stop_manager is None:
             self.logger.warning("Stop manager not set, cannot stop")
             return
-        
+
         # Get current planning state with total actions
         planning_state = self.get_planning_state()
-        
+
         # 最終要約を作成してコンテキストをcompletedに移動
         self.context_manager.stop()
-        
+
         # コメントとラベル更新
         self.stop_manager.post_stop_notification(
             self.task,
@@ -2737,15 +2872,15 @@ Maintain the same JSON format as before for action_plan.actions."""
         """
         if self.comment_detection_manager is None:
             return
-        
+
         try:
             new_comments = self.comment_detection_manager.check_for_new_comments()
             if new_comments:
                 self.comment_detection_manager.add_to_context(
-                    self.llm_client, new_comments
+                    self.llm_client, new_comments,
                 )
                 self.logger.info(
-                    "新規コメント %d件をコンテキストに追加しました", len(new_comments)
+                    "新規コメント %d件をコンテキストに追加しました", len(new_comments),
                 )
         except Exception as e:
             self.logger.warning("新規コメントの検出中にエラー発生: %s", e)

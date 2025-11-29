@@ -976,5 +976,248 @@ class TestLLMCallComments(unittest.TestCase):
         assert "verification" in coordinator.phase_default_messages
 
 
+class TestEnvironmentSelection(unittest.TestCase):
+    """実行環境選択機能のテスト."""
+
+    def setUp(self) -> None:
+        """テスト環境をセットアップ."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.task_uuid = "test-uuid"
+        self.config = {
+            "enabled": True,
+            "strategy": "chain_of_thought",
+            "max_subtasks": 100,
+            "llm_call_comments": {
+                "enabled": False,  # テストではコメント機能を無効化
+            },
+            "reflection": {
+                "enabled": True,
+                "trigger_on_error": True,
+                "trigger_interval": 3,
+            },
+            "revision": {
+                "max_revisions": 3,
+            },
+            "main_config": {
+                "llm": {
+                    "provider": "openai",
+                    "model": "gpt-4",
+                    "context_length": 8000,
+                    "function_calling": False,
+                    "openai": {
+                        "api_key": "test-key",
+                        "model": "gpt-4",
+                    },
+                },
+            },
+        }
+        self.task = MockTask(task_uuid=self.task_uuid)
+        self.mcp_clients = {"github": MagicMock()}
+        self.context_manager = MockContextManager(self.task_uuid, self.temp_dir)
+
+    def tearDown(self) -> None:
+        """テスト環境をクリーンアップ."""
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_selected_environment_initialization(self) -> None:
+        """selected_environmentの初期化テスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        assert coordinator.selected_environment is None
+
+    def test_extract_selected_environment_dict_format(self) -> None:
+        """辞書形式のselected_environmentの抽出テスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        plan = {
+            "selected_environment": {
+                "name": "node",
+                "reasoning": "This is a TypeScript project with package.json",
+            }
+        }
+
+        env = coordinator._extract_selected_environment(plan)
+        assert env == "node"
+
+    def test_extract_selected_environment_string_format(self) -> None:
+        """文字列形式のselected_environmentの抽出テスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        plan = {
+            "selected_environment": "python"
+        }
+
+        env = coordinator._extract_selected_environment(plan)
+        assert env == "python"
+
+    def test_extract_selected_environment_missing(self) -> None:
+        """selected_environmentがない場合の抽出テスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        plan = {
+            "goal_understanding": {},
+            "task_decomposition": {},
+        }
+
+        env = coordinator._extract_selected_environment(plan)
+        assert env is None
+
+    def test_extract_selected_environment_invalid_plan(self) -> None:
+        """無効な計画からの抽出テスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        env = coordinator._extract_selected_environment(None)
+        assert env is None
+
+        env = coordinator._extract_selected_environment("not a dict")
+        assert env is None
+
+    def test_build_environment_selection_prompt(self) -> None:
+        """環境選択プロンプト構築テスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        prompt = coordinator._build_environment_selection_prompt()
+
+        # プロンプトに必要な要素が含まれていることを確認
+        assert "Execution Environment Selection" in prompt
+        assert "python" in prompt
+        assert "node" in prompt
+        assert "java" in prompt
+        assert "go" in prompt
+        assert "miniforge" in prompt
+        assert "Default Environment" in prompt
+        assert "Selection Criteria" in prompt
+        assert "selected_environment" in prompt
+
+    def test_build_planning_prompt_includes_environment_selection(self) -> None:
+        """計画プロンプトに環境選択情報が含まれるかテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        prompt = coordinator._build_planning_prompt([])
+
+        # 環境選択情報が含まれていることを確認
+        assert "Execution Environment Selection" in prompt
+        assert "selected_environment" in prompt
+
+    def test_get_planning_state_includes_selected_environment(self) -> None:
+        """get_planning_stateにselected_environmentが含まれるかテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.selected_environment = "node"
+        state = coordinator.get_planning_state()
+
+        assert "selected_environment" in state
+        assert state["selected_environment"] == "node"
+
+    def test_restore_planning_state_restores_selected_environment(self) -> None:
+        """restore_planning_stateでselected_environmentが復元されるかテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        planning_state = {
+            "enabled": True,
+            "current_phase": "execution",
+            "action_counter": 3,
+            "revision_counter": 1,
+            "selected_environment": "java",
+        }
+
+        coordinator.restore_planning_state(planning_state)
+
+        assert coordinator.selected_environment == "java"
+
+    def test_build_environment_selection_prompt_with_execution_manager(self) -> None:
+        """ExecutionEnvironmentManagerがある場合の環境選択プロンプトテスト."""
+        from handlers.execution_environment_manager import ExecutionEnvironmentManager
+
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        # ExecutionEnvironmentManagerをモックとして設定
+        mock_execution_manager = MagicMock()
+        mock_execution_manager.get_available_environments.return_value = {
+            "python": "coding-agent-executor-python:latest",
+            "node": "coding-agent-executor-node:latest",
+        }
+        mock_execution_manager.get_default_environment.return_value = "python"
+        coordinator.execution_manager = mock_execution_manager
+
+        prompt = coordinator._build_environment_selection_prompt()
+
+        # ExecutionEnvironmentManagerから取得した環境が含まれていることを確認
+        assert "python" in prompt
+        assert "node" in prompt
+        mock_execution_manager.get_available_environments.assert_called_once()
+        mock_execution_manager.get_default_environment.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
