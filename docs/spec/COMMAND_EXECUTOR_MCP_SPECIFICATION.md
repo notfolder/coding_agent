@@ -21,6 +21,8 @@
 
 - Command Executor MCP Serverを使用してコマンド実行をサポートする
 - 実行環境はDockerで独立してタスク毎に初期化される
+- **計画フェーズで適切な言語環境を選択し、その環境でコンテナを起動する**
+- **各言語用イメージにはgitとCommand Executor MCPの基盤機能をあらかじめインストールしておき、即座に起動可能な状態にする**
 - 実行環境にはあらかじめプロジェクトファイルをダウンロードしておく
 - タスク終了時に実行環境を削除する
 
@@ -29,6 +31,7 @@
 - [Command Executor MCP Server（外部）](https://zenn.dev/sunwood_ai_labs/articles/command-executor-mcp-server-v0-1-0-release)
 - [基本仕様](spec.md)
 - [継続動作モード仕様](CONTINUOUS_MODE_SPECIFICATION.md)
+- **[複数言語対応実行環境仕様](MULTI_LANGUAGE_ENVIRONMENT_SPECIFICATION.md)**
 
 ---
 
@@ -40,6 +43,7 @@
 flowchart TD
     subgraph CodingAgent[コーディングエージェント]
         TaskHandler[TaskHandler]
+        PlanningCoordinator[PlanningCoordinator]
         MCPClient[MCPToolClient]
         ExecutionManager[ExecutionEnvironmentManager]
     end
@@ -50,6 +54,13 @@ flowchart TD
     
     subgraph DockerHost[Docker Host]
         DockerAPI[Docker API]
+        subgraph DockerImages[言語別Dockerイメージ]
+            ImgPython[Python イメージ]
+            ImgMiniforge[Miniforge イメージ]
+            ImgNode[Node.js イメージ]
+            ImgJava[Java イメージ]
+            ImgGo[Go イメージ]
+        end
         subgraph ExecutionContainer[実行環境コンテナ]
             ProjectFiles[プロジェクトファイル]
             WorkDir[作業ディレクトリ]
@@ -61,11 +72,13 @@ flowchart TD
         GitLab[GitLab]
     end
     
+    TaskHandler --> PlanningCoordinator
+    PlanningCoordinator -->|環境選択| ExecutionManager
     TaskHandler --> MCPClient
     MCPClient --> CommandMCP
-    TaskHandler --> ExecutionManager
     ExecutionManager --> DockerAPI
-    DockerAPI --> ExecutionContainer
+    DockerAPI --> DockerImages
+    DockerImages --> ExecutionContainer
     ExecutionManager -->|git clone| GitPlatform
     CommandMCP -->|コマンド実行| ExecutionContainer
 ```
@@ -77,7 +90,9 @@ flowchart TD
 実行環境の生成、管理、削除を担当するコンポーネントです。
 
 **責務:**
-- タスク毎のDockerコンテナの生成
+- **利用可能な言語環境リストの提供**
+- **計画フェーズからの環境選択受付**
+- タスク毎のDockerコンテナの生成（**選択された言語イメージを使用**）
 - プロジェクトファイルのダウンロードとマウント
 - コンテナの状態監視
 - タスク終了時のコンテナ削除
@@ -122,18 +137,33 @@ coding-agent-exec-{task_uuid}
 
 この命名規則により、タスクとコンテナの紐付けを明確にし、クリーンアップ時の特定を容易にします。
 
-### 3.3 ベースイメージの設定
+### 3.3 言語別イメージの設定
 
-実行環境のベースイメージは設定ファイルで指定可能とします。デフォルトでは汎用的な開発環境イメージを使用します。
+実行環境は計画フェーズでLLMが選択した言語に応じた専用イメージを使用します。各イメージには以下の共通機能があらかじめインストールされています：
 
-**デフォルトイメージ:**
-- Node.js、Python、Go、Java等の主要言語のランタイムを含む
-- Git、curl、wget等の基本ツールを含む
-- 非rootユーザーで実行
+**共通プリインストール済みツール:**
+- git（バージョン管理）
+- curl / wget（ファイルダウンロード）
+- jq（JSON処理）
+- tree（ディレクトリ構造表示）
+- その他基本的なコマンドラインツール
 
-**カスタムイメージ:**
-- プロジェクト毎にカスタムイメージを指定可能
-- プロジェクトルートの設定ファイルで上書き可能
+**利用可能な言語環境:**
+
+| 環境名 | イメージ名 | 説明 | 主な用途 |
+|--------|-----------|------|----------|
+| python | coding-agent-executor-python:latest | Python 3.11 + pip + pytest/black/flake8/mypy | 純粋Pythonプロジェクト、Webフレームワーク |
+| miniforge | coding-agent-executor-miniforge:latest | conda/mamba + Python + データサイエンスツール | 科学計算、ML/AI、condaenv.yaml使用プロジェクト |
+| node | coding-agent-executor-node:latest | Node.js 20 + npm/yarn/pnpm + TypeScript/ESLint | フロントエンド、Node.jsバックエンド |
+| java | coding-agent-executor-java:latest | Java 21 + Maven + Gradle | Spring Boot、Java/Kotlinプロジェクト |
+| go | coding-agent-executor-go:latest | Go 1.22 + golangci-lint | Goプロジェクト、CLIツール |
+
+**環境選択の判断基準:**
+- プロジェクトルートの依存関係ファイル（package.json, requirements.txt等）
+- Issue/MRの内容から推測される言語・フレームワーク
+- デフォルト環境: python（選択に失敗した場合）
+
+詳細は[複数言語対応実行環境仕様](MULTI_LANGUAGE_ENVIRONMENT_SPECIFICATION.md)を参照してください。
 
 ### 3.4 リソース制限
 
@@ -172,24 +202,32 @@ coding-agent-exec-{task_uuid}
 
 ### 4.1 ダウンロードフロー
 
+**注意:** コンテナ作成は計画フェーズ完了後、環境選択フェーズで実行されます。
+
 ```mermaid
 sequenceDiagram
-    participant TH as TaskHandler
+    participant PC as PlanningCoordinator
     participant EM as ExecutionEnvironmentManager
     participant Docker as Docker API
     participant Git as Git Platform
 
-    TH->>EM: 実行環境準備要求(task)
-    EM->>Docker: コンテナ作成
+    Note over PC: 計画フェーズ完了
+    PC->>EM: 利用可能環境リスト取得
+    EM-->>PC: 環境リスト
+    PC->>PC: LLMによる環境選択
+    PC->>EM: prepare(task, selected_environment)
+    EM->>Docker: コンテナ作成（選択されたイメージで）
     Docker-->>EM: コンテナID
     EM->>Docker: コンテナ起動
+    Note over Docker: gitはイメージにプリインストール済み
     EM->>Docker: git clone実行
     Docker->>Git: リポジトリクローン
     Git-->>Docker: ファイル取得
     Docker-->>EM: クローン完了
     EM->>Docker: ブランチチェックアウト（PR/MRの場合）
     Docker-->>EM: チェックアウト完了
-    EM-->>TH: 実行環境準備完了
+    EM-->>PC: 実行環境準備完了
+    Note over PC: 実行フェーズ開始
 ```
 
 ### 4.2 クローン対象の決定
@@ -238,20 +276,26 @@ sequenceDiagram
 
 ## 5. タスク毎の環境初期化仕様
 
-### 5.1 初期化フロー
+### 5.1 初期化フロー（計画後に実行）
+
+**変更点:** コンテナ作成タイミングが「タスク開始時」から「計画フェーズ完了後」に変更されました。
 
 ```mermaid
 flowchart TD
-    A[タスク開始] --> B[ExecutionEnvironmentManager.prepare]
-    B --> C{既存コンテナ確認}
-    C -->|存在する| D[既存コンテナ削除]
-    C -->|存在しない| E[新規コンテナ作成]
-    D --> E
-    E --> F[コンテナ起動]
-    F --> G[プロジェクトファイルダウンロード]
-    G --> H[依存関係インストール]
-    H --> I[初期化完了]
-    I --> J[タスク処理開始]
+    A[タスク開始] --> B[計画フェーズ]
+    B --> C[計画作成完了]
+    C --> D[環境選択フェーズ]
+    D --> E[LLMが環境を選択]
+    E --> F[ExecutionEnvironmentManager.prepare]
+    F --> G{既存コンテナ確認}
+    G -->|存在する| H[既存コンテナ削除]
+    G -->|存在しない| I[選択されたイメージでコンテナ作成]
+    H --> I
+    I --> J[コンテナ起動]
+    J --> K[プロジェクトファイルダウンロード]
+    K --> L[依存関係インストール]
+    L --> M[初期化完了]
+    M --> N[実行フェーズ開始]
 ```
 
 ### 5.2 クリーン環境の保証
@@ -260,8 +304,8 @@ flowchart TD
 
 **初期化時の処理:**
 1. 同一task_uuidのコンテナが存在する場合は削除
-2. 新規コンテナを作成
-3. プロジェクトファイルを新規にクローン
+2. **選択された言語環境のイメージを使用して**新規コンテナを作成
+3. **gitは既にインストール済みのため、即座に**プロジェクトファイルをクローン
 4. 必要に応じて依存関係をインストール
 
 **前タスクの影響排除:**
