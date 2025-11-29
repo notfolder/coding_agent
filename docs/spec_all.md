@@ -330,26 +330,23 @@ GitHub/GitLabのIssueで依頼された内容を自動的にMerge Request (MR) /
 
 ### 13.2 主要機能
 
-- **ブランチ名自動生成**: LLMがIssue内容を分析し、適切なブランチ名を決定
+- **ブランチ名自動生成**: LLMがIssue内容を分析し、Bot名とIssue番号を含む適切なブランチ名を決定
 - **内容転記**: Issue本文とコメントをMR/PRに転記
-- **新規タスク開始**: 作成されたMR/PRを新規タスクとして処理開始
-- **元Issueへの通知**: 作成されたMR/PRへのリンクを元Issueにコメント
+- **自動タスク化**: MR/PRにBotをアサイン・ラベル付与することで自動的にタスク処理開始
+- **元Issueへの報告**: 作成されたMR/PRへのリンクを元Issueにコメント
 
 ### 13.3 処理フロー
 
-1. 特定ラベル（例: `create-mr`）が付与されたIssueを検知
-2. Issue内容をLLMに送信し、ブランチ名を生成
-3. 新規ブランチを作成
-4. MR/PRを作成し、Issue内容とコメントを転記
-5. 元Issueにリンクコメントを投稿
-6. MR/PRを新規タスクとして処理開始
+1. `coding agent`ラベルが付与されたIssueを検知
+2. Issue内容をLLMに送信し、ブランチ名を生成（Bot名+Issue番号を含む）
+3. 新規ブランチを作成（空コミット）
+4. WIP付きのMR/PRを作成し、Issue内容とコメントを転記
+5. MR/PRにBotアサインと`coding agent`ラベルを付与
+6. 元Issueに作成報告をコメント
+7. 元Issueを`coding agent done`に更新
+8. MR/PRが自動的にタスクとして処理開始
 
-### 13.4 トリガー方式
-
-- **ラベルベース**: 特定ラベル付与でトリガー
-- **コメントベース**: `/create-mr` コマンドでトリガー
-
-### 13.5 詳細仕様
+### 13.4 詳細仕様
 
 → 詳細は [ISSUE_TO_MR_CONVERSION_SPECIFICATION.md](spec/ISSUE_TO_MR_CONVERSION_SPECIFICATION.md) を参照
 

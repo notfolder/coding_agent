@@ -32,9 +32,7 @@
 ```mermaid
 flowchart TD
     subgraph Detection[検知フェーズ]
-        A[Issue検知] --> B{MR/PR変換要求?}
-        B -->|Yes| C[変換処理開始]
-        B -->|No| D[通常のIssue処理]
+        A[Issue検知] --> C[変換処理開始]
     end
     
     subgraph BranchNaming[ブランチ名決定フェーズ]
@@ -48,19 +46,20 @@ flowchart TD
     end
     
     subgraph MRCreation[MR/PR作成フェーズ]
-        J --> K[MR/PRの作成]
-        K --> L[Issue内容の転記]
-        L --> M[コメントの転記]
-        M --> N[ラベルの設定]
+        J --> K[空コミット作成]
+        K --> L[MR/PRの作成]
+        L --> M[Issue内容の転記]
+        M --> N[コメントの転記]
+        N --> O[botラベル・アサイン設定]
     end
     
     subgraph TaskStart[タスク開始フェーズ]
-        N --> O[新規タスクとして登録]
-        O --> P[元Issueにリンクコメント]
-        P --> Q[MR/PRタスク処理開始]
+        O --> P[元Issueに作成報告]
+        P --> Q[元Issueをdoneに更新]
+        Q --> R[MR/PRが自動タスク化]
     end
     
-    Q --> R[完了]
+    R --> S[完了]
 ```
 
 ### 2.2 主要コンポーネント
@@ -68,7 +67,6 @@ flowchart TD
 1. **IssueToMRConverter**: Issue から MR/PR への変換を制御するメインクラス
 2. **BranchNameGenerator**: LLM を使用してブランチ名を生成するクラス
 3. **ContentTransferManager**: Issue の内容とコメントを MR/PR に転記するクラス
-4. **ConversionTaskFactory**: 変換後の MR/PR タスクを生成するファクトリークラス
 
 ---
 
@@ -82,11 +80,13 @@ LLM を使用して Issue の内容からブランチ名を自動生成します
 
 LLM に以下の情報を提供してブランチ名を生成させます：
 
+- **Issue 番号**: Issue の識別番号
 - **Issue タイトル**: Issue の題名
 - **Issue 本文**: Issue の詳細説明
 - **ラベル**: Issue に付与されているラベル一覧
 - **リポジトリ名**: 対象リポジトリの名前
 - **既存ブランチ一覧**: 重複を避けるための既存ブランチ情報
+- **Bot 名**: エージェントのボット名（ブランチ名に含める）
 
 ### 3.3 ブランチ名生成ルール
 
@@ -101,9 +101,9 @@ LLM に以下のルールを指示してブランチ名を生成させます：
   - リファクタリング: `refactor/`
   - テスト追加: `test/`
   - その他: `task/`
+- **Bot 名と Issue 番号を必ず含める**（例: `feature/codingagent-123-add-user-auth`）
 - 英語の小文字とハイフンのみを使用する
 - 最大長は 50 文字とする
-- Issue 番号を含めることを推奨する（例: `feature/123-add-user-auth`）
 
 #### 3.3.2 禁止文字
 
@@ -119,27 +119,61 @@ LLM に以下のルールを指示してブランチ名を生成させます：
 LLM が生成したブランチ名に対して以下の検証を実施します：
 
 1. **形式チェック**: Git の命名規則に準拠しているか
-2. **重複チェック**: 既存のブランチ名と重複していないか
-3. **長さチェック**: 最大長を超えていないか
-4. **予約語チェック**: 禁止されたブランチ名（`main`, `master`, `develop` 等）でないか
+2. **必須要素チェック**: Bot 名と Issue 番号が含まれているか
+3. **重複チェック**: 既存のブランチ名と重複していないか
+4. **長さチェック**: 最大長を超えていないか
+5. **予約語チェック**: 禁止されたブランチ名（`main`, `master`, `develop` 等）でないか
 
 ### 3.5 LLM への指示形式
 
-LLM に対して以下の形式で指示を行います：
+ブランチ名生成には専用のシステムプロンプトとメッセージを使用します。
 
-**システムプロンプト拡張**:
-- Issue の内容を分析し、適切なブランチ名を提案する役割を説明
-- ブランチ名の命名規則を明記
-- 出力形式（JSON）を指定
+#### 3.5.1 システムプロンプト（英語）
 
-**期待する出力形式**:
+```
+You are a branch name generator for Git repositories.
+Your task is to analyze GitHub/GitLab issue content and generate an appropriate branch name.
+
+Branch naming rules:
+1. Use one of these prefixes based on issue type:
+   - feature/ : for new features
+   - fix/ : for bug fixes
+   - docs/ : for documentation
+   - refactor/ : for refactoring
+   - test/ : for tests
+   - task/ : for other tasks
+2. MUST include bot name and issue number in format: {prefix}{bot_name}-{issue_number}-{description}
+3. Use only lowercase letters, numbers, and hyphens
+4. Maximum length is 50 characters
+5. Do not use spaces or special characters
+
+Output format: JSON with "branch_name" and "reasoning" fields.
+```
+
+#### 3.5.2 メッセージ形式（英語）
+
+```
+Generate a branch name for the following issue:
+
+Bot Name: {bot_name}
+Issue Number: {issue_number}
+Issue Title: {issue_title}
+Issue Body: {issue_body}
+Labels: {labels}
+Repository: {repository_name}
+Existing Branches: {existing_branches}
+
+Please generate an appropriate branch name following the naming rules.
+```
+
+#### 3.5.3 期待する出力形式
 
 LLM は以下の JSON 形式で応答することを期待します：
 
 ```json
 {
-  "branch_name": "feature/123-add-user-authentication",
-  "reasoning": "Issue #123 はユーザー認証機能の追加を要求しているため、feature プレフィックスを使用し、内容を簡潔に表現しました。"
+  "branch_name": "feature/codingagent-123-add-user-authentication",
+  "reasoning": "Issue #123 requests adding user authentication feature. Using feature/ prefix with bot name and issue number as required."
 }
 ```
 
@@ -160,17 +194,18 @@ LLM は以下の JSON 形式で応答することを期待します：
 
 #### 4.2.2 初期コミットの作成
 
-新規ブランチに初期コミットを作成する。この段階では、空コミットまたはプレースホルダーファイルの追加を行う。
+新規ブランチに空コミットを作成する。
 
 #### 4.2.3 MR/PR の作成
 
 以下の情報を設定して MR/PR を作成する：
 
-- **タイトル**: Issue のタイトルをそのまま使用、または「WIP:」プレフィックスを付与
+- **タイトル**: 「WIP: 」プレフィックスを必ず付与し、その後に Issue のタイトルを使用
 - **本文**: Issue の内容を転記（詳細は 4.3 参照）
 - **ソースブランチ**: 作成した新規ブランチ
 - **ターゲットブランチ**: デフォルトブランチ
-- **ドラフトフラグ**: true（作業中として作成）
+- **アサイン**: Bot ユーザーにアサイン
+- **ラベル**: `coding agent` ラベルを付与
 
 ### 4.3 内容転記の詳細
 
@@ -217,40 +252,20 @@ MR/PR の本文には以下の情報を含めます：
 - ボットによる自動コメントは除外するオプションを提供
 - コメントが長すぎる場合は、要約または省略して転記
 
-### 4.4 ラベルの設定
+### 4.4 自動タスク化の設定
 
-MR/PR に以下のラベルを設定する：
+MR/PR に以下の設定を行うことで、自動的にタスクとして処理されるようにする：
 
-1. `coding agent`: エージェントによる処理対象を示す
-2. 元 Issue に付与されていたラベル（オプションで転記）
-3. `from-issue`: Issue から変換されたことを示すラベル（オプション）
+1. **Bot ユーザーへのアサイン**: MR/PR を Bot ユーザーにアサインする
+2. **`coding agent` ラベルの付与**: エージェントによる処理対象を示すラベルを付与する
+
+これにより、MR/PR が作成されると、Producer の定期スキャンによって自動的にタスクとして検知され、処理が開始される。タスク検知は既存の TaskGetter の仕組み（`coding agent` ラベルでの検索）を利用する。
 
 ---
 
-## 5. 新規タスクとしての処理
+## 5. 元 Issue への報告と更新
 
-### 5.1 概要
-
-作成された MR/PR を新規タスクとして登録し、通常の MR/PR タスク処理を開始します。
-
-### 5.2 タスク登録処理
-
-#### 5.2.1 タスクキーの生成
-
-MR/PR のタスクキーを生成し、タスク管理システムに登録します。
-
-- GitHub の場合: `GitHubPullRequestTaskKey` を使用
-- GitLab の場合: `GitLabMergeRequestTaskKey` を使用
-
-#### 5.2.2 元 Issue との関連付け
-
-新規タスクと元 Issue の関連を保持するため、以下の情報を記録します：
-
-- 元 Issue のタスクキー
-- 変換日時
-- 変換を実行したエージェント情報
-
-### 5.3 元 Issue へのリンクコメント
+### 5.1 MR/PR 作成報告
 
 元の Issue に対して、MR/PR が作成されたことを通知するコメントを投稿します。
 
@@ -268,13 +283,11 @@ MR/PR のタスクキーを生成し、タスク管理システムに登録し�
 以降の処理は MR/PR 上で進めます。
 ```
 
-### 5.4 元 Issue のステータス更新
+### 5.2 元 Issue のステータス更新
 
 MR/PR 作成後、元の Issue に対して以下の処理を行います：
 
-1. **ラベル変更**: `coding agent` → `coding agent converted` または独自のラベルに変更
-2. **アサイン解除**: オプションで元 Issue からのアサインを解除
-3. **Issue クローズ**: オプションで元 Issue を自動的にクローズ（設定で制御）
+1. **ラベル変更**: `coding agent` → `coding agent done` に変更
 
 ---
 
@@ -318,34 +331,17 @@ MR/PR 作成後、元の Issue に対して以下の処理を行います：
 
 | 設定項目 | 説明 | デフォルト値 |
 |---------|------|-------------|
-| enabled | Issue → MR/PR 変換機能の有効/無効 | false |
-| trigger_label | 変換をトリガーするラベル | "create-mr" |
+| enabled | Issue → MR/PR 変換機能の有効/無効 | true |
 | auto_draft | PR/MR をドラフトとして作成するか | true |
 | transfer_comments | コメントを転記するか | true |
 | max_comments | 転記するコメントの最大数 | 50 |
 | exclude_bot_comments | ボットコメントを除外するか | true |
-| close_source_issue | 元 Issue を自動クローズするか | false |
-| transfer_labels | ラベルを転記するか | true |
-| branch_prefix_mapping | ラベルとブランチプレフィックスのマッピング | (下記参照) |
-
-#### 7.1.1 branch_prefix_mapping の設定例
-
-```yaml
-issue_to_mr_conversion:
-  branch_prefix_mapping:
-    enhancement: "feature/"
-    bug: "fix/"
-    documentation: "docs/"
-    refactoring: "refactor/"
-    default: "task/"
-```
 
 ### 7.2 環境変数
 
 | 環境変数 | 説明 |
 |---------|------|
 | ISSUE_TO_MR_ENABLED | 機能の有効/無効 (true/false) |
-| ISSUE_TO_MR_TRIGGER_LABEL | トリガーラベル |
 
 ---
 
@@ -391,42 +387,15 @@ MR/PR の作成に失敗した場合：
 
 LLM がブランチ名を適切に生成できない場合：
 
-1. フォールバックとして Issue 番号ベースのデフォルト名を使用
-2. 例: `task/{issue_number}-auto-generated`
+1. フォールバックとして Bot 名と Issue 番号ベースのデフォルト名を使用
+2. 例: `task/codingagent-123-auto-generated`
 3. Issue に警告コメントを投稿
 
 ---
 
-## 9. トリガー方式
+## 9. アーキテクチャ
 
-### 9.1 ラベルベースのトリガー
-
-特定のラベル（例: `create-mr`）が Issue に付与された場合に変換処理を開始します。
-
-### 9.2 コメントベースのトリガー
-
-Issue のコメントに特定のコマンド（例: `/create-mr`）が投稿された場合に変換処理を開始します。
-
-#### 9.2.1 コメントコマンド形式
-
-```
-/create-mr [オプション]
-
-オプション:
-  --branch <name>   : ブランチ名を指定（LLM 生成をスキップ）
-  --no-comments     : コメント転記をスキップ
-  --no-draft        : ドラフトではなく通常の PR として作成
-```
-
-### 9.3 両方のラベルが存在する場合
-
-`coding agent` ラベルと `create-mr` ラベルの両方が存在する場合、まず MR/PR への変換を実行してから、MR/PR に対して通常のタスク処理を開始します。
-
----
-
-## 10. アーキテクチャ
-
-### 10.1 クラス図
+### 9.1 クラス図
 
 ```mermaid
 classDiagram
@@ -447,7 +416,8 @@ classDiagram
         -llm_client: LLMClient
         -config: dict
         +generate(issue_info: dict) str
-        -_build_prompt() str
+        -_build_system_prompt() str
+        -_build_message() str
         -_validate_name(name: str) bool
         -_sanitize_name(name: str) str
     }
@@ -461,18 +431,11 @@ classDiagram
         -_format_comments() str
     }
     
-    class ConversionTaskFactory {
-        -config: dict
-        -mcp_clients: dict
-        +create_from_mr(mr_info: dict) Task
-    }
-    
     IssueToMRConverter --> BranchNameGenerator
     IssueToMRConverter --> ContentTransferManager
-    IssueToMRConverter --> ConversionTaskFactory
 ```
 
-### 10.2 シーケンス図
+### 9.2 シーケンス図
 
 ```mermaid
 sequenceDiagram
@@ -482,11 +445,10 @@ sequenceDiagram
     participant LLM as LLMClient
     participant MCP as MCPToolClient
     participant CTM as ContentTransferManager
-    participant CTF as ConversionTaskFactory
 
     TH->>IC: convert(issue_task)
     IC->>BNG: generate(issue_info)
-    BNG->>LLM: ブランチ名生成リクエスト
+    BNG->>LLM: ブランチ名生成リクエスト（専用プロンプト）
     LLM-->>BNG: ブランチ名応答
     BNG->>BNG: validate_name()
     BNG-->>IC: branch_name
@@ -494,8 +456,14 @@ sequenceDiagram
     IC->>MCP: create_branch(branch_name)
     MCP-->>IC: success
     
-    IC->>MCP: create_pull_request(pr_info)
+    IC->>MCP: create_empty_commit()
+    MCP-->>IC: success
+    
+    IC->>MCP: create_pull_request(pr_info with WIP prefix)
     MCP-->>IC: pr_data
+    
+    IC->>MCP: assign_bot_and_add_label(pr)
+    MCP-->>IC: success
     
     IC->>CTM: transfer_content(issue, pr)
     CTM->>MCP: update_pull_request(content)
@@ -504,33 +472,18 @@ sequenceDiagram
     MCP-->>CTM: comments
     CTM-->>IC: success
     
-    IC->>MCP: add_issue_comment(notification)
+    IC->>MCP: add_issue_comment(creation_report)
     MCP-->>IC: success
     
-    IC->>CTF: create_from_mr(pr_data)
-    CTF-->>IC: new_task
+    IC->>MCP: update_issue_label(done)
+    MCP-->>IC: success
     
-    IC-->>TH: TaskResult(new_task)
+    IC-->>TH: TaskResult(success)
 ```
 
 ---
 
-## 11. 将来の拡張
-
-### 11.1 検討中の機能
-
-- **テンプレート対応**: MR/PR の本文テンプレートをカスタマイズ可能にする
-- **複数 Issue の統合**: 関連する複数の Issue を 1 つの MR/PR にまとめる機能
-- **自動マイルストーン設定**: Issue のマイルストーンを MR/PR に引き継ぐ
-- **レビュアー自動設定**: 元 Issue の関係者を自動的にレビュアーに設定
-
-### 11.2 互換性の考慮
-
-将来の機能拡張時にも、既存の設定やワークフローとの後方互換性を維持します。
-
----
-
-## 12. 関連ドキュメント
+## 10. 関連ドキュメント
 
 - [基本仕様](spec.md)
 - [クラス設計](class_spec.md)
@@ -540,6 +493,6 @@ sequenceDiagram
 
 ---
 
-**文書バージョン:** 1.0  
+**文書バージョン:** 2.0  
 **最終更新日:** 2025-11-29  
 **ステータス:** 設計完了
