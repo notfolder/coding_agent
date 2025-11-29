@@ -20,6 +20,9 @@ DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 # JSON出力の切り詰め制限定数
 JSON_TRUNCATION_LIMIT = 1000
 
+# ツール引数表示の最大文字数
+TOOL_ARGS_MAX_LENGTH = 40
+
 if TYPE_CHECKING:
     from clients.llm_base import LLMClient
     from clients.mcp_tool_client import MCPToolClient
@@ -657,11 +660,8 @@ class PlanningCoordinator:
                 data = json.loads(resp) if isinstance(resp, str) else resp
                 
                 # LLM呼び出し完了コメントを投稿
+                # Note: commentフィールドの投稿はここで統一的に処理される
                 self._post_llm_call_comment("execution", data, task_id)
-                
-                # Post comment to Issue/MR if provided (既存の機能は維持)
-                # Note: _post_llm_call_commentが既にcommentフィールドを処理するため、
-                # この処理は重複しているが、後方互換性のために維持
                 
                 # Check if done
                 if isinstance(data, dict) and data.get("done"):
@@ -669,7 +669,6 @@ class PlanningCoordinator:
                 
                 return {"status": "success", "result": data, "action": current_action}
             except (json.JSONDecodeError, ValueError):
-                # If not JSON, treat as text response
                 # テキスト応答の場合もLLM呼び出しコメントを投稿
                 self._post_llm_call_comment("execution", None, task_id)
                 return {"status": "success", "result": resp, "action": current_action}
@@ -2292,10 +2291,9 @@ Maintain the same JSON format as before for action_plan.actions."""
             else:
                 args_str = str(arguments)
 
-            # 40文字を超える場合は切り捨て
-            max_length = 40
-            if len(args_str) > max_length:
-                args_str = args_str[:max_length] + "..."
+            # 最大文字数を超える場合は切り捨て
+            if len(args_str) > TOOL_ARGS_MAX_LENGTH:
+                args_str = args_str[:TOOL_ARGS_MAX_LENGTH] + "..."
 
             # コメント構築
             timestamp = datetime.now().strftime(DATETIME_FORMAT)

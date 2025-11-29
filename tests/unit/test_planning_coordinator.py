@@ -1,6 +1,7 @@
 """Unit tests for PlanningCoordinator."""
 from __future__ import annotations
 
+import shutil
 import sys
 import tempfile
 import unittest
@@ -115,7 +116,6 @@ class TestPlanningCoordinator(unittest.TestCase):
 
     def tearDown(self) -> None:
         """Clean up test environment."""
-        import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_coordinator_creation(self) -> None:
@@ -399,7 +399,6 @@ class TestVerificationPhase(unittest.TestCase):
 
     def tearDown(self) -> None:
         """テスト環境をクリーンアップ."""
-        import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_build_executed_actions_summary_with_actions(self) -> None:
@@ -703,7 +702,6 @@ class TestLLMCallComments(unittest.TestCase):
 
     def tearDown(self) -> None:
         """テスト環境をクリーンアップ."""
-        import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_llm_call_count_initialization(self) -> None:
