@@ -150,12 +150,15 @@ task_key_hashカラムにインデックスを作成し、同一TaskKeyの過去
 
 #### 4.1.2 TaskKeyハッシュ生成ロジック
 
-TaskKeyの各フィールドを連結してSHA-256ハッシュを生成します：
+TaskKeyの各フィールドを連結してSHA-256ハッシュを生成します。
+既存のTaskKeyクラスのtype名に合わせて一貫性のある形式を使用します：
 
 - GitHub Issue: `github_issue:{owner}:{repo}:{number}`
 - GitHub PR: `github_pull_request:{owner}:{repo}:{number}`
 - GitLab Issue: `gitlab_issue:{project_id}:{issue_iid}`
 - GitLab MR: `gitlab_merge_request:{project_id}:{mr_iid}`
+
+**注意**: これらの形式はTaskKey.to_dict()のtype値と一致させています。
 
 ### 4.2 引き継ぎコンテキスト生成処理
 
@@ -233,18 +236,20 @@ context_inheritanceセクションで以下を設定します：
 | 設定項目 | 型 | デフォルト値 | 説明 |
 |---------|-----|-------------|------|
 | enabled | boolean | true | 引き継ぎ機能の有効/無効 |
-| max_inheritance_depth | integer | 10 | 最大引き継ぎ世代数 |
+| max_inheritance_depth | integer | 5 | 最大引き継ぎ世代数（推奨: 3〜5） |
 | context_expiry_days | integer | 90 | 引き継ぎ可能なコンテキストの有効期限（日数） |
-| max_inherited_tokens | integer | 8000 | 引き継ぎコンテキストの最大トークン数 |
+| max_inherited_tokens | integer | 8000 | 引き継ぎコンテキストの最大トークン数（注1） |
 | include_failed_contexts | boolean | false | 失敗したコンテキストを引き継ぎ対象に含めるか |
 | summary_priority | string | "latest" | 複数要約がある場合の優先順位（latest/merged） |
+
+**注1**: max_inherited_tokensは、使用するLLMモデルのコンテキストウィンドウサイズに応じて調整することを推奨します。一般的なモデルでは、コンテキストウィンドウの5〜10%程度（例：128Kモデルで8000〜12800トークン）が適切です。
 
 ### 5.2 設定例
 
 ```yaml
 context_inheritance:
   enabled: true
-  max_inheritance_depth: 10
+  max_inheritance_depth: 5
   context_expiry_days: 90
   max_inherited_tokens: 8000
   include_failed_contexts: false
@@ -579,15 +584,17 @@ context_inheritanceセクションに以下のPlanning Mode専用設定を追加
 | planning.inherit_plans | boolean | true | 過去の計画を引き継ぐか |
 | planning.inherit_verifications | boolean | true | 過去の検証結果を引き継ぐか |
 | planning.inherit_reflections | boolean | true | 過去のリフレクションを引き継ぐか |
-| planning.max_previous_plans | integer | 3 | 参照する過去計画の最大数 |
+| planning.max_previous_plans | integer | 3 | 参照する過去計画の最大数（注2） |
 | planning.reuse_successful_patterns | boolean | true | 成功パターンを再利用するか |
+
+**注2**: max_previous_plansは、max_inheritance_depthとは独立した設定です。max_inheritance_depthは引き継ぎの「世代数」（同一タスクの処理回数の連鎖）を制限し、max_previous_plansは「参照する計画数」（最新N件の計画を参照）を制限します。トークン制限の観点から、max_previous_plansはmax_inheritance_depthより小さい値を推奨します。
 
 ### 13.10 設定例（Planning Mode込み）
 
 ```yaml
 context_inheritance:
   enabled: true
-  max_inheritance_depth: 10
+  max_inheritance_depth: 5
   context_expiry_days: 90
   max_inherited_tokens: 8000
   include_failed_contexts: false
