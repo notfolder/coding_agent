@@ -36,7 +36,7 @@
 ```mermaid
 flowchart TD
     subgraph BuildPhase[ビルドフェーズ（事前準備）]
-        DC[docker-compose.yml] --> |ダミープロファイル指定|Build[docker compose build]
+        DC[docker-compose.yml] --> |ビルド専用プロファイル指定|Build[docker compose build]
         Build --> ImgPython[Python イメージ]
         Build --> ImgMiniforge[Miniforge イメージ]
         Build --> ImgNode[Node.js イメージ]
@@ -257,8 +257,6 @@ coding-agent-executor-go:latest
 
 ```
 docker/
-├── executor-base/
-│   └── base-packages.sh       # 共通パッケージインストールスクリプト
 ├── executor-python/
 │   └── Dockerfile
 ├── executor-miniforge/
