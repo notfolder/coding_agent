@@ -564,10 +564,10 @@ class GithubClient:
             if isinstance(total_count, int) and total_count <= len(aggregated):
                 break
 
-            if len(page_items) < per_page:
+            if data.get("incomplete_results") is True:
                 break
 
-            if data.get("incomplete_results") is True:
+            if not isinstance(total_count, int) and len(page_items) < per_page:
                 break
 
             current_page += 1

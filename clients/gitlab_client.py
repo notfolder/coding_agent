@@ -238,9 +238,6 @@ class GitlabClient:
                 page = next_page
                 continue
 
-            if len(page_items) < per_page:
-                break
-
             page += 1
 
         return items

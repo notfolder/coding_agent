@@ -224,8 +224,6 @@ class TaskGitLabIssue(Task):
 
             next_page = self._determine_next_page(response, page)
             if next_page is None:
-                if len(discussions) < per_page:
-                    break
                 page += 1
                 continue
             if next_page <= page:
