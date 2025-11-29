@@ -1,6 +1,7 @@
 """Unit tests for PlanningCoordinator."""
 from __future__ import annotations
 
+import shutil
 import sys
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from handlers.planning_coordinator import PlanningCoordinator
+from handlers.task_key import GitHubIssueTaskKey
 
 
 class MockTask:
@@ -21,6 +23,7 @@ class MockTask:
         self.title = title
         self.body = body
         self.number = number
+        self._task_key = GitHubIssueTaskKey("test-owner", "test-repo", number)
         
     def comment(self, text):
         """Mock comment method."""
@@ -33,6 +36,10 @@ class MockTask:
     def get_prompt(self):
         """Mock get_prompt method."""
         return f"TASK: {self.title}\nDESCRIPTION: {self.body}\nNUMBER: {self.number}"
+    
+    def get_task_key(self):
+        """Get task key."""
+        return self._task_key
 
 
 class MockContextManager:
@@ -115,7 +122,6 @@ class TestPlanningCoordinator(unittest.TestCase):
 
     def tearDown(self) -> None:
         """Clean up test environment."""
-        import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_coordinator_creation(self) -> None:
@@ -399,7 +405,6 @@ class TestVerificationPhase(unittest.TestCase):
 
     def tearDown(self) -> None:
         """テスト環境をクリーンアップ."""
-        import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_build_executed_actions_summary_with_actions(self) -> None:
@@ -660,6 +665,315 @@ class TestVerificationPhase(unittest.TestCase):
         assert "Additional Work (From Verification)" in checklist_content
         assert "[ ]" in checklist_content
         assert "verification_fix_1" in checklist_content
+
+
+class TestLLMCallComments(unittest.TestCase):
+    """LLM呼び出しコメント機能のテスト."""
+
+    def setUp(self) -> None:
+        """テスト環境をセットアップ."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.task_uuid = "test-uuid"
+        self.config = {
+            "enabled": True,
+            "strategy": "chain_of_thought",
+            "max_subtasks": 100,
+            "llm_call_comments": {
+                "enabled": True,
+            },
+            "reflection": {
+                "enabled": True,
+                "trigger_on_error": True,
+                "trigger_interval": 3,
+            },
+            "revision": {
+                "max_revisions": 3,
+            },
+            "main_config": {
+                "llm": {
+                    "provider": "openai",
+                    "model": "gpt-4",
+                    "context_length": 8000,
+                    "function_calling": False,
+                    "openai": {
+                        "api_key": "test-key",
+                        "model": "gpt-4",
+                    },
+                },
+            },
+        }
+        self.task = MockTask(task_uuid=self.task_uuid)
+        self.mcp_clients = {"github": MagicMock()}
+        self.context_manager = MockContextManager(self.task_uuid, self.temp_dir)
+
+    def tearDown(self) -> None:
+        """テスト環境をクリーンアップ."""
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_llm_call_count_initialization(self) -> None:
+        """LLM呼び出しカウンターの初期化テスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        assert coordinator.llm_call_count == 0
+        assert coordinator.llm_call_comments_enabled is True
+
+    def test_llm_call_comments_disabled(self) -> None:
+        """LLM呼び出しコメント機能無効時のテスト."""
+        config = self.config.copy()
+        config["llm_call_comments"] = {"enabled": False}
+        
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        assert coordinator.llm_call_comments_enabled is False
+
+    def test_post_llm_call_comment_with_comment_field(self) -> None:
+        """commentフィールドがある場合のLLM呼び出しコメントテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.task.comment = MagicMock(return_value={"id": 456})
+        
+        response = {"comment": "テスト進捗メッセージ", "phase": "planning"}
+        coordinator._post_llm_call_comment("planning", response)
+        
+        coordinator.task.comment.assert_called_once()
+        call_args = coordinator.task.comment.call_args[0][0]
+        assert "テスト進捗メッセージ" in call_args
+        assert "計画作成" in call_args
+        assert "#1" in call_args
+
+    def test_post_llm_call_comment_without_comment_field(self) -> None:
+        """commentフィールドがない場合のLLM呼び出しコメントテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.task.comment = MagicMock(return_value={"id": 456})
+        
+        response = {"phase": "planning"}  # commentフィールドなし
+        coordinator._post_llm_call_comment("planning", response)
+        
+        coordinator.task.comment.assert_called_once()
+        call_args = coordinator.task.comment.call_args[0][0]
+        assert "実行計画の作成が完了しました" in call_args
+        assert "完了" in call_args
+
+    def test_post_tool_call_before_comment(self) -> None:
+        """ツール呼び出し前コメントのテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.task.comment = MagicMock(return_value={"id": 456})
+        
+        coordinator._post_tool_call_before_comment(
+            "github_read_file",
+            {"path": "/home/user/project/src/very/long/path/to/file.py"},
+        )
+        
+        coordinator.task.comment.assert_called_once()
+        call_args = coordinator.task.comment.call_args[0][0]
+        assert "🔧 ツール呼び出し" in call_args
+        assert "github_read_file" in call_args
+        assert "引数" in call_args
+        # 40文字超は切り捨て
+        assert "..." in call_args or len(call_args) < 200
+
+    def test_post_tool_call_after_comment_success(self) -> None:
+        """ツール呼び出し後コメント（成功）のテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.task.comment = MagicMock(return_value={"id": 456})
+        
+        coordinator._post_tool_call_after_comment("github_read_file", success=True)
+        
+        coordinator.task.comment.assert_called_once()
+        call_args = coordinator.task.comment.call_args[0][0]
+        assert "✅ ツール完了" in call_args
+        assert "成功" in call_args
+
+    def test_post_tool_call_after_comment_failure(self) -> None:
+        """ツール呼び出し後コメント（失敗）のテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.task.comment = MagicMock(return_value={"id": 456})
+        
+        coordinator._post_tool_call_after_comment("github_read_file", success=False)
+        
+        coordinator.task.comment.assert_called_once()
+        call_args = coordinator.task.comment.call_args[0][0]
+        assert "❌ ツール失敗" in call_args
+        assert "失敗" in call_args
+
+    def test_post_llm_error_comment(self) -> None:
+        """LLMエラーコメントのテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.task.comment = MagicMock(return_value={"id": 456})
+        
+        coordinator._post_llm_error_comment("planning", "Connection timeout")
+        
+        coordinator.task.comment.assert_called_once()
+        call_args = coordinator.task.comment.call_args[0][0]
+        assert "⚠️ LLM呼び出しエラー" in call_args
+        assert "Connection timeout" in call_args
+        assert "リトライを試みます" in call_args
+
+    def test_post_tool_error_comment(self) -> None:
+        """ツールエラーコメントのテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.task.comment = MagicMock(return_value={"id": 456})
+        
+        coordinator._post_tool_error_comment(
+            "github_create_file",
+            "File already exists",
+            "task_3",
+        )
+        
+        coordinator.task.comment.assert_called_once()
+        call_args = coordinator.task.comment.call_args[0][0]
+        assert "❌ エラー発生" in call_args
+        assert "github_create_file" in call_args
+        assert "File already exists" in call_args
+        assert "task_3" in call_args
+
+    def test_llm_call_count_increment(self) -> None:
+        """LLM呼び出しカウンターのインクリメントテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.task.comment = MagicMock(return_value={"id": 456})
+        
+        assert coordinator.llm_call_count == 0
+        
+        coordinator._post_llm_call_comment("planning", {"comment": "test1"})
+        assert coordinator.llm_call_count == 1
+        
+        coordinator._post_llm_call_comment("execution", {"comment": "test2"})
+        assert coordinator.llm_call_count == 2
+
+    def test_get_planning_state_includes_llm_call_count(self) -> None:
+        """get_planning_stateにllm_call_countが含まれるかテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        coordinator.llm_call_count = 5
+        state = coordinator.get_planning_state()
+        
+        assert "llm_call_count" in state
+        assert state["llm_call_count"] == 5
+
+    def test_restore_planning_state_restores_llm_call_count(self) -> None:
+        """restore_planning_stateでllm_call_countが復元されるかテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        planning_state = {
+            "enabled": True,
+            "current_phase": "execution",
+            "action_counter": 3,
+            "revision_counter": 1,
+            "llm_call_count": 10,
+        }
+        
+        coordinator.restore_planning_state(planning_state)
+        
+        assert coordinator.llm_call_count == 10
+
+    def test_phase_default_messages(self) -> None:
+        """フェーズ別デフォルトメッセージのテスト."""
+        llm_client = MagicMock()
+        coordinator = PlanningCoordinator(
+            config=self.config,
+            llm_client=llm_client,
+            mcp_clients=self.mcp_clients,
+            task=self.task,
+            context_manager=self.context_manager,
+        )
+
+        assert "pre_planning" in coordinator.phase_default_messages
+        assert "planning" in coordinator.phase_default_messages
+        assert "execution" in coordinator.phase_default_messages
+        assert "reflection" in coordinator.phase_default_messages
+        assert "revision" in coordinator.phase_default_messages
+        assert "verification" in coordinator.phase_default_messages
 
 
 if __name__ == "__main__":

@@ -350,9 +350,43 @@ GitHub/GitLabのIssueで依頼された内容を自動的にMerge Request (MR) /
 
 → 詳細は [ISSUE_TO_MR_CONVERSION_SPECIFICATION.md](spec/ISSUE_TO_MR_CONVERSION_SPECIFICATION.md) を参照
 
+## 14. 過去コンテキスト引き継ぎ機能
+
+### 14.1 概要
+
+同一のIssue、Merge Request、Pull Requestに対して、過去にコーディングエージェントが処理した際のコンテキストを引き継ぎ、処理の継続性と効率性を向上させる機能です。
+
+本機能は、通常モードと計画実行モード（Planning Mode）の両方で動作します。
+
+### 14.2 主要機能
+
+- **過去コンテキスト検索**: TaskKeyのハッシュ値を使用した高速検索
+- **引き継ぎデータ管理**: 要約、計画履歴、ツール実行履歴の引き継ぎ
+- **Planning Mode対応**: 計画・実行・検証・振り返り履歴の引き継ぎ
+- **トークン制限対応**: 引き継ぎコンテキストのトークン数制御
+- **ユーザー制御**: コメントコマンドによる引き継ぎ動作の制御
+
+### 14.3 引き継ぎ対象
+
+通常モードとPlanning Modeで以下のデータを引き継ぎます：
+
+| データ | 通常モード | Planning Mode |
+|--------|-----------|--------------|
+| 要約履歴 | ✅ | ✅ |
+| メタデータ | ✅ | ✅ |
+| ツール実行履歴 | ✅ | ✅ |
+| 計画履歴 | ✅ | ✅ |
+| 検証結果 | - | ✅ |
+| リフレクション | - | ✅ |
+| 再計画判断 | - | ✅ |
+
+### 14.4 詳細仕様
+
+→ 詳細は [CONTEXT_INHERITANCE_SPECIFICATION.md](spec/CONTEXT_INHERITANCE_SPECIFICATION.md) を参照
+
 ---
 
-## 14. 外部API仕様
+## 15. 外部API仕様
 
 本プロジェクトで使用する外部APIの仕様については、以下を参照してください。
 
@@ -365,7 +399,7 @@ GitHub/GitLabのIssueで依頼された内容を自動的にMerge Request (MR) /
 
 ---
 
-## 15. 仕様書一覧
+## 16. 仕様書一覧
 
 | ファイル名 | 内容 |
 |-----------|------|
@@ -373,6 +407,7 @@ GitHub/GitLabのIssueで依頼された内容を自動的にMerge Request (MR) /
 | [class_spec.md](spec/class_spec.md) | クラス設計・関係図 |
 | [context_file_spec.md](spec/context_file_spec.md) | コンテキストファイル化仕様 |
 | [CONTEXT_STORAGE_IMPLEMENTATION.md](spec/CONTEXT_STORAGE_IMPLEMENTATION.md) | コンテキストストレージ実装仕様 |
+| [CONTEXT_INHERITANCE_SPECIFICATION.md](spec/CONTEXT_INHERITANCE_SPECIFICATION.md) | 過去コンテキスト引き継ぎ仕様 |
 | [PLANNING_SPECIFICATION.md](spec/PLANNING_SPECIFICATION.md) | 計画実行モード仕様 |
 | [PAUSE_RESUME_SPECIFICATION.md](spec/PAUSE_RESUME_SPECIFICATION.md) | 一時停止・再開機能仕様 |
 | [TASK_STOP_SPECIFICATION.md](spec/TASK_STOP_SPECIFICATION.md) | タスク停止機能仕様 |
@@ -387,6 +422,6 @@ GitHub/GitLabのIssueで依頼された内容を自動的にMerge Request (MR) /
 
 ---
 
-**文書バージョン:** 1.0  
-**最終更新日:** 2025-11-29  
+**文書バージョン:** 1.1  
+**最終更新日:** 2024-11-29  
 **ステータス:** 統合ドキュメント

@@ -24,23 +24,23 @@ class GitlabClient:
         labels: list[str] | None = None,
         state: str = "opened",
         per_page: int = 100,
+        max_pages: int = 200,
     ) -> list[dict[str, Any]]:
         url = f"{self.api_url}/projects/{project_id}/issues"
-        params = {"state": state, "per_page": per_page}
+        params: dict[str, Any] = {"state": state}
         if labels:
             params["labels"] = ",".join(labels)
-        resp = requests.get(url, headers=self.headers, params=params, timeout=30)
-        resp.raise_for_status()
-        return resp.json()
+        return self._fetch_paginated_list(url, params, per_page, max_pages)
 
     def list_issue_notes(
-        self, project_id: int | str, issue_iid: int | str, per_page: int = 100,
+        self,
+        project_id: int | str,
+        issue_iid: int | str,
+        per_page: int = 100,
+        max_pages: int = 200,
     ) -> list[dict[str, Any]]:
         url = f"{self.api_url}/projects/{project_id}/issues/{issue_iid}/notes"
-        params = {"per_page": per_page}
-        resp = requests.get(url, headers=self.headers, params=params, timeout=30)
-        resp.raise_for_status()
-        return resp.json()
+        return self._fetch_paginated_list(url, {}, per_page, max_pages)
 
     def add_issue_note(
         self, project_id: int | str, issue_iid: int | str, body: str,
@@ -101,25 +101,25 @@ class GitlabClient:
         assignee: str | None = None,
         state: str = "opened",
         per_page: int = 100,
+        max_pages: int = 200,
     ) -> list[dict[str, Any]]:
         url = f"{self.api_url}/projects/{project_id}/merge_requests"
-        params = {"state": state, "per_page": per_page}
+        params: dict[str, Any] = {"state": state}
         if labels:
             params["labels"] = ",".join(labels)
         if assignee:
             params["assignee_username"] = assignee
-        resp = requests.get(url, headers=self.headers, params=params, timeout=30)
-        resp.raise_for_status()
-        return resp.json()
+        return self._fetch_paginated_list(url, params, per_page, max_pages)
 
     def list_merge_request_notes(
-        self, project_id: int | str, merge_request_iid: int | str, per_page: int = 100,
+        self,
+        project_id: int | str,
+        merge_request_iid: int | str,
+        per_page: int = 100,
+        max_pages: int = 200,
     ) -> list[dict[str, Any]]:
         url = f"{self.api_url}/projects/{project_id}/merge_requests/{merge_request_iid}/notes"
-        params = {"per_page": per_page}
-        resp = requests.get(url, headers=self.headers, params=params, timeout=30)
-        resp.raise_for_status()
-        return resp.json()
+        return self._fetch_paginated_list(url, {}, per_page, max_pages)
 
     def add_merge_request_note(
         self, project_id: int | str, merge_request_iid: int | str, body: str,
@@ -168,21 +168,76 @@ class GitlabClient:
         return resp.json()
 
     def search_issues(
-        self, query: str, state: str = "opened", per_page: int = 200,
+        self,
+        query: str,
+        state: str = "opened",
+        per_page: int = 200,
+        max_pages: int = 200,
     ) -> list[dict[str, Any]]:
         url = f"{self.api_url}/search"
-        params = {"scope": "issues", "search": query, "state": state, "per_page": per_page}
-        resp = requests.get(url, headers=self.headers, params=params, timeout=30)
-        resp.raise_for_status()
-        return resp.json()
+        params: dict[str, Any] = {"scope": "issues", "search": query, "state": state}
+        return self._fetch_paginated_list(url, params, per_page, max_pages)
 
     def search_merge_requests(
-        self, query: str, state: str | None = None, per_page: int = 200,
+        self,
+        query: str,
+        state: str | None = None,
+        per_page: int = 200,
+        max_pages: int = 200,
     ) -> list[dict[str, Any]]:
         url = f"{self.api_url}/search"
-        params = {"scope": "merge_requests", "search": query, "per_page": per_page}
+        params: dict[str, Any] = {"scope": "merge_requests", "search": query}
         if state:
             params["state"] = state
-        resp = requests.get(url, headers=self.headers, params=params, timeout=30)
-        resp.raise_for_status()
-        return resp.json()
+        return self._fetch_paginated_list(url, params, per_page, max_pages)
+
+    def _fetch_paginated_list(
+        self,
+        url: str,
+        params: dict[str, Any],
+        per_page: int,
+        max_pages: int,
+    ) -> list[dict[str, Any]]:
+        """GitLab APIからページング結果を全件取得するヘルパー."""
+        items: list[dict[str, Any]] = []
+        page: int = 1
+        visited_pages: set[int] = set()
+
+        # X-Next-Pageヘッダーとレスポンス件数を使って次ページを辿る
+        while page not in visited_pages and page <= max_pages:
+            visited_pages.add(page)
+            page_params = dict(params)
+            page_params["per_page"] = per_page
+            page_params["page"] = page
+
+            resp = requests.get(url, headers=self.headers, params=page_params, timeout=30)
+            resp.raise_for_status()
+            payload = resp.json()
+
+            page_items: list[dict[str, Any]]
+            if isinstance(payload, list):
+                page_items = payload
+            elif isinstance(payload, dict) and isinstance(payload.get("items"), list):
+                page_items = payload["items"]
+            else:
+                break
+
+            if not page_items:
+                break
+
+            items.extend(page_items)
+
+            next_page_header = resp.headers.get("X-Next-Page")
+            if next_page_header:
+                try:
+                    next_page = int(next_page_header)
+                except ValueError:
+                    break
+                if next_page <= 0:
+                    break
+                page = next_page
+                continue
+
+            page += 1
+
+        return items

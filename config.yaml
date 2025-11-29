@@ -70,6 +70,12 @@ planning:
   # 選択肢: "detailed", "moderate", "minimal"
   decomposition_level: "moderate"
 
+  # LLM呼び出し時のIssueコメント設定
+  # LLM呼び出しの度にIssue/MRにコメントを投稿する機能
+  llm_call_comments:
+    # 機能の有効/無効（デフォルト: true）
+    enabled: true
+
   # 計画前情報収集フェーズ設定
   # 計画を立てる前に依頼内容を理解し、必要な情報を収集するフェーズ
   pre_planning:
@@ -204,6 +210,28 @@ context_storage:
     {messages}
     
     要約のみを出力してください。
+
+# 過去コンテキスト引き継ぎ機能の設定
+# 同一Issue/MR/PRの過去のコンテキストを引き継いで処理の継続性を向上させる
+context_inheritance:
+  # 引き継ぎ機能の有効/無効（デフォルト: true）
+  enabled: true
+  # コンテキストの有効期限（日数、デフォルト: 90）
+  context_expiry_days: 90
+  # 引き継ぎコンテキストの最大トークン数（デフォルト: 8000）
+  max_inherited_tokens: 8000
+  # Planning Mode専用の引き継ぎ設定
+  planning:
+    # 過去の計画を引き継ぐか（デフォルト: true）
+    inherit_plans: true
+    # 過去の検証結果を引き継ぐか（デフォルト: true）
+    inherit_verifications: true
+    # 過去のリフレクションを引き継ぐか（デフォルト: true）
+    inherit_reflections: true
+    # 参照する過去計画の最大数（デフォルト: 3）
+    max_previous_plans: 3
+    # 成功パターンを再利用するか（デフォルト: true）
+    reuse_successful_patterns: true
 
 github:
   owner:     "notfolder"

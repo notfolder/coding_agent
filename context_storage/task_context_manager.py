@@ -80,8 +80,42 @@ class TaskContextManager:
         from handlers.planning_history_store import PlanningHistoryStore
         self.planning_store = PlanningHistoryStore(task_uuid, self.planning_dir)
         
+        # 引き継ぎコンテキストの初期化（リジュームでない新規タスクの場合のみ）
+        self.inheritance_context = None
+        self.inheritance_manager = None
+        if not is_resumed:
+            self._init_context_inheritance(task_key, config)
+        
         # Register task in database (or update if resumed)
         self._register_or_update_task()
+
+    def _init_context_inheritance(self, task_key: TaskKey, config: dict[str, Any]) -> None:
+        """過去コンテキスト引き継ぎを初期化する.
+
+        Args:
+            task_key: タスクキー
+            config: 設定辞書
+
+        """
+        import logging
+        from .context_inheritance_manager import ContextInheritanceManager
+
+        logger = logging.getLogger(__name__)
+
+        try:
+            self.inheritance_manager = ContextInheritanceManager(self.base_dir, config)
+            
+            # 引き継ぎコンテキストを検索
+            inheritance = self.inheritance_manager.get_inheritance_context(task_key)
+            
+            if inheritance:
+                self.inheritance_context = inheritance
+                logger.info(
+                    "過去コンテキストを引き継ぎます: uuid=%s",
+                    inheritance.previous_context.uuid[:8],
+                )
+        except Exception as e:
+            logger.warning("過去コンテキスト引き継ぎの初期化に失敗: %s", e)
 
     def get_message_store(self) -> MessageStore:
         """Get MessageStore instance.
@@ -118,6 +152,57 @@ class TaskContextManager:
 
         """
         return self.planning_store
+
+    def get_inheritance_context(self) -> Any | None:
+        """Get inheritance context if available.
+
+        Returns:
+            InheritanceContext instance or None if no inheritance
+
+        """
+        return self.inheritance_context
+
+    def has_inheritance_context(self) -> bool:
+        """Check if inheritance context is available.
+
+        Returns:
+            True if inheritance context exists
+
+        """
+        return self.inheritance_context is not None
+
+    def get_inheritance_notification_comment(self) -> str | None:
+        """Generate notification comment for inheritance.
+
+        Returns:
+            Notification comment string or None if no inheritance
+
+        """
+        if self.inheritance_context is None or self.inheritance_manager is None:
+            return None
+
+        return self.inheritance_manager.generate_notification_comment(
+            self.inheritance_context
+        )
+
+    def create_initial_context_with_inheritance(
+        self, user_request: str
+    ) -> list[dict[str, Any]] | None:
+        """Create initial context with inheritance if available.
+
+        Args:
+            user_request: Current user request (Issue/MR/PR content)
+
+        Returns:
+            Initial context messages or None if no inheritance
+
+        """
+        if self.inheritance_context is None or self.inheritance_manager is None:
+            return None
+
+        return self.inheritance_manager.create_initial_context(
+            self.inheritance_context, user_request
+        )
 
     def update_status(self, status: str, error_message: str | None = None) -> None:
         """Update task status in database.
@@ -172,14 +257,39 @@ class TaskContextManager:
 
     def complete(self) -> None:
         """Mark task as completed and move to completed directory."""
+        self._finalize_task("completed")
+
+    def stop(self) -> None:
+        """Mark task as stopped by user and move to completed directory."""
+        self._finalize_task("stopped")
+
+    def _finalize_task(self, status: str) -> None:
+        """Finalize task with given status.
+
+        Args:
+            status: Final status ("completed" or "stopped")
+
+        """
         # Update database
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE tasks SET status = ?, completed_at = ? WHERE uuid = ?",
-                ("completed", datetime.now(timezone.utc).isoformat(), self.uuid),
-            )
-            conn.commit()
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE tasks SET status = ?, completed_at = ? WHERE uuid = ?",
+                    (status, datetime.now(timezone.utc).isoformat(), self.uuid),
+                )
+                conn.commit()
+            
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info("タスクを%sとしてデータベースに記録しました: uuid=%s", status, self.uuid)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error("タスク%sのデータベース更新に失敗しました: %s", status, e, exc_info=True)
+        
+        # タスク完了/停止時に最終要約を作成
+        self._create_final_summary()
         
         # Move directory
         target_dir = self.completed_dir / self.uuid
@@ -195,19 +305,68 @@ class TaskContextManager:
 
         """
         # Update database
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE tasks SET status = ?, error_message = ?, completed_at = ? WHERE uuid = ?",
-                ("failed", error_message, datetime.now(timezone.utc).isoformat(), self.uuid),
-            )
-            conn.commit()
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE tasks SET status = ?, error_message = ?, completed_at = ? WHERE uuid = ?",
+                    ("failed", error_message, datetime.now(timezone.utc).isoformat(), self.uuid),
+                )
+                conn.commit()
+            
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info("タスクを失敗としてデータベースに記録しました: uuid=%s, error=%s", self.uuid, error_message)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error("タスク失敗のデータベース更新に失敗しました: %s", e, exc_info=True)
+        
+        # タスク失敗時にも最終要約を作成
+        self._create_final_summary()
         
         # Move directory
         target_dir = self.completed_dir / self.uuid
         if self.context_dir.exists():
             shutil.move(str(self.context_dir), str(target_dir))
         self.context_dir = target_dir
+
+    def _create_final_summary(self) -> None:
+        """タスク完了/失敗時に最終要約を作成する."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # メッセージ数を確認
+        message_count = self.message_store.count_messages()
+        if message_count == 0:
+            logger.info("メッセージがないため最終要約をスキップします")
+            return
+        
+        try:
+            # LLMクライアントを取得（要約生成に必要）
+            from clients.lm_client import get_llm_client
+            llm_client = get_llm_client(self.config, "planning")
+            
+            # ContextCompressorを初期化
+            from .context_compressor import ContextCompressor
+            compressor = ContextCompressor(
+                self.message_store,
+                self.summary_store,
+                llm_client,
+                self.config,
+            )
+            
+            # 最終要約を作成（全メッセージを対象とした要約）
+            logger.info("タスク完了時の最終要約を作成します: uuid=%s, messages=%d", self.uuid, message_count)
+            summary_id = compressor.create_final_summary()
+            
+            if summary_id < 0:
+                logger.warning("最終要約の作成がスキップされました（メッセージなし）")
+            else:
+                logger.info("最終要約の作成が完了しました: summary_id=%d", summary_id)
+        except Exception as e:
+            # 要約作成失敗は致命的エラーではないため警告ログのみ
+            logger.warning("最終要約の作成に失敗しました: %s", e, exc_info=True)
 
     def _init_database(self) -> None:
         """Initialize SQLite database and create tables if needed."""
@@ -277,56 +436,101 @@ class TaskContextManager:
 
     def _register_or_update_task(self) -> None:
         """Register task in database, or update if resumed."""
-        llm_config = self.config.get("llm", {})
-        provider = llm_config.get("provider", "openai")
-        provider_config = llm_config.get(provider, {})
-        
-        task_dict = self.task_key.to_dict()
-        
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
+        try:
+            llm_config = self.config.get("llm", {})
+            provider = llm_config.get("provider", "openai")
+            provider_config = llm_config.get(provider, {})
             
-            if self.is_resumed:
-                # Update existing task record for resumed task
-                cursor.execute(
-                    """UPDATE tasks SET
-                        status = ?,
-                        started_at = ?,
-                        process_id = ?,
-                        hostname = ?
-                    WHERE uuid = ?""",
-                    (
-                        "running",
-                        datetime.now(timezone.utc).isoformat(),
-                        os.getpid(),
-                        os.uname().nodename,
-                        self.uuid,
-                    ),
-                )
+            task_dict = self.task_key.to_dict()
+            
+            # TaskKeyのto_dict()から、データベース形式に変換
+            # type: "github_issue" -> task_source: "github", task_type: "issue"
+            # type: "gitlab_issue" -> task_source: "gitlab", task_type: "issue"
+            task_type_full = task_dict.get("type", "unknown")
+            if "_" in task_type_full:
+                parts = task_type_full.split("_", 1)
+                task_source = parts[0]
+                task_type = parts[1]
             else:
-                # Insert new task record
-                cursor.execute(
-                    """INSERT INTO tasks (
-                        uuid, task_source, owner, repo, task_type, task_id,
-                        status, created_at, started_at, process_id, hostname,
-                        llm_provider, model, context_length, user
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        self.uuid,
-                        task_dict.get("task_source", "unknown"),
-                        task_dict.get("owner", "unknown"),
-                        task_dict.get("repo", "unknown"),
-                        task_dict.get("task_type", "unknown"),
-                        task_dict.get("task_id", "unknown"),
-                        "running",
-                        datetime.now(timezone.utc).isoformat(),
-                        datetime.now(timezone.utc).isoformat(),
-                        os.getpid(),
-                        os.uname().nodename,
-                        provider,
-                        provider_config.get("model", "unknown"),
-                        provider_config.get("context_length", 128000),
-                        self.user,
-                    ),
+                task_source = task_type_full
+                task_type = task_type_full
+            
+            # owner, repo, task_idの取得
+            # GitHub: owner, repo, number
+            # GitLab: project_id (→ repo), issue_iid/mr_iid (→ task_id)
+            owner = task_dict.get("owner", "")
+            repo = task_dict.get("repo", "")
+            task_id = ""
+            
+            if task_source == "gitlab":
+                # GitLabの場合: project_idをrepoとして使用
+                repo = str(task_dict.get("project_id", ""))
+                # issue_iidまたはmr_iidをtask_idとして使用
+                task_id = str(task_dict.get("issue_iid", "") or task_dict.get("mr_iid", ""))
+            else:
+                # GitHub等の場合: numberをtask_idとして使用
+                task_id = str(task_dict.get("number", ""))
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                if self.is_resumed:
+                    # Update existing task record for resumed task
+                    cursor.execute(
+                        """UPDATE tasks SET
+                            status = ?,
+                            started_at = ?,
+                            process_id = ?,
+                            hostname = ?
+                        WHERE uuid = ?""",
+                        (
+                            "running",
+                            datetime.now(timezone.utc).isoformat(),
+                            os.getpid(),
+                            os.uname().nodename,
+                            self.uuid,
+                        ),
+                    )
+                else:
+                    # Insert new task record
+                    cursor.execute(
+                        """INSERT INTO tasks (
+                            uuid, task_source, owner, repo, task_type, task_id,
+                            status, created_at, started_at, process_id, hostname,
+                            llm_provider, model, context_length, user
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            self.uuid,
+                            task_source,
+                            owner,
+                            repo,
+                            task_type,
+                            task_id,
+                            "running",
+                            datetime.now(timezone.utc).isoformat(),
+                            datetime.now(timezone.utc).isoformat(),
+                            os.getpid(),
+                            os.uname().nodename,
+                            provider,
+                            provider_config.get("model", "unknown"),
+                            provider_config.get("context_length", 128000),
+                            self.user,
+                        ),
+                    )
+                conn.commit()
+                
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(
+                    "タスクをデータベースに登録しました: uuid=%s, source=%s, owner=%s, repo=%s, type=%s, id=%s",
+                    self.uuid,
+                    task_source,
+                    owner,
+                    repo,
+                    task_type,
+                    task_id,
                 )
-            conn.commit()
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error("タスクのデータベース登録に失敗しました: %s", e, exc_info=True)

@@ -72,7 +72,14 @@ class GithubClient:
         return [label["name"] for label in issue.get("labels", [])]
 
     def list_pull_requests_with_label(
-        self, owner: str, repo: str, label: str, state: str = "open",
+        self,
+        owner: str,
+        repo: str,
+        label: str,
+        state: str = "open",
+        *,
+        per_page: int = 100,
+        max_pages: int = 20,
     ) -> list[dict[str, Any]]:
         """指定したラベルが付いているPull Requestの一覧を取得する.
 
@@ -91,12 +98,10 @@ class GithubClient:
         """
         # Pull Request一覧取得のAPIエンドポイント
         url = f"{self.api_url}/repos/{owner}/{repo}/pulls"
-        params = {"state": state, "per_page": 100}
+        params = {"state": state}
 
-        # Pull Request一覧を取得
-        response = requests.get(url, headers=self.headers, params=params, timeout=30)
-        response.raise_for_status()
-        pulls = response.json()
+        # Pull Request一覧をページングしながら取得
+        pulls = self._fetch_paginated_list(url, params, per_page, max_pages)
 
         # 指定されたラベルが付いているPull Requestをフィルタリング
         result = []
@@ -266,11 +271,12 @@ class GithubClient:
 
         # タイムラインコメント(Issueコメント)を取得
         url_issue = f"{self.api_url}/repos/{owner}/{repo}/issues/{pull_number}/comments"
-        resp_issue = requests.get(
-            url_issue, headers=self.headers, params={"per_page": 200}, timeout=30,
+        issue_comments_raw = self._fetch_paginated_list(
+            url_issue,
+            {},
+            per_page=200,
+            max_pages=20,
         )
-        resp_issue.raise_for_status()
-        issue_comments_raw = resp_issue.json()
 
         # 不要なURLフィールドを削除
         issue_comments = [self.remove_url_fields(c) for c in issue_comments_raw]
@@ -309,20 +315,22 @@ class GithubClient:
         """
         # レビュー一覧を取得
         url_reviews = f"{self.api_url}/repos/{owner}/{repo}/pulls/{pull_number}/reviews"
-        resp_reviews = requests.get(
-            url_reviews, headers=self.headers, params={"per_page": 100}, timeout=30,
+        reviews_raw = self._fetch_paginated_list(
+            url_reviews,
+            {},
+            per_page=100,
+            max_pages=20,
         )
-        resp_reviews.raise_for_status()
-        reviews_raw = resp_reviews.json()
         reviews = [self.remove_url_fields(r) for r in reviews_raw]
 
         # レビューコメント一覧を取得
         url_comments = f"{self.api_url}/repos/{owner}/{repo}/pulls/{pull_number}/comments"
-        resp_comments = requests.get(
-            url_comments, headers=self.headers, params={"per_page": 200}, timeout=30,
+        comments_raw = self._fetch_paginated_list(
+            url_comments,
+            {},
+            per_page=200,
+            max_pages=20,
         )
-        resp_comments.raise_for_status()
-        comments_raw = resp_comments.json()
         comments = [self.remove_url_fields(c) for c in comments_raw]
 
         # review_idごとにコメントをまとめる
@@ -425,20 +433,7 @@ class GithubClient:
         """
         # Search API のエンドポイント
         url = f"{self.api_url}/search/issues"
-        params = {"q": query, "per_page": per_page, "page": page}
-
-        # ソート条件とソート順序を設定
-        if sort:
-            params["sort"] = sort
-        if order:
-            params["order"] = order
-
-        # 検索実行
-        response = requests.get(url, headers=self.headers, params=params, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-
-        return data.get("items", [])
+        return self._fetch_search_results(url, query, sort, order, per_page, page)
 
     def search_pull_requests(
         self,
@@ -497,3 +492,85 @@ class GithubClient:
         # 検索実行とIssueのフィルタリング
         items = self.search_issues_and_prs(query, sort, order, per_page, page)
         return [item for item in items if "pull_request" not in item]
+
+    def _fetch_paginated_list(
+        self,
+        url: str,
+        params: dict[str, Any],
+        per_page: int,
+        max_pages: int,
+    ) -> list[dict[str, Any]]:
+        """GitHubの標準REST APIでページングされるリストを全件取得する."""
+        items: list[dict[str, Any]] = []
+        page_number: int = 1
+
+        # Linkヘッダーを使わず、ページ数と件数で終了条件を判定
+        while page_number <= max_pages:
+            page_params = dict(params)
+            page_params["per_page"] = per_page
+            page_params["page"] = page_number
+
+            response = requests.get(url, headers=self.headers, params=page_params, timeout=30)
+            response.raise_for_status()
+            page_items = response.json()
+
+            if not isinstance(page_items, list) or not page_items:
+                break
+
+            items.extend(page_items)
+
+            if len(page_items) < per_page:
+                break
+
+            page_number += 1
+
+        return items
+
+    def _fetch_search_results(
+        self,
+        url: str,
+        query: str,
+        sort: str | None,
+        order: str | None,
+        per_page: int,
+        page: int,
+        *,
+        max_pages: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Search APIで複数ページに跨る結果を収集する."""
+        aggregated: list[dict[str, Any]] = []
+        current_page: int = page
+        pages_fetched: int = 0
+
+        # Search API固有のtotal_countなどを利用してループを制御
+        while pages_fetched < max_pages:
+            params = {"q": query, "per_page": per_page, "page": current_page}
+            if sort:
+                params["sort"] = sort
+            if order:
+                params["order"] = order
+
+            response = requests.get(url, headers=self.headers, params=params, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+
+            page_items = data.get("items", [])
+            if not page_items:
+                break
+
+            aggregated.extend(page_items)
+
+            total_count = data.get("total_count")
+            if isinstance(total_count, int) and total_count <= len(aggregated):
+                break
+
+            if data.get("incomplete_results") is True:
+                break
+
+            if not isinstance(total_count, int) and len(page_items) < per_page:
+                break
+
+            current_page += 1
+            pages_fetched += 1
+
+        return aggregated

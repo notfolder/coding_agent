@@ -300,7 +300,10 @@ class TaskHandler:
                 # Check for assignee removal (task stop)
                 if stop_manager.should_check_now() and not stop_manager.check_assignee_status(task):
                     self.logger.info("アサイン解除を検出、タスクを停止します")
-                    stop_manager.stop_task(task, task.uuid, llm_call_count=count)
+                    # 最終要約を作成してコンテキストをcompletedに移動
+                    context_manager.stop()
+                    # コメントとラベル更新
+                    stop_manager.post_stop_notification(task, llm_call_count=count)
                     return  # Exit without calling finish()
                 
                 # Check for new comments and add to context
