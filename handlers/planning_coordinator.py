@@ -65,9 +65,13 @@ class PlanningCoordinator:
         self.history_store = context_manager.get_planning_store()
         message_store = context_manager.get_message_store()
 
-        # Set issue_id for cross-task history tracking
-        if hasattr(task, "number"):
-            self.history_store.issue_id = str(task.number)
+        # Set issue_id for cross-task history tracking from TaskKey
+        task_key = task.get_task_key()
+        task_dict = task_key.to_dict()
+        # GitHub: number, GitLab: issue_iid or mr_iid
+        issue_id = task_dict.get("number") or task_dict.get("issue_iid") or task_dict.get("mr_iid")
+        if issue_id:
+            self.history_store.issue_id = str(issue_id)
 
         # Track checklist comment ID for updates
         self.checklist_comment_id: int | str | None = None
@@ -131,6 +135,7 @@ class PlanningCoordinator:
         # LLM呼び出しコメント機能の有効/無効
         llm_call_comments_config = config.get("llm_call_comments", {})
         self.llm_call_comments_enabled = llm_call_comments_config.get("enabled", True)
+        self.logger.info("LLM呼び出しコメント機能: %s", "有効" if self.llm_call_comments_enabled else "無効")
 
         # フェーズ別のデフォルトメッセージ
         self.phase_default_messages: dict[str, str] = {
@@ -675,8 +680,11 @@ class PlanningCoordinator:
             Planning result dictionary or None if planning failed
         """
         try:
-            # Get past executions for context
-            issue_id = getattr(self.task, 'number', None)
+            # Get past executions for context from TaskKey
+            task_key = self.task.get_task_key()
+            task_dict = task_key.to_dict()
+            # GitHub: number, GitLab: issue_iid or mr_iid
+            issue_id = task_dict.get("number") or task_dict.get("issue_iid") or task_dict.get("mr_iid")
             past_history = []
             if issue_id:
                 past_history = self.history_store.get_past_executions_for_issue(str(issue_id))
@@ -2713,10 +2721,12 @@ Maintain the same JSON format as before for action_plan.actions."""
         # Get current planning state with total actions
         planning_state = self.get_planning_state()
         
-        # Stop the task with planning state
-        self.stop_manager.stop_task(
+        # 最終要約を作成してコンテキストをcompletedに移動
+        self.context_manager.stop()
+        
+        # コメントとラベル更新
+        self.stop_manager.post_stop_notification(
             self.task,
-            self.task.uuid,
             planning_state=planning_state,
         )
 
