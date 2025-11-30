@@ -7,6 +7,53 @@ You can execute commands in an isolated Docker execution environment with projec
 **Execution Environment Information:**
 - Working directory: `/workspace/project/` (where project files are cloned)
 - Dependencies: Automatically installed
+- Environment: Selected during planning phase based on project requirements
+
+### Available Environments
+
+The following execution environments are available:
+
+| Environment | Base Image | Recommended For |
+|-------------|-----------|-----------------|
+| python | python:3.11-slim-bookworm | Pure Python projects, Django/Flask |
+| miniforge | condaforge/miniforge3:latest | Data science, conda environments |
+| node | node:20-slim | JavaScript/TypeScript, React/Vue/Angular |
+| java | eclipse-temurin:21-jdk-jammy | Java/Kotlin, Spring Boot |
+| go | golang:1.22-bookworm | Go projects, CLI tools |
+
+All environments include: git, curl, wget, jq, tree
+
+### Library Installation Guide
+
+Before executing project code, you may need to install required libraries:
+
+**Python Environment:**
+- `pip install <package>` - Install a specific package
+- `pip install -r requirements.txt` - Install from requirements file
+- `pip install -e .` - Install project in editable mode
+
+**Miniforge (Conda) Environment:**
+- `mamba install <package>` - Install via mamba (faster than conda)
+- `mamba env update -f environment.yml` - Update environment from file
+- `mamba env update -f condaenv.yaml` - Update environment from condaenv.yaml
+- `conda activate <env_name>` - Activate a specific environment
+
+**Node.js Environment:**
+- `npm install` - Install dependencies from package.json
+- `npm install <package>` - Install a specific package
+- `yarn install` - Install using yarn
+- `pnpm install` - Install using pnpm
+
+**Java Environment:**
+- `mvn dependency:resolve` - Download Maven dependencies
+- `mvn install -DskipTests` - Install project without running tests
+- `gradle dependencies` - Download Gradle dependencies
+- `gradle build -x test` - Build without running tests
+
+**Go Environment:**
+- `go mod download` - Download module dependencies
+- `go get <package>` - Install a specific package
+- `go mod tidy` - Clean up go.mod and go.sum
 
 ### Available Commands
 
@@ -41,12 +88,14 @@ The following commands are available for execution:
 ### Usage Notes
 
 - Project source code is cloned to `/workspace/project/` in the execution environment
-- Dependencies are automatically installed
+- Dependencies are automatically installed when dependency files are detected
 - Check command execution results (stdout/stderr) and determine the next action
 - Long-running commands may timeout
+- Use the appropriate package manager for the selected environment
 
 ### Recommended Usage
 
 1. **Before code changes**: Search the codebase with `grep` to understand the impact scope of changes
 2. **After code changes**: Run tests to verify the correctness of changes
 3. **Before creating pull request**: Run linters to verify code quality
+4. **If dependencies are missing**: Install them using the appropriate package manager for the environment

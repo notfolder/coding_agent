@@ -2,6 +2,7 @@
 
 Command Executor MCP Server連携のためのDocker実行環境を管理するクラスを提供します。
 タスク毎のコンテナ作成・削除、プロジェクトクローン、コマンド実行を担当します。
+また、計画フェーズで選択された言語環境に応じた適切なイメージを使用してコンテナを起動します。
 """
 from __future__ import annotations
 
@@ -18,6 +19,19 @@ if TYPE_CHECKING:
     from handlers.task import Task
 
 
+# デフォルトの利用可能環境定義
+DEFAULT_ENVIRONMENTS: dict[str, str] = {
+    "python": "coding-agent-executor-python:latest",
+    "miniforge": "coding-agent-executor-miniforge:latest",
+    "node": "coding-agent-executor-node:latest",
+    "java": "coding-agent-executor-java:latest",
+    "go": "coding-agent-executor-go:latest",
+}
+
+# デフォルト環境名
+DEFAULT_ENVIRONMENT_NAME = "python"
+
+
 @dataclass
 class ContainerInfo:
     """コンテナ情報を保持するデータクラス.
@@ -25,6 +39,7 @@ class ContainerInfo:
     Attributes:
         container_id: DockerコンテナID
         task_uuid: 関連するタスクのUUID
+        environment_name: 使用された環境名（python, node等）
         workspace_path: コンテナ内の作業ディレクトリパス
         created_at: コンテナ作成日時
         status: コンテナの状態
@@ -33,6 +48,7 @@ class ContainerInfo:
 
     container_id: str
     task_uuid: str
+    environment_name: str = DEFAULT_ENVIRONMENT_NAME
     workspace_path: str = "/workspace/project"
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     status: str = "created"
@@ -61,6 +77,7 @@ class ExecutionEnvironmentManager:
     
     Docker APIを使用してコンテナの作成・削除、プロジェクトのクローン、
     コマンドの実行を行います。
+    計画フェーズで選択された言語環境に応じた適切なイメージを使用します。
     """
 
     # コンテナ名のプレフィックス
@@ -78,6 +95,16 @@ class ExecutionEnvironmentManager:
 
         # Command Executor設定を取得
         self._executor_config = config.get("command_executor", {})
+
+        # 利用可能な環境の設定（環境名からイメージ名へのマッピング）
+        self._environments: dict[str, str] = self._executor_config.get(
+            "environments", DEFAULT_ENVIRONMENTS.copy(),
+        )
+
+        # デフォルト環境名
+        self._default_environment = self._executor_config.get(
+            "default_environment", DEFAULT_ENVIRONMENT_NAME,
+        )
 
         # Docker設定
         self._docker_config = self._executor_config.get("docker", {})
@@ -118,9 +145,27 @@ class ExecutionEnvironmentManager:
 
         # アクティブコンテナの追跡
         self._active_containers: dict[str, ContainerInfo] = {}
-        
+
         # 現在のタスク参照（コマンド実行時に使用）
         self._current_task: Task | None = None
+
+    def get_available_environments(self) -> dict[str, str]:
+        """利用可能な環境のリストを取得する.
+        
+        Returns:
+            環境名からイメージ名へのマッピング辞書
+
+        """
+        return self._environments.copy()
+
+    def get_default_environment(self) -> str:
+        """デフォルト環境名を取得する.
+        
+        Returns:
+            デフォルト環境名
+
+        """
+        return self._default_environment
 
     def set_current_task(self, task: Task) -> None:
         """現在のタスクを設定する.
@@ -230,7 +275,7 @@ class ExecutionEnvironmentManager:
 
             # APIURLからベースURLを抽出（/api/v4を除去）
             base_url = gitlab_url.replace("/api/v4", "").replace("/api/v3", "")
-            
+
             # プロトコル（http/https）を保持
             if base_url.startswith("https://"):
                 protocol = "https://"
@@ -273,11 +318,15 @@ class ExecutionEnvironmentManager:
         )
         raise ValueError(error_msg)
 
-    def prepare(self, task: Task) -> ContainerInfo:
+    def prepare(self, task: Task, environment_name: str | None = None) -> ContainerInfo:
         """タスク用のコンテナを作成し、プロジェクトをクローンする.
+
+        計画フェーズで選択された環境名に基づいて、対応するDockerイメージでコンテナを作成します。
+        環境名が指定されない場合や無効な場合は、デフォルト環境を使用します。
 
         Args:
             task: タスクオブジェクト
+            environment_name: 使用する環境名（python, node等）。Noneの場合はデフォルト環境を使用
             
         Returns:
             作成されたコンテナの情報
@@ -289,7 +338,14 @@ class ExecutionEnvironmentManager:
         task_uuid = task.uuid
         container_name = self._get_container_name(task_uuid)
 
-        self.logger.info("実行環境を準備します: %s", container_name)
+        # 環境名の検証とイメージ選択
+        selected_env = self._validate_and_select_environment(environment_name)
+
+        self.logger.info(
+            "実行環境を準備します: %s (環境: %s)", 
+            container_name, 
+            selected_env,
+        )
 
         # 既存コンテナがあれば削除
         try:
@@ -297,23 +353,26 @@ class ExecutionEnvironmentManager:
         except (RuntimeError, subprocess.SubprocessError) as e:
             self.logger.warning("既存コンテナの削除に失敗: %s", e)
 
-        # コンテナを作成
-        container_id = self._create_container(task)
+        # コンテナを作成（選択された環境のイメージを使用）
+        container_id, is_custom_image = self._create_container(task, selected_env)
 
-        # コンテナ情報を作成
+        # コンテナ情報を作成（environment_name属性を含める）
         container_info = ContainerInfo(
             container_id=container_id,
             task_uuid=task_uuid,
+            environment_name=selected_env,
             status="created",
         )
 
-        # gitをインストール
-        try:
-            self._install_git(container_id)
-        except RuntimeError:
-            # コンテナを削除してエラーを再送出
-            self._remove_container(task_uuid)
-            raise
+        # プレビルドイメージ（coding-agent-executor-*）にはgitが含まれているためスキップ
+        # base_imageへフォールバックした場合のみgitをインストール
+        if not is_custom_image:
+            try:
+                self._install_git(container_id)
+            except RuntimeError:
+                # コンテナを削除してエラーを再送出
+                self._remove_container(task_uuid)
+                raise
 
         # プロジェクトをクローン
         try:
@@ -334,24 +393,70 @@ class ExecutionEnvironmentManager:
         # アクティブコンテナに登録
         self._active_containers[task_uuid] = container_info
 
-        self.logger.info("実行環境の準備が完了しました: %s", container_id)
+        self.logger.info(
+            "実行環境の準備が完了しました: %s (環境: %s)",
+            container_id,
+            selected_env,
+        )
         return container_info
 
-    def _create_container(self, task: Task) -> str:
+    def _validate_and_select_environment(self, environment_name: str | None) -> str:
+        """環境名を検証し、使用する環境を選択する.
+
+        Args:
+            environment_name: 指定された環境名、またはNone
+
+        Returns:
+            使用する環境名
+
+        """
+        if environment_name is None:
+            self.logger.info(
+                "環境名が指定されていません。デフォルト環境を使用します: %s",
+                self._default_environment,
+            )
+            return self._default_environment
+
+        if environment_name not in self._environments:
+            self.logger.warning(
+                "無効な環境名が指定されました: %s。デフォルト環境を使用します: %s",
+                environment_name,
+                self._default_environment,
+            )
+            return self._default_environment
+
+        return environment_name
+
+    def _create_container(
+        self, task: Task, environment_name: str | None = None,
+    ) -> tuple[str, bool]:
         """Dockerコンテナを作成する.
-        
+
         Args:
             task: タスクオブジェクト
-            
+            environment_name: 使用する環境名。指定された場合は対応するイメージを使用
+
         Returns:
-            コンテナID
-            
+            (コンテナID, カスタムイメージ使用フラグ) のタプル
+            カスタムイメージ使用フラグは、environments設定のイメージを使用した場合True
+
         Raises:
             RuntimeError: コンテナ作成に失敗した場合
 
         """
         task_uuid = task.uuid
         container_name = self._get_container_name(task_uuid)
+
+        # 環境名に基づいてイメージを選択
+        is_custom_image = False
+        if environment_name and environment_name in self._environments:
+            image = self._environments[environment_name]
+            is_custom_image = True
+            self.logger.info("環境 '%s' のイメージを使用: %s", environment_name, image)
+        else:
+            # フォールバック: base_imageを使用
+            image = self._base_image
+            self.logger.info("デフォルトイメージを使用: %s", image)
 
         # コンテナ作成コマンドを構築
         create_args = [
@@ -362,9 +467,7 @@ class ExecutionEnvironmentManager:
             "--workdir", "/workspace",
             # 非特権モードで実行
             "--security-opt", "no-new-privileges",
-            # コンテナを継続実行（sleepコマンド）
-            self._base_image,
-            "sleep", "infinity",
+            image,
         ]
 
         try:
@@ -387,7 +490,7 @@ class ExecutionEnvironmentManager:
             self._run_docker_command(["rm", "-f", container_id], check=False)
             raise RuntimeError(error_msg) from e
 
-        return container_id
+        return container_id, is_custom_image
 
     def _install_git(self, container_id: str) -> None:
         """コンテナ内にgitをインストールする.
@@ -800,18 +903,18 @@ class ExecutionEnvironmentManager:
         """
         if self._current_task is None:
             raise RuntimeError("Current task not set. Call set_current_task() first.")
-        
+
         task_uuid = self._current_task.uuid
         container_info = self._active_containers.get(task_uuid)
-        
+
         if container_info is None or container_info.status != "ready":
             raise RuntimeError(f"Execution environment not ready for task {task_uuid}")
-        
+
         container_id = container_info.container_id
         work_dir = working_directory or container_info.workspace_path
-        
+
         self.logger.info("コマンドを実行します: %s (作業ディレクトリ: %s)", command, work_dir)
-        
+
         # コマンド実行
         exec_args = [
             "exec",
@@ -819,9 +922,9 @@ class ExecutionEnvironmentManager:
             container_id,
             "sh", "-c", command,
         ]
-        
+
         start_time = time.time()
-        
+
         try:
             result = self._run_docker_command(
                 exec_args,
@@ -829,23 +932,23 @@ class ExecutionEnvironmentManager:
                 check=False,
             )
             duration_ms = int((time.time() - start_time) * 1000)
-            
+
             # 出力サイズを制限
             stdout = result.stdout
             stderr = result.stderr
-            
+
             if len(stdout) > self._max_output_size:
                 stdout = stdout[:self._max_output_size] + "\n...(truncated)"
             if len(stderr) > self._max_output_size:
                 stderr = stderr[:self._max_output_size] + "\n...(truncated)"
-            
+
             return {
                 "exit_code": result.returncode,
                 "stdout": stdout,
                 "stderr": stderr,
                 "duration_ms": duration_ms,
             }
-            
+
         except subprocess.TimeoutExpired:
             duration_ms = int((time.time() - start_time) * 1000)
             return {
@@ -872,7 +975,7 @@ class ExecutionEnvironmentManager:
         """
         if not self.is_enabled():
             return []
-        
+
         return [
             {
                 "name": "command-executor_execute_command",
@@ -891,7 +994,7 @@ class ExecutionEnvironmentManager:
                     },
                     "required": ["command"],
                 },
-            }
+            },
         ]
 
     def get_function_calling_tools(self) -> list[dict[str, Any]]:
@@ -903,7 +1006,7 @@ class ExecutionEnvironmentManager:
         """
         if not self.is_enabled():
             return []
-        
+
         functions = self.get_function_calling_functions()
         return [
             {

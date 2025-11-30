@@ -199,7 +199,7 @@ class TestExecutionEnvironmentManager(unittest.TestCase):
         )
         
         result = self.manager._run_docker_command(["ps"])
-        
+
         mock_run.assert_called_once()
         assert result.returncode == 0
         assert result.stdout == "container list"
@@ -222,14 +222,15 @@ class TestExecutionEnvironmentManager(unittest.TestCase):
                 stderr="",
             ),
         ]
-        
+
         # タスクのモックを作成
         mock_task = MagicMock()
         mock_task.uuid = "test-uuid-123"
-        
-        container_id = self.manager._create_container(mock_task)
-        
+
+        container_id, is_custom = self.manager._create_container(mock_task)
+
         assert container_id == "container-id-123"
+        assert is_custom is False  # 環境名指定なしなのでFalse
         assert mock_run.call_count == 2
 
     @patch("subprocess.run")
@@ -428,6 +429,161 @@ class TestGetCloneUrl(unittest.TestCase):
         
         assert "gitlab.example.com" in url
         assert "group/project.git" in url
+
+
+class TestMultiLanguageEnvironment(unittest.TestCase):
+    """複数言語環境対応機能のテスト."""
+
+    def setUp(self) -> None:
+        """テスト環境のセットアップ."""
+        self.config: dict[str, Any] = {
+            "command_executor": {
+                "enabled": True,
+                "environments": {
+                    "python": "coding-agent-executor-python:latest",
+                    "miniforge": "coding-agent-executor-miniforge:latest",
+                    "node": "coding-agent-executor-node:latest",
+                    "java": "coding-agent-executor-java:latest",
+                    "go": "coding-agent-executor-go:latest",
+                },
+                "default_environment": "python",
+                "docker": {
+                    "base_image": "ubuntu:25.04",
+                    "resources": {
+                        "cpu_limit": 2,
+                        "memory_limit": "4g",
+                    },
+                },
+            },
+        }
+        self.manager = ExecutionEnvironmentManager(self.config)
+
+    def test_get_available_environments(self) -> None:
+        """利用可能な環境リスト取得テスト."""
+        environments = self.manager.get_available_environments()
+        
+        # すべての環境が含まれていることを確認
+        assert "python" in environments
+        assert "miniforge" in environments
+        assert "node" in environments
+        assert "java" in environments
+        assert "go" in environments
+        
+        # イメージ名が正しいことを確認
+        assert environments["python"] == "coding-agent-executor-python:latest"
+        assert environments["node"] == "coding-agent-executor-node:latest"
+
+    def test_get_default_environment(self) -> None:
+        """デフォルト環境名取得テスト."""
+        default_env = self.manager.get_default_environment()
+        assert default_env == "python"
+
+    def test_validate_and_select_environment_valid(self) -> None:
+        """有効な環境名の検証テスト."""
+        # 有効な環境名
+        assert self.manager._validate_and_select_environment("python") == "python"
+        assert self.manager._validate_and_select_environment("node") == "node"
+        assert self.manager._validate_and_select_environment("java") == "java"
+        assert self.manager._validate_and_select_environment("go") == "go"
+        assert self.manager._validate_and_select_environment("miniforge") == "miniforge"
+
+    def test_validate_and_select_environment_invalid(self) -> None:
+        """無効な環境名の検証テスト（デフォルトにフォールバック）."""
+        # 無効な環境名はデフォルト環境にフォールバック
+        assert self.manager._validate_and_select_environment("invalid") == "python"
+        assert self.manager._validate_and_select_environment("ruby") == "python"
+
+    def test_validate_and_select_environment_none(self) -> None:
+        """環境名がNoneの場合の検証テスト."""
+        # Noneの場合はデフォルト環境
+        assert self.manager._validate_and_select_environment(None) == "python"
+
+    @patch("subprocess.run")
+    def test_create_container_with_environment(self, mock_run: MagicMock) -> None:
+        """環境指定でのコンテナ作成テスト."""
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(
+                args=["docker", "create"],
+                returncode=0,
+                stdout="container-id-123",
+                stderr="",
+            ),
+            subprocess.CompletedProcess(
+                args=["docker", "start"],
+                returncode=0,
+                stdout="",
+                stderr="",
+            ),
+        ]
+
+        mock_task = MagicMock()
+        mock_task.uuid = "test-uuid-123"
+
+        container_id, is_custom = self.manager._create_container(mock_task, "node")
+
+        assert container_id == "container-id-123"
+        assert is_custom is True  # 有効な環境名指定なのでTrue
+
+        # docker create コマンドにnode用イメージが含まれることを確認
+        create_call = mock_run.call_args_list[0]
+        cmd = create_call[0][0]
+        assert "coding-agent-executor-node:latest" in cmd
+
+    @patch("subprocess.run")
+    def test_create_container_fallback_to_base_image(self, mock_run: MagicMock) -> None:
+        """無効な環境名でのbase_imageフォールバックテスト."""
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(
+                args=["docker", "create"],
+                returncode=0,
+                stdout="container-id-456",
+                stderr="",
+            ),
+            subprocess.CompletedProcess(
+                args=["docker", "start"],
+                returncode=0,
+                stdout="",
+                stderr="",
+            ),
+        ]
+
+        mock_task = MagicMock()
+        mock_task.uuid = "test-uuid-456"
+
+        # 無効な環境名を渡す
+        container_id, is_custom = self.manager._create_container(mock_task, "invalid_env")
+
+        assert container_id == "container-id-456"
+        assert is_custom is False  # 無効な環境名なのでFalse
+
+        # docker create コマンドにbase_imageが含まれることを確認
+        create_call = mock_run.call_args_list[0]
+        cmd = create_call[0][0]
+        assert "ubuntu:25.04" in cmd
+
+    def test_container_info_with_environment_name(self) -> None:
+        """環境名を含むContainerInfoの作成テスト."""
+        info = ContainerInfo(
+            container_id="test-container-id",
+            task_uuid="test-uuid",
+            environment_name="node",
+        )
+
+        assert info.environment_name == "node"
+        assert info.container_id == "test-container-id"
+        assert info.task_uuid == "test-uuid"
+
+    def test_default_environments_constant(self) -> None:
+        """デフォルト環境定数のテスト."""
+        from handlers.execution_environment_manager import DEFAULT_ENVIRONMENTS
+
+        # すべての環境が定義されていることを確認
+        assert len(DEFAULT_ENVIRONMENTS) == 5
+        assert "python" in DEFAULT_ENVIRONMENTS
+        assert "miniforge" in DEFAULT_ENVIRONMENTS
+        assert "node" in DEFAULT_ENVIRONMENTS
+        assert "java" in DEFAULT_ENVIRONMENTS
+        assert "go" in DEFAULT_ENVIRONMENTS
 
 
 if __name__ == "__main__":

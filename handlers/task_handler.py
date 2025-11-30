@@ -98,18 +98,22 @@ class TaskHandler:
         """
         # タスク固有の設定を取得
         task_config = self._get_task_config(task)
-        
-        # 実行環境の初期化
-        execution_manager = self._init_execution_environment(task, task_config)
-        
+
+        # 計画機能の有効可否を先に判定する
+        planning_config = task_config.get("planning", {})
+        planning_enabled = planning_config.get("enabled", True)
+
+        # 実行環境の初期化（計画利用時はコンテナ起動を後回し）
+        execution_manager = self._init_execution_environment(
+            task,
+            task_config,
+            prepare=not planning_enabled,
+        )
+
         try:
-            # Check if planning is enabled
-            planning_config = task_config.get("planning", {})
-            planning_enabled = planning_config.get("enabled", True)
-            
             if planning_enabled and task.uuid:
                 # Use planning-based task handling
-                self._handle_with_planning(task, task_config)
+                self._handle_with_planning(task, task_config, execution_manager)
             else:
                 # Check if context storage is enabled
                 context_storage_enabled = task_config.get("context_storage", {}).get("enabled", False)
@@ -128,6 +132,8 @@ class TaskHandler:
         self,
         task: Task,
         task_config: dict[str, Any],
+        *,
+        prepare: bool = True,
     ) -> Any | None:
         """実行環境を初期化する.
 
@@ -136,6 +142,7 @@ class TaskHandler:
         Args:
             task: タスクオブジェクト
             task_config: タスク固有の設定
+            prepare: 直ちにコンテナを起動するかどうか
 
         Returns:
             ExecutionEnvironmentManagerインスタンス（無効な場合はNone）
@@ -160,6 +167,14 @@ class TaskHandler:
                 )
                 return None
             
+            if not prepare:
+                # 計画フェーズ完了後にコンテナを起動する
+                self.logger.info(
+                    "Command Executor実行環境の準備を遅延します: %s",
+                    task.uuid,
+                )
+                return manager
+
             # 実行環境を準備
             self.logger.info("Command Executor実行環境を準備します: %s", task.uuid)
             container_info = manager.prepare(task)
@@ -335,12 +350,18 @@ class TaskHandler:
             context_manager.fail(str(e))
             raise
 
-    def _handle_with_planning(self, task: Task, task_config: dict[str, Any]) -> None:
+    def _handle_with_planning(
+        self,
+        task: Task,
+        task_config: dict[str, Any],
+        execution_manager: Any | None,
+    ) -> None:
         """Handle task with planning-based approach.
 
         Args:
             task: Task object
             task_config: Task configuration
+            execution_manager: Execution environment manager instance
 
         """
         from comment_detection_manager import CommentDetectionManager
@@ -378,9 +399,6 @@ class TaskHandler:
             user=task.user,
             is_resumed=is_resumed,
         )
-        
-        # Initialize execution environment if enabled
-        execution_manager = self._init_execution_environment(task, task_config)
         
         try:
             # Get planning configuration
@@ -452,9 +470,6 @@ class TaskHandler:
             context_manager.fail(str(e))
             self.logger.exception("Planning-based task processing failed")
             raise
-        finally:
-            # Cleanup execution environment
-            self._cleanup_execution_environment(execution_manager, task)
 
     def _handle_legacy(self, task: Task, task_config: dict[str, Any]) -> None:
         """Handle task using legacy in-memory approach.
