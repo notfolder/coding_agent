@@ -1423,6 +1423,11 @@ class TaskHandler:
             変換結果（ConversionResult）、変換に失敗した場合は None
 
         """
+        import tempfile
+        from pathlib import Path
+
+        from clients.lm_client import get_llm_client
+        from context_storage.message_store import MessageStore
         from handlers.issue_to_mr_converter import IssueToMRConverter
 
         try:
@@ -1438,17 +1443,34 @@ class TaskHandler:
                 )
                 return None
 
-            # IssueToMRConverter のインスタンス化
-            converter = IssueToMRConverter(
-                task=task,
-                llm_client=self.llm_client,
-                mcp_client=mcp_client,
-                config=task_config,
-                platform=platform,
-            )
+            # Issue→MR変換用の一時LLMクライアントを作成
+            # LLMクライアントにはmessage_storeが必要なため、一時ディレクトリを使用
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_context_dir = Path(temp_dir)
 
-            # 変換の実行
-            result = converter.convert()
+                # メッセージストアを初期化
+                temp_message_store = MessageStore(temp_context_dir, task_config)
+
+                # 変換用のLLMクライアントを作成
+                conversion_llm_client = get_llm_client(
+                    task_config,
+                    functions=None,  # Issue→MR変換にfunctionsは不要
+                    tools=None,
+                    message_store=temp_message_store,
+                    context_dir=temp_context_dir,
+                )
+
+                # IssueToMRConverter のインスタンス化
+                converter = IssueToMRConverter(
+                    task=task,
+                    llm_client=conversion_llm_client,
+                    mcp_client=mcp_client,
+                    config=task_config,
+                    platform=platform,
+                )
+
+                # 変換の実行
+                result = converter.convert()
 
             if result.success:
                 self.logger.info(
