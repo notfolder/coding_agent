@@ -58,7 +58,7 @@ SQLAlchemy ORMを使用してtasksテーブルを定義する。
 | task_type | String(50) | VARCHAR(50) | NOT NULL | タスクタイプ（issue/pull_request/merge_request） |
 | owner | String(255) | VARCHAR(255) | NULL可 | GitHubリポジトリオーナー |
 | repo | String(255) | VARCHAR(255) | NULL可 | GitHubリポジトリ名 |
-| project_id | String(255) | VARCHAR(255) | NULL可 | GitLabプロジェクトID |
+| project_id | Integer | INTEGER | NULL可 | GitLabプロジェクトID |
 | number | Integer | INTEGER | NOT NULL | タスク番号 |
 | status | String(20) | VARCHAR(20) | NOT NULL | ステータス |
 | created_at | DateTime | TIMESTAMP WITH TIME ZONE | NOT NULL | 作成日時 |
@@ -111,7 +111,8 @@ SQLAlchemy ORMを使用してtasksテーブルを定義する。
 
 | メソッド名 | 引数 | 戻り値 | 説明 |
 |-----------|------|--------|------|
-| create_task | task_data: dict | DBTask | 新規タスクを作成する |
+| create_task | task_data: dict | DBTask | 新規タスクを作成し、DBにINSERTする |
+| create_task_from_task | task: Task | DBTask | Taskオブジェクトから新規タスクを作成し、DBにINSERTする |
 | get_task | uuid: str | DBTask または None | UUIDでタスクを取得する |
 | get_task_by_key | task_key: TaskKey | DBTask または None | TaskKeyでタスクを取得する |
 | save_task | db_task: DBTask | DBTask | DBTaskオブジェクトを保存（更新）する |
@@ -211,23 +212,9 @@ PostgreSQLコンテナを追加する。
 
 ---
 
-## 5. テスト設計
+## 5. 影響範囲
 
-### 5.1 ユニットテスト
-以下のテストを追加する：
-
-| テストファイル | 対象 | 内容 |
-|--------------|------|------|
-| test_task_db.py | db/task_db.py | TaskDBManagerクラスのテスト |
-
-### 5.2 テスト用データベース
-テスト実行時はテスト用PostgreSQLコンテナを使用する。
-
----
-
-## 6. 影響範囲
-
-### 6.1 修正対象ファイル
+### 5.1 修正対象ファイル
 | ファイル | 修正内容 |
 |---------|---------|
 | context_storage/task_context_manager.py | DB操作をTaskDBManagerクラス経由に変更 |
@@ -236,7 +223,7 @@ PostgreSQLコンテナを追加する。
 | pyproject.toml | 依存パッケージを追加 |
 | condaenv.yaml | 依存パッケージを追加 |
 
-### 6.2 新規作成ファイル
+### 5.2 新規作成ファイル
 | ファイル | 内容 |
 |---------|------|
 | db/task_db.py | DBTaskモデル + TaskDBManagerクラス |
@@ -244,7 +231,7 @@ PostgreSQLコンテナを追加する。
 
 ---
 
-## 7. 用語集
+## 6. 用語集
 
 | 用語 | 説明 |
 |------|------|
