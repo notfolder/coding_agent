@@ -116,6 +116,236 @@ class GithubClient:
 
         return result
 
+    def list_branches(
+        self, owner: str, repo: str, per_page: int = 100, max_pages: int = 20,
+    ) -> list[dict[str, Any]]:
+        """リポジトリのブランチ一覧を取得する.
+
+        Args:
+            owner: リポジトリのオーナー名
+            repo: リポジトリ名
+            per_page: 1ページあたりの件数
+            max_pages: 最大ページ数
+
+        Returns:
+            ブランチ情報のリスト
+
+        """
+        url = f"{self.api_url}/repos/{owner}/{repo}/branches"
+        return self._fetch_paginated_list(url, {}, per_page, max_pages)
+
+    def create_branch(
+        self, owner: str, repo: str, branch: str, sha: str | None = None,
+    ) -> dict[str, Any]:
+        """新しいブランチを作成する.
+
+        Args:
+            owner: リポジトリのオーナー名
+            repo: リポジトリ名
+            branch: ブランチ名
+            sha: ブランチの基点となるコミットSHA（Noneの場合はデフォルトブランチのHEAD）
+
+        Returns:
+            作成されたリファレンス情報
+
+        """
+        # デフォルトブランチのSHAを取得
+        if sha is None:
+            repo_info_url = f"{self.api_url}/repos/{owner}/{repo}"
+            repo_response = requests.get(repo_info_url, headers=self.headers, timeout=30)
+            repo_response.raise_for_status()
+            default_branch = repo_response.json()["default_branch"]
+
+            branch_url = f"{self.api_url}/repos/{owner}/{repo}/git/ref/heads/{default_branch}"
+            branch_response = requests.get(branch_url, headers=self.headers, timeout=30)
+            branch_response.raise_for_status()
+            sha = branch_response.json()["object"]["sha"]
+
+        # ブランチを作成
+        url = f"{self.api_url}/repos/{owner}/{repo}/git/refs"
+        data = {"ref": f"refs/heads/{branch}", "sha": sha}
+        response = requests.post(url, headers=self.headers, json=data, timeout=30)
+        response.raise_for_status()
+        return response.json()
+
+    def create_or_update_file(
+        self,
+        owner: str,
+        repo: str,
+        path: str,
+        message: str,
+        content: str,
+        branch: str,
+        sha: str | None = None,
+    ) -> dict[str, Any]:
+        """ファイルを作成または更新する.
+
+        Args:
+            owner: リポジトリのオーナー名
+            repo: リポジトリ名
+            path: ファイルパス
+            message: コミットメッセージ
+            content: ファイル内容
+            branch: ブランチ名
+            sha: 更新時の既存ファイルのSHA（新規作成時はNone）
+
+        Returns:
+            作成/更新されたファイル情報
+
+        """
+        import base64
+
+        url = f"{self.api_url}/repos/{owner}/{repo}/contents/{path}"
+        encoded_content = base64.b64encode(content.encode()).decode()
+        data: dict[str, Any] = {
+            "message": message,
+            "content": encoded_content,
+            "branch": branch,
+        }
+        if sha:
+            data["sha"] = sha
+
+        response = requests.put(url, headers=self.headers, json=data, timeout=30)
+        response.raise_for_status()
+        return response.json()
+
+    def create_pull_request(
+        self,
+        owner: str,
+        repo: str,
+        title: str,
+        body: str,
+        head: str,
+        base: str,
+        draft: bool = False,
+    ) -> dict[str, Any]:
+        """Pull Requestを作成する.
+
+        Args:
+            owner: リポジトリのオーナー名
+            repo: リポジトリ名
+            title: PR タイトル
+            body: PR 本文
+            head: ソースブランチ名
+            base: ターゲットブランチ名
+            draft: ドラフトPRとして作成するか
+
+        Returns:
+            作成されたPull Request情報
+
+        """
+        url = f"{self.api_url}/repos/{owner}/{repo}/pulls"
+        data: dict[str, Any] = {
+            "title": title,
+            "body": body,
+            "head": head,
+            "base": base,
+            "draft": draft,
+        }
+        response = requests.post(url, headers=self.headers, json=data, timeout=30)
+        response.raise_for_status()
+        return response.json()
+
+    def update_pull_request(
+        self,
+        owner: str,
+        repo: str,
+        pull_number: int,
+        title: str | None = None,
+        body: str | None = None,
+    ) -> dict[str, Any]:
+        """Pull Requestを更新する.
+
+        Args:
+            owner: リポジトリのオーナー名
+            repo: リポジトリ名
+            pull_number: Pull Request番号
+            title: 新しいタイトル（Noneの場合は変更なし）
+            body: 新しい本文（Noneの場合は変更なし）
+
+        Returns:
+            更新されたPull Request情報
+
+        """
+        url = f"{self.api_url}/repos/{owner}/{repo}/pulls/{pull_number}"
+        data: dict[str, Any] = {}
+        if title:
+            data["title"] = title
+        if body is not None:
+            data["body"] = body
+
+        response = requests.patch(url, headers=self.headers, json=data, timeout=30)
+        response.raise_for_status()
+        return response.json()
+
+    def add_issue_labels(
+        self, owner: str, repo: str, issue_number: int, labels: list[str],
+    ) -> list[dict[str, Any]]:
+        """IssueまたはPull Requestにラベルを追加する.
+
+        Args:
+            owner: リポジトリのオーナー名
+            repo: リポジトリ名
+            issue_number: IssueまたはPull Request番号
+            labels: 追加するラベル名のリスト
+
+        Returns:
+            追加後のラベル情報のリスト
+
+        """
+        url = f"{self.api_url}/repos/{owner}/{repo}/issues/{issue_number}/labels"
+        data = {"labels": labels}
+        response = requests.post(url, headers=self.headers, json=data, timeout=30)
+        response.raise_for_status()
+        return response.json()
+
+    def update_issue(
+        self,
+        owner: str,
+        repo: str,
+        issue_number: int,
+        assignees: list[str] | None = None,
+        labels: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """IssueまたはPull Requestを更新する.
+
+        Args:
+            owner: リポジトリのオーナー名
+            repo: リポジトリ名
+            issue_number: IssueまたはPull Request番号
+            assignees: アサインするユーザー名のリスト
+            labels: 設定するラベル名のリスト
+
+        Returns:
+            更新されたIssue情報
+
+        """
+        url = f"{self.api_url}/repos/{owner}/{repo}/issues/{issue_number}"
+        data: dict[str, Any] = {}
+        if assignees:
+            data["assignees"] = assignees
+        if labels:
+            data["labels"] = labels
+
+        response = requests.patch(url, headers=self.headers, json=data, timeout=30)
+        response.raise_for_status()
+        return response.json()
+
+    def delete_branch(
+        self, owner: str, repo: str, branch: str,
+    ) -> None:
+        """ブランチを削除する.
+
+        Args:
+            owner: リポジトリのオーナー名
+            repo: リポジトリ名
+            branch: ブランチ名
+
+        """
+        url = f"{self.api_url}/repos/{owner}/{repo}/git/refs/heads/{branch}"
+        response = requests.delete(url, headers=self.headers, timeout=30)
+        response.raise_for_status()
+
     def add_comment_to_pull_request(
         self, owner: str, repo: str, pull_number: int, body: str,
     ) -> dict[str, Any]:

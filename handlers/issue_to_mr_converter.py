@@ -12,9 +12,11 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from clients.github_client import GithubClient
+from clients.gitlab_client import GitlabClient
+
 if TYPE_CHECKING:
     from clients.llm_base import LLMClient
-    from clients.mcp_tool_client import MCPToolClient
     from handlers.task import Task
 
 
@@ -400,25 +402,28 @@ class IssueToMRConverter:
         self,
         task: Task,
         llm_client: LLMClient,
-        mcp_client: MCPToolClient,
         config: dict[str, Any],
         platform: str,
+        gitlab_client: GitlabClient = None,
+        github_client: GithubClient = None,
     ) -> None:
         """IssueToMRConverterを初期化する.
 
         Args:
             task: Issueタスクオブジェクト
             llm_client: LLMクライアント
-            mcp_client: MCPツールクライアント
             config: アプリケーション設定
             platform: プラットフォーム名 ("github" または "gitlab")
+            gitlab_client: GitLabClientインスタンス (GitLabの場合)
+            github_client: GithubClientインスタンス (GitHubの場合)
 
         """
         self.task = task
         self.llm_client = llm_client
-        self.mcp_client = mcp_client
         self.config = config
         self.platform = platform
+        self.gitlab_client = gitlab_client
+        self.github_client = github_client
         self.logger = logging.getLogger(__name__)
 
         # 機能が有効かどうかをチェック
@@ -562,22 +567,20 @@ class IssueToMRConverter:
         """既存のブランチ一覧を取得する."""
         try:
             if self.platform == "github":
+                # GitHubの場合 - GithubClientを使用
                 task_key = self.task.get_task_key()
-                result = self.mcp_client.call_tool(
-                    "list_branches",
-                    {"owner": task_key.owner, "repo": task_key.repo},
+                branches_data = self.github_client.list_branches(
+                    owner=task_key.owner,
+                    repo=task_key.repo,
                 )
-                if isinstance(result, list):
-                    return [b.get("name", "") for b in result if isinstance(b, dict)]
+                if isinstance(branches_data, list):
+                    return [b.get("name", "") for b in branches_data if isinstance(b, dict)]
             else:
-                # GitLabの場合
+                # GitLabの場合 - GitLabClientを使用
                 task_key = self.task.get_task_key()
-                result = self.mcp_client.call_tool(
-                    "list_branches",
-                    {"project_id": str(task_key.project_id)},
-                )
-                if isinstance(result, list):
-                    return [b.get("name", "") for b in result if isinstance(b, dict)]
+                branches_data = self.gitlab_client.list_branches(task_key.project_id)
+                if isinstance(branches_data, list):
+                    return [b.get("name", "") for b in branches_data if isinstance(b, dict)]
         except Exception as e:
             self.logger.warning("ブランチ一覧の取得に失敗: %s", e)
 
@@ -587,24 +590,20 @@ class IssueToMRConverter:
         """ブランチを作成する."""
         try:
             if self.platform == "github":
+                # GitHubの場合はGithubClientを使用
                 task_key = self.task.get_task_key()
-                self.mcp_client.call_tool(
-                    "create_branch",
-                    {
-                        "owner": task_key.owner,
-                        "repo": task_key.repo,
-                        "branch": branch_name,
-                    },
+                self.github_client.create_branch(
+                    owner=task_key.owner,
+                    repo=task_key.repo,
+                    branch=branch_name,
                 )
             else:
+                # GitLabの場合はGitLabClientを使用
                 task_key = self.task.get_task_key()
-                self.mcp_client.call_tool(
-                    "create_branch",
-                    {
-                        "project_id": str(task_key.project_id),
-                        "branch": branch_name,
-                        "ref": "main",  # デフォルトブランチから作成
-                    },
+                self.gitlab_client.create_branch(
+                    project_id=task_key.project_id,
+                    branch_name=branch_name,
+                    ref="main",
                 )
             return True
         except Exception as e:
@@ -618,36 +617,24 @@ class IssueToMRConverter:
             commit_message = f"chore: Initialize branch for issue #{issue_number}"
 
             if self.platform == "github":
+                # GitHubの場合はGithubClientを使用
                 task_key = self.task.get_task_key()
-                # GitHub では create_or_update_file を使用して空ファイルを作成
-                self.mcp_client.call_tool(
-                    "create_or_update_file",
-                    {
-                        "owner": task_key.owner,
-                        "repo": task_key.repo,
-                        "path": ".gitkeep",
-                        "message": commit_message,
-                        "content": "",
-                        "branch": branch_name,
-                    },
+                self.github_client.create_or_update_file(
+                    owner=task_key.owner,
+                    repo=task_key.repo,
+                    path=".gitkeep",
+                    message=commit_message,
+                    content="",
+                    branch=branch_name,
                 )
             else:
-                # GitLab では commit API を使用
+                # GitLabの場合はGitLabClientを使用
                 task_key = self.task.get_task_key()
-                self.mcp_client.call_tool(
-                    "create_commit",
-                    {
-                        "project_id": str(task_key.project_id),
-                        "branch": branch_name,
-                        "commit_message": commit_message,
-                        "actions": [
-                            {
-                                "action": "create",
-                                "file_path": ".gitkeep",
-                                "content": "",
-                            },
-                        ],
-                    },
+                self.gitlab_client.create_commit(
+                    project_id=task_key.project_id,
+                    branch=branch_name,
+                    commit_message=commit_message,
+                    actions=[],
                 )
             return True
         except Exception as e:
@@ -657,36 +644,32 @@ class IssueToMRConverter:
     def _create_mr_pr(self, branch_name: str, issue_info: dict[str, Any]) -> dict[str, Any] | None:
         """MR/PRを作成する."""
         try:
-            title = f"WIP: {issue_info.get('title', '')}"
+            title = f"{issue_info.get('title', '')}"
             issue_number = issue_info.get("number", 0)
             body = f"この MR/PR は Issue #{issue_number} から自動生成されました。"
 
             if self.platform == "github":
+                # GitHubの場合はGithubClientを使用
                 task_key = self.task.get_task_key()
-                result = self.mcp_client.call_tool(
-                    "create_pull_request",
-                    {
-                        "owner": task_key.owner,
-                        "repo": task_key.repo,
-                        "title": title,
-                        "body": body,
-                        "head": branch_name,
-                        "base": "main",
-                        "draft": self._conversion_config.get("auto_draft", True),
-                    },
+                result = self.github_client.create_pull_request(
+                    owner=task_key.owner,
+                    repo=task_key.repo,
+                    title=title,
+                    body=body,
+                    head=branch_name,
+                    base="main",
+                    draft=self._conversion_config.get("auto_draft", True),
                 )
                 return result
             else:
+                # GitLabの場合はGitLabClientを使用
                 task_key = self.task.get_task_key()
-                result = self.mcp_client.call_tool(
-                    "create_merge_request",
-                    {
-                        "project_id": str(task_key.project_id),
-                        "title": title,
-                        "description": body,
-                        "source_branch": branch_name,
-                        "target_branch": "main",
-                    },
+                result = self.gitlab_client.create_merge_request(
+                    project_id=task_key.project_id,
+                    source_branch=branch_name,
+                    target_branch="main",
+                    title=title,
+                    description=body,
                 )
                 return result
         except Exception as e:
@@ -697,27 +680,23 @@ class IssueToMRConverter:
         """MR/PRの本文を更新する."""
         try:
             if self.platform == "github":
+                # GitHubの場合はGithubClientを使用
                 task_key = self.task.get_task_key()
                 pr_number = mr_result.get("number")
-                self.mcp_client.call_tool(
-                    "update_pull_request",
-                    {
-                        "owner": task_key.owner,
-                        "repo": task_key.repo,
-                        "pull_number": pr_number,
-                        "body": body,
-                    },
+                self.github_client.update_pull_request(
+                    owner=task_key.owner,
+                    repo=task_key.repo,
+                    pull_number=pr_number,
+                    body=body,
                 )
             else:
+                # GitLabの場合はGitLabClientを使用
                 task_key = self.task.get_task_key()
                 mr_iid = mr_result.get("iid")
-                self.mcp_client.call_tool(
-                    "update_merge_request",
-                    {
-                        "project_id": str(task_key.project_id),
-                        "merge_request_iid": mr_iid,
-                        "description": body,
-                    },
+                self.gitlab_client.update_merge_request(
+                    project_id=task_key.project_id,
+                    merge_request_iid=mr_iid,
+                    description=body,
                 )
         except Exception as e:
             self.logger.warning("MR/PR本文の更新に失敗: %s", e)
@@ -734,63 +713,64 @@ class IssueToMRConverter:
         """MR/PRに自動タスク化の設定を行う."""
         try:
             if self.platform == "github":
+                # GitHubの場合はGithubClientを使用
                 task_key = self.task.get_task_key()
                 pr_number = mr_result.get("number")
                 bot_label = self.config.get("github", {}).get("bot_label", "coding agent")
 
                 # ラベルを追加
-                self.mcp_client.call_tool(
-                    "add_issue_labels",
-                    {
-                        "owner": task_key.owner,
-                        "repo": task_key.repo,
-                        "issue_number": pr_number,
-                        "labels": [bot_label],
-                    },
+                self.github_client.add_issue_labels(
+                    owner=task_key.owner,
+                    repo=task_key.repo,
+                    issue_number=pr_number,
+                    labels=[bot_label],
                 )
 
-                # アサインを設定
-                assignee = os.environ.get("GITHUB_BOT_NAME") or self.config.get("github", {}).get(
-                    "assignee",
+                # アサインを設定（ボット名を優先）
+                bot_name = (
+                    os.environ.get("GITHUB_BOT_NAME")
+                    or self.config.get("github", {}).get("bot_name")
+                    or self.config.get("github", {}).get("assignee")
                 )
-                if assignee:
-                    self.mcp_client.call_tool(
-                        "update_issue",
-                        {
-                            "owner": task_key.owner,
-                            "repo": task_key.repo,
-                            "issue_number": pr_number,
-                            "assignees": [assignee],
-                        },
+                if bot_name:
+                    self.github_client.update_issue(
+                        owner=task_key.owner,
+                        repo=task_key.repo,
+                        issue_number=pr_number,
+                        assignees=[bot_name],
                     )
             else:
                 task_key = self.task.get_task_key()
                 mr_iid = mr_result.get("iid")
                 bot_label = self.config.get("gitlab", {}).get("bot_label", "coding agent")
 
-                # ラベルを追加
-                self.mcp_client.call_tool(
-                    "update_merge_request",
-                    {
-                        "project_id": str(task_key.project_id),
-                        "merge_request_iid": mr_iid,
-                        "labels": bot_label,
-                    },
+                # ラベルを追加 - GitLabClientを使用
+                self.gitlab_client.update_merge_request(
+                    project_id=task_key.project_id,
+                    merge_request_iid=mr_iid,
+                    labels=[bot_label],
                 )
 
-                # アサインを設定
-                assignee = os.environ.get("GITLAB_BOT_NAME") or self.config.get("gitlab", {}).get(
-                    "assignee",
+                # アサインを設定（ボット名を優先）
+                bot_name = (
+                    os.environ.get("GITLAB_BOT_NAME")
+                    or self.config.get("gitlab", {}).get("bot_name")
+                    or self.config.get("gitlab", {}).get("assignee")
                 )
-                if assignee:
-                    self.mcp_client.call_tool(
-                        "update_merge_request",
-                        {
-                            "project_id": str(task_key.project_id),
-                            "merge_request_iid": mr_iid,
-                            "assignee_username": assignee,
-                        },
-                    )
+                if bot_name:
+                    # ユーザー名からuser_idを取得
+                    user_info = self.gitlab_client.get_user_by_username(bot_name)
+                    if user_info and "id" in user_info:
+                        self.gitlab_client.update_merge_request(
+                            project_id=task_key.project_id,
+                            merge_request_iid=mr_iid,
+                            assignee_ids=[user_info["id"]],
+                        )
+                    else:
+                        self.logger.warning(
+                            "GitLabユーザー '%s' が見つかりませんでした",
+                            bot_name,
+                        )
         except Exception as e:
             self.logger.warning("自動タスク設定に失敗: %s", e)
 
@@ -832,23 +812,19 @@ class IssueToMRConverter:
         """作成したブランチを削除する（エラー時のクリーンアップ）."""
         try:
             if self.platform == "github":
+                # GitHubの場合はGithubClientを使用
                 task_key = self.task.get_task_key()
-                self.mcp_client.call_tool(
-                    "delete_branch",
-                    {
-                        "owner": task_key.owner,
-                        "repo": task_key.repo,
-                        "branch": branch_name,
-                    },
+                self.github_client.delete_branch(
+                    owner=task_key.owner,
+                    repo=task_key.repo,
+                    branch=branch_name,
                 )
             else:
+                # GitLabの場合はGitLabClientを使用
                 task_key = self.task.get_task_key()
-                self.mcp_client.call_tool(
-                    "delete_branch",
-                    {
-                        "project_id": str(task_key.project_id),
-                        "branch": branch_name,
-                    },
+                self.gitlab_client.delete_branch(
+                    project_id=task_key.project_id,
+                    branch_name=branch_name,
                 )
         except Exception as e:
             self.logger.warning("ブランチのクリーンアップに失敗: %s", e)

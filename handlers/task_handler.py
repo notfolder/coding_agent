@@ -1461,13 +1461,24 @@ class TaskHandler:
                 )
 
                 # IssueToMRConverter のインスタンス化
-                converter = IssueToMRConverter(
-                    task=task,
-                    llm_client=conversion_llm_client,
-                    mcp_client=mcp_client,
-                    config=task_config,
-                    platform=platform,
-                )
+                if platform == "gitlab":
+                    # GitLabの場合はGitLabClientを渡す
+                    converter = IssueToMRConverter(
+                        task=task,
+                        llm_client=conversion_llm_client,
+                        config=task_config,
+                        platform=platform,
+                        gitlab_client=task.gitlab_client if hasattr(task, "gitlab_client") else None,
+                    )
+                else:
+                    # GitHubの場合はGithubClientを渡す
+                    converter = IssueToMRConverter(
+                        task=task,
+                        llm_client=conversion_llm_client,
+                        config=task_config,
+                        platform=platform,
+                        github_client=task.github_client if hasattr(task, "github_client") else None,
+                    )
 
                 # 変換の実行
                 result = converter.convert()

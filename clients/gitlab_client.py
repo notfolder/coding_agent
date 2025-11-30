@@ -167,6 +167,182 @@ class GitlabClient:
         resp.raise_for_status()
         return resp.json()
 
+    def list_branches(
+        self,
+        project_id: int | str,
+        per_page: int = 100,
+        max_pages: int = 200,
+    ) -> list[dict[str, Any]]:
+        """List all branches in a project.
+        
+        Args:
+            project_id: Project ID
+            per_page: Number of items per page
+            max_pages: Maximum number of pages to fetch
+            
+        Returns:
+            List of branch information dictionaries
+        """
+        url = f"{self.api_url}/projects/{project_id}/repository/branches"
+        return self._fetch_paginated_list(url, {}, per_page, max_pages)
+
+    def get_user_by_username(
+        self, username: str,
+    ) -> dict[str, Any] | None:
+        """Get user information by username.
+        
+        Args:
+            username: Username to search for
+            
+        Returns:
+            User information dictionary, or None if not found
+        """
+        url = f"{self.api_url}/users"
+        params = {"username": username}
+        resp = requests.get(url, headers=self.headers, params=params, timeout=30)
+        resp.raise_for_status()
+        users = resp.json()
+        if isinstance(users, list) and len(users) > 0:
+            return users[0]
+        return None
+
+    def create_branch(
+        self, project_id: int | str, branch_name: str, ref: str,
+    ) -> dict[str, Any]:
+        """Create a new branch in a project.
+        
+        Args:
+            project_id: Project ID
+            branch_name: Name of the new branch
+            ref: Branch, commit SHA, or tag name to create the branch from
+            
+        Returns:
+            Created branch information
+        """
+        url = f"{self.api_url}/projects/{project_id}/repository/branches"
+        data = {"branch": branch_name, "ref": ref}
+        resp = requests.post(url, headers=self.headers, json=data, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+
+    def create_commit(
+        self,
+        project_id: int | str,
+        branch: str,
+        commit_message: str,
+        actions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Create a commit with multiple file actions.
+        
+        Args:
+            project_id: Project ID
+            branch: Branch name to commit to
+            commit_message: Commit message
+            actions: List of file actions (create, update, delete, etc.)
+                Each action should have: action, file_path, content (if needed)
+            
+        Returns:
+            Created commit information
+        """
+        url = f"{self.api_url}/projects/{project_id}/repository/commits"
+        data = {
+            "branch": branch,
+            "commit_message": commit_message,
+            "actions": actions,
+        }
+        resp = requests.post(url, headers=self.headers, json=data, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+
+    def create_merge_request(
+        self,
+        project_id: int | str,
+        source_branch: str,
+        target_branch: str,
+        title: str,
+        description: str | None = None,
+        assignee_ids: list[int] | None = None,
+        labels: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a new merge request.
+        
+        Args:
+            project_id: Project ID
+            source_branch: Source branch name
+            target_branch: Target branch name
+            title: MR title
+            description: MR description (optional)
+            assignee_ids: List of user IDs to assign (optional)
+            labels: List of labels to add (optional)
+            
+        Returns:
+            Created merge request information
+        """
+        url = f"{self.api_url}/projects/{project_id}/merge_requests"
+        data: dict[str, Any] = {
+            "source_branch": source_branch,
+            "target_branch": target_branch,
+            "title": title,
+        }
+        if description:
+            data["description"] = description
+        if assignee_ids:
+            data["assignee_ids"] = assignee_ids
+        if labels:
+            data["labels"] = ",".join(labels)
+        resp = requests.post(url, headers=self.headers, json=data, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+
+    def update_merge_request(
+        self,
+        project_id: int | str,
+        merge_request_iid: int | str,
+        title: str | None = None,
+        description: str | None = None,
+        assignee_ids: list[int] | None = None,
+        labels: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing merge request.
+        
+        Args:
+            project_id: Project ID
+            merge_request_iid: Merge request internal ID
+            title: New title (optional)
+            description: New description (optional)
+            assignee_ids: List of user IDs to assign (optional)
+            labels: List of labels (optional)
+            
+        Returns:
+            Updated merge request information
+        """
+        url = f"{self.api_url}/projects/{project_id}/merge_requests/{merge_request_iid}"
+        data: dict[str, Any] = {}
+        if title:
+            data["title"] = title
+        if description:
+            data["description"] = description
+        if assignee_ids:
+            data["assignee_ids"] = assignee_ids
+        if labels:
+            data["labels"] = ",".join(labels)
+        resp = requests.put(url, headers=self.headers, json=data, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+
+    def delete_branch(
+        self, project_id: int | str, branch_name: str,
+    ) -> None:
+        """Delete a branch from a project.
+        
+        Args:
+            project_id: Project ID
+            branch_name: Name of the branch to delete
+        """
+        url = f"{self.api_url}/projects/{project_id}/repository/branches/{branch_name}"
+        resp = requests.delete(url, headers=self.headers, timeout=30)
+        resp.raise_for_status()
+
     def search_issues(
         self,
         query: str,

@@ -340,7 +340,7 @@ GitHub/GitLabのIssueで依頼された内容を自動的にMerge Request (MR) /
 1. `coding agent`ラベルが付与されたIssueを検知
 2. Issue内容をLLMに送信し、ブランチ名を生成（Bot名+Issue番号を含む）
 3. 新規ブランチを作成（空コミット）
-4. WIP付きのMR/PRを作成し、Issue内容とコメントを転記
+4. MR/PRを作成し、Issue内容とコメントを転記
 5. MR/PRにBotアサインと`coding agent`ラベルを付与
 6. 元Issueに作成報告をコメント
 7. 元Issueを`coding agent done`に更新

@@ -512,7 +512,7 @@ class TaskGetterFromGitLab(TaskGetter):
             mr
             for mr in merge_requests
             if self.config["gitlab"]["bot_label"] in mr.get("labels")
-            and mr.get("assignee", {}).get("username", "") == assignee
+            and (mr.get("assignee") or {}).get("username", "") == assignee
         ]
         tasks.extend([
             TaskGitLabMergeRequest(mr, self.mcp_client, self.gitlab_client, self.config)

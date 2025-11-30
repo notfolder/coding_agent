@@ -359,10 +359,20 @@ class TestIssueToMRConverter:
         return client
 
     @pytest.fixture
-    def mock_mcp_client(self) -> MagicMock:
-        """モックMCPクライアントを作成する."""
+    def mock_github_client(self) -> MagicMock:
+        """モックGitHubクライアントを作成する."""
         client = MagicMock()
-        client.call_tool.return_value = []
+        client.list_branches.return_value = []
+        client.create_branch.return_value = {}
+        client.create_or_update_file.return_value = {"commit": {"sha": "abc123"}}
+        client.create_pull_request.return_value = {
+            "number": 123,
+            "html_url": "https://github.com/owner/repo/pull/123",
+        }
+        client.update_pull_request.return_value = {}
+        client.add_issue_labels.return_value = []
+        client.update_issue.return_value = {}
+        client.delete_branch.return_value = None
         return client
 
     @pytest.fixture
@@ -386,14 +396,14 @@ class TestIssueToMRConverter:
         self,
         mock_task: MagicMock,
         mock_llm_client: MagicMock,
-        mock_mcp_client: MagicMock,
+        mock_github_client: MagicMock,
         config: dict,
     ) -> IssueToMRConverter:
         """IssueToMRConverterインスタンスを作成する."""
         return IssueToMRConverter(
             task=mock_task,
             llm_client=mock_llm_client,
-            mcp_client=mock_mcp_client,
+            github_client=mock_github_client,
             config=config,
             platform="github",
         )
@@ -416,7 +426,7 @@ class TestIssueToMRConverter:
         self,
         mock_task: MagicMock,
         mock_llm_client: MagicMock,
-        mock_mcp_client: MagicMock,
+        mock_github_client: MagicMock,
     ) -> None:
         """設定による無効化テスト."""
         config = {
@@ -426,7 +436,7 @@ class TestIssueToMRConverter:
         converter = IssueToMRConverter(
             task=mock_task,
             llm_client=mock_llm_client,
-            mcp_client=mock_mcp_client,
+            github_client=mock_github_client,
             config=config,
             platform="github",
         )
@@ -453,7 +463,7 @@ class TestIssueToMRConverter:
         self,
         mock_task: MagicMock,
         mock_llm_client: MagicMock,
-        mock_mcp_client: MagicMock,
+        mock_github_client: MagicMock,
     ) -> None:
         """無効時の変換テスト."""
         config = {
@@ -463,7 +473,7 @@ class TestIssueToMRConverter:
         converter = IssueToMRConverter(
             task=mock_task,
             llm_client=mock_llm_client,
-            mcp_client=mock_mcp_client,
+            github_client=mock_github_client,
             config=config,
             platform="github",
         )
@@ -477,19 +487,13 @@ class TestIssueToMRConverter:
     def test_convert_branch_creation_failure(
         self,
         converter: IssueToMRConverter,
-        mock_mcp_client: MagicMock,
+        mock_github_client: MagicMock,
     ) -> None:
         """ブランチ作成失敗時のテスト."""
         # list_branches は空リストを返す
+        mock_github_client.list_branches.return_value = []
         # create_branch は例外を投げる
-        def call_tool_side_effect(tool_name: str, args: dict) -> any:
-            if tool_name == "list_branches":
-                return []
-            if tool_name == "create_branch":
-                raise Exception("Branch creation failed")
-            return []
-        
-        mock_mcp_client.call_tool.side_effect = call_tool_side_effect
+        mock_github_client.create_branch.side_effect = Exception("Branch creation failed")
 
         result = converter.convert()
 
@@ -499,32 +503,10 @@ class TestIssueToMRConverter:
     def test_convert_successful(
         self,
         converter: IssueToMRConverter,
-        mock_mcp_client: MagicMock,
+        mock_github_client: MagicMock,
     ) -> None:
         """変換成功テスト."""
-        # MCP client のモック設定
-        def call_tool_side_effect(tool_name: str, args: dict) -> any:
-            if tool_name == "list_branches":
-                return []
-            if tool_name == "create_branch":
-                return {}
-            if tool_name == "create_or_update_file":
-                return {"commit": {"sha": "abc123"}}
-            if tool_name == "create_pull_request":
-                return {
-                    "number": 123,
-                    "html_url": "https://github.com/owner/repo/pull/123",
-                }
-            if tool_name == "update_pull_request":
-                return {}
-            if tool_name == "add_issue_labels":
-                return {}
-            if tool_name == "update_issue":
-                return {}
-            return {}
-        
-        mock_mcp_client.call_tool.side_effect = call_tool_side_effect
-
+        # GitHub client のモック設定は fixture で済み
         result = converter.convert()
 
         assert result.success is True
@@ -567,10 +549,18 @@ class TestGitLabIssueToMRConverter:
         return client
 
     @pytest.fixture
-    def mock_mcp_client(self) -> MagicMock:
-        """モックMCPクライアントを作成する."""
+    def mock_gitlab_client(self) -> MagicMock:
+        """モックGitLabクライアントを作成する."""
         client = MagicMock()
-        client.call_tool.return_value = []
+        client.list_branches.return_value = []
+        client.create_branch.return_value = {}
+        client.create_commit.return_value = {"id": "abc123"}
+        client.create_merge_request.return_value = {
+            "iid": 123,
+            "web_url": "https://gitlab.com/project/repo/-/merge_requests/123",
+        }
+        client.update_merge_request.return_value = {}
+        client.delete_branch.return_value = None
         return client
 
     @pytest.fixture
@@ -593,14 +583,14 @@ class TestGitLabIssueToMRConverter:
         self,
         mock_task: MagicMock,
         mock_llm_client: MagicMock,
-        mock_mcp_client: MagicMock,
+        mock_gitlab_client: MagicMock,
         config: dict,
     ) -> IssueToMRConverter:
         """GitLab用IssueToMRConverterインスタンスを作成する."""
         return IssueToMRConverter(
             task=mock_task,
             llm_client=mock_llm_client,
-            mcp_client=mock_mcp_client,
+            gitlab_client=mock_gitlab_client,
             config=config,
             platform="gitlab",
         )
