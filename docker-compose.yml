@@ -121,6 +121,28 @@ services:
     networks:
       - coding-agent-network
 
+  # PostgreSQL - タスク情報の永続化
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    restart: always
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_DB: coding_agent
+      POSTGRES_USER: coding_agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-coding_agent_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - coding-agent-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coding_agent -d coding_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   # Producer サービス - タスクを継続的に取得してキューに追加
   coding-agent-producer:
     build: .
@@ -132,6 +154,8 @@ services:
       user-config-api:
         condition: service_started
       web:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     networks:
       - coding-agent-network
@@ -149,6 +173,13 @@ services:
       - RABBITMQ_PORT=5672
       - RABBITMQ_USER=guest
       - RABBITMQ_PASSWORD=guest
+
+      # PostgreSQL設定
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=coding_agent
+      - DATABASE_USER=coding_agent
+      - DATABASE_PASSWORD=${POSTGRES_PASSWORD:-coding_agent_password}
 
       # LLM設定
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
@@ -186,6 +217,8 @@ services:
         condition: service_started
       web:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     networks:
       - coding-agent-network
     environment:
@@ -202,6 +235,13 @@ services:
       - RABBITMQ_PORT=5672
       - RABBITMQ_USER=guest
       - RABBITMQ_PASSWORD=guest
+
+      # PostgreSQL設定
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=coding_agent
+      - DATABASE_USER=coding_agent
+      - DATABASE_PASSWORD=${POSTGRES_PASSWORD:-coding_agent_password}
 
       # LLM設定
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
@@ -288,6 +328,7 @@ services:
 
 volumes:
   rabbitmq_data:
+  postgres_data:
   user-config-data:
   openldap-data:
   openldap-config:

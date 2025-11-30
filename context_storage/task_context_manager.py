@@ -7,30 +7,41 @@ storage components and manages the task lifecycle.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from db.task_db import DBTask, TaskDBManager
 
 from .message_store import MessageStore
 from .summary_store import SummaryStore
 from .tool_store import ToolStore
 
 if TYPE_CHECKING:
-    from handlers.task_key import TaskKey
     from handlers.planning_history_store import PlanningHistoryStore
+    from handlers.task_key import TaskKey
+
+logger = logging.getLogger(__name__)
 
 
 class TaskContextManager:
     """Task context manager.
     
     Manages the entire task context including directory structure,
-    SQLite database, and all context stores.
+    PostgreSQL database (via TaskDBManager), and all context stores.
     """
 
-    def __init__(self, task_key: TaskKey, task_uuid: str, config: dict[str, Any], user: str | None = None, is_resumed: bool = False) -> None:
+    def __init__(
+        self,
+        task_key: TaskKey,
+        task_uuid: str,
+        config: dict[str, Any],
+        user: str | None = None,
+        is_resumed: bool = False,
+    ) -> None:
         """Initialize TaskContextManager.
 
         Args:
@@ -64,9 +75,10 @@ class TaskContextManager:
         self.planning_dir = self.context_dir / "planning"
         self.planning_dir.mkdir(parents=True, exist_ok=True)
         
-        # Initialize database
-        self.db_path = base_dir / "tasks.db"
-        self._init_database()
+        # Initialize TaskDBManager for PostgreSQL access
+        self._db_manager = TaskDBManager(config)
+        # DBTaskインスタンスをキャッシュ
+        self._db_task: DBTask | None = None
         
         # Create metadata.json
         self._create_metadata()
@@ -97,10 +109,7 @@ class TaskContextManager:
             config: 設定辞書
 
         """
-        import logging
         from .context_inheritance_manager import ContextInheritanceManager
-
-        logger = logging.getLogger(__name__)
 
         try:
             self.inheritance_manager = ContextInheritanceManager(self.base_dir, config)
@@ -212,19 +221,19 @@ class TaskContextManager:
             error_message: Error message (if status is "failed")
 
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            if error_message:
-                cursor.execute(
-                    "UPDATE tasks SET status = ?, error_message = ? WHERE uuid = ?",
-                    (status, error_message, self.uuid),
-                )
-            else:
-                cursor.execute(
-                    "UPDATE tasks SET status = ? WHERE uuid = ?",
-                    (status, self.uuid),
-                )
-            conn.commit()
+        try:
+            # DBTaskを取得（キャッシュがあれば使用）
+            if self._db_task is None:
+                self._db_task = self._db_manager.get_task(self.uuid)
+            
+            if self._db_task:
+                self._db_task.status = status
+                if error_message:
+                    self._db_task.error_message = error_message
+                self._db_task = self._db_manager.save_task(self._db_task)
+                logger.debug("タスクステータスを更新しました: uuid=%s, status=%s", self.uuid, status)
+        except Exception as e:
+            logger.error("タスクステータスの更新に失敗しました: %s", e, exc_info=True)
 
     def update_statistics(
         self,
@@ -242,18 +251,24 @@ class TaskContextManager:
             compressions: Number of compressions to add
 
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """UPDATE tasks SET 
-                   llm_call_count = llm_call_count + ?,
-                   tool_call_count = tool_call_count + ?,
-                   total_tokens = total_tokens + ?,
-                   compression_count = compression_count + ?
-                   WHERE uuid = ?""",
-                (llm_calls, tool_calls, tokens, compressions, self.uuid),
-            )
-            conn.commit()
+        try:
+            # DBTaskを取得（キャッシュがあれば使用）
+            if self._db_task is None:
+                self._db_task = self._db_manager.get_task(self.uuid)
+            
+            if self._db_task:
+                # 統計情報を加算
+                self._db_task.llm_call_count = (self._db_task.llm_call_count or 0) + llm_calls
+                self._db_task.tool_call_count = (self._db_task.tool_call_count or 0) + tool_calls
+                self._db_task.total_tokens = (self._db_task.total_tokens or 0) + tokens
+                self._db_task.compression_count = (self._db_task.compression_count or 0) + compressions
+                self._db_task = self._db_manager.save_task(self._db_task)
+                logger.debug(
+                    "タスク統計を更新しました: uuid=%s, llm=%d, tool=%d, tokens=%d, compressions=%d",
+                    self.uuid, llm_calls, tool_calls, tokens, compressions,
+                )
+        except Exception as e:
+            logger.error("タスク統計の更新に失敗しました: %s", e, exc_info=True)
 
     def complete(self) -> None:
         """Mark task as completed and move to completed directory."""
@@ -272,20 +287,17 @@ class TaskContextManager:
         """
         # Update database
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "UPDATE tasks SET status = ?, completed_at = ? WHERE uuid = ?",
-                    (status, datetime.now(timezone.utc).isoformat(), self.uuid),
-                )
-                conn.commit()
+            # DBTaskを取得（キャッシュがあれば使用）
+            if self._db_task is None:
+                self._db_task = self._db_manager.get_task(self.uuid)
             
-            import logging
-            logger = logging.getLogger(__name__)
+            if self._db_task:
+                self._db_task.status = status
+                self._db_task.completed_at = datetime.now(timezone.utc)
+                self._db_task = self._db_manager.save_task(self._db_task)
+            
             logger.info("タスクを%sとしてデータベースに記録しました: uuid=%s", status, self.uuid)
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.error("タスク%sのデータベース更新に失敗しました: %s", status, e, exc_info=True)
         
         # タスク完了/停止時に最終要約を作成
@@ -306,20 +318,18 @@ class TaskContextManager:
         """
         # Update database
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "UPDATE tasks SET status = ?, error_message = ?, completed_at = ? WHERE uuid = ?",
-                    ("failed", error_message, datetime.now(timezone.utc).isoformat(), self.uuid),
-                )
-                conn.commit()
+            # DBTaskを取得（キャッシュがあれば使用）
+            if self._db_task is None:
+                self._db_task = self._db_manager.get_task(self.uuid)
             
-            import logging
-            logger = logging.getLogger(__name__)
+            if self._db_task:
+                self._db_task.status = "failed"
+                self._db_task.error_message = error_message
+                self._db_task.completed_at = datetime.now(timezone.utc)
+                self._db_task = self._db_manager.save_task(self._db_task)
+            
             logger.info("タスクを失敗としてデータベースに記録しました: uuid=%s, error=%s", self.uuid, error_message)
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.error("タスク失敗のデータベース更新に失敗しました: %s", e, exc_info=True)
         
         # タスク失敗時にも最終要約を作成
@@ -333,9 +343,6 @@ class TaskContextManager:
 
     def _create_final_summary(self) -> None:
         """タスク完了/失敗時に最終要約を作成する."""
-        import logging
-        logger = logging.getLogger(__name__)
-        
         # メッセージ数を確認
         message_count = self.message_store.count_messages()
         if message_count == 0:
@@ -368,45 +375,6 @@ class TaskContextManager:
             # 要約作成失敗は致命的エラーではないため警告ログのみ
             logger.warning("最終要約の作成に失敗しました: %s", e, exc_info=True)
 
-    def _init_database(self) -> None:
-        """Initialize SQLite database and create tables if needed."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            # Create tasks table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tasks (
-                    uuid TEXT PRIMARY KEY,
-                    task_source TEXT NOT NULL,
-                    owner TEXT NOT NULL,
-                    repo TEXT NOT NULL,
-                    task_type TEXT NOT NULL,
-                    task_id TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    started_at TEXT,
-                    completed_at TEXT,
-                    process_id INTEGER,
-                    hostname TEXT,
-                    llm_provider TEXT,
-                    model TEXT,
-                    context_length INTEGER,
-                    llm_call_count INTEGER DEFAULT 0,
-                    tool_call_count INTEGER DEFAULT 0,
-                    total_tokens INTEGER DEFAULT 0,
-                    compression_count INTEGER DEFAULT 0,
-                    error_message TEXT,
-                    user TEXT
-                )
-            """)
-            
-            # Create indexes
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user)")
-            
-            conn.commit()
-
     def _create_metadata(self) -> None:
         """Create metadata.json file."""
         llm_config = self.config.get("llm", {})
@@ -435,7 +403,10 @@ class TaskContextManager:
             json.dump(metadata, f, indent=2)
 
     def _register_or_update_task(self) -> None:
-        """Register task in database, or update if resumed."""
+        """Register task in database, or update if resumed.
+        
+        TaskDBManagerを使用してPostgreSQLにタスク情報を登録/更新します。
+        """
         try:
             llm_config = self.config.get("llm", {})
             provider = llm_config.get("provider", "openai")
@@ -455,82 +426,60 @@ class TaskContextManager:
                 task_source = task_type_full
                 task_type = task_type_full
             
-            # owner, repo, task_idの取得
-            # GitHub: owner, repo, number
-            # GitLab: project_id (→ repo), issue_iid/mr_iid (→ task_id)
-            owner = task_dict.get("owner", "")
-            repo = task_dict.get("repo", "")
-            task_id = ""
+            # フィールドの抽出
+            owner = task_dict.get("owner")
+            repo = task_dict.get("repo")
+            project_id = task_dict.get("project_id")
+            number = 0
             
             if task_source == "gitlab":
-                # GitLabの場合: project_idをrepoとして使用
-                repo = str(task_dict.get("project_id", ""))
-                # issue_iidまたはmr_iidをtask_idとして使用
-                task_id = str(task_dict.get("issue_iid", "") or task_dict.get("mr_iid", ""))
+                number = int(task_dict.get("issue_iid", 0) or task_dict.get("mr_iid", 0))
             else:
-                # GitHub等の場合: numberをtask_idとして使用
-                task_id = str(task_dict.get("number", ""))
+                number = int(task_dict.get("number", 0))
             
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                if self.is_resumed:
-                    # Update existing task record for resumed task
-                    cursor.execute(
-                        """UPDATE tasks SET
-                            status = ?,
-                            started_at = ?,
-                            process_id = ?,
-                            hostname = ?
-                        WHERE uuid = ?""",
-                        (
-                            "running",
-                            datetime.now(timezone.utc).isoformat(),
-                            os.getpid(),
-                            os.uname().nodename,
-                            self.uuid,
-                        ),
-                    )
-                else:
-                    # Insert new task record
-                    cursor.execute(
-                        """INSERT INTO tasks (
-                            uuid, task_source, owner, repo, task_type, task_id,
-                            status, created_at, started_at, process_id, hostname,
-                            llm_provider, model, context_length, user
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (
-                            self.uuid,
-                            task_source,
-                            owner,
-                            repo,
-                            task_type,
-                            task_id,
-                            "running",
-                            datetime.now(timezone.utc).isoformat(),
-                            datetime.now(timezone.utc).isoformat(),
-                            os.getpid(),
-                            os.uname().nodename,
-                            provider,
-                            provider_config.get("model", "unknown"),
-                            provider_config.get("context_length", 128000),
-                            self.user,
-                        ),
-                    )
-                conn.commit()
-                
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(
-                    "タスクをデータベースに登録しました: uuid=%s, source=%s, owner=%s, repo=%s, type=%s, id=%s",
-                    self.uuid,
-                    task_source,
-                    owner,
-                    repo,
-                    task_type,
-                    task_id,
-                )
+            now = datetime.now(timezone.utc)
+            
+            if self.is_resumed:
+                # 既存タスクを取得して更新
+                self._db_task = self._db_manager.get_task(self.uuid)
+                if self._db_task:
+                    self._db_task.status = "running"
+                    self._db_task.started_at = now
+                    self._db_task.process_id = os.getpid()
+                    self._db_task.hostname = os.uname().nodename
+                    self._db_task = self._db_manager.save_task(self._db_task)
+            else:
+                # 新規タスクを作成
+                task_data = {
+                    "uuid": self.uuid,
+                    "task_source": task_source,
+                    "task_type": task_type,
+                    "owner": owner,
+                    "repo": repo,
+                    "project_id": int(project_id) if project_id is not None else None,
+                    "number": number,
+                    "status": "running",
+                    "created_at": now,
+                    "started_at": now,
+                    "process_id": os.getpid(),
+                    "hostname": os.uname().nodename,
+                    "llm_provider": provider,
+                    "model": provider_config.get("model", "unknown"),
+                    "context_length": provider_config.get("context_length", 128000),
+                    "user": self.user,
+                    "llm_call_count": 0,
+                    "tool_call_count": 0,
+                    "total_tokens": 0,
+                    "compression_count": 0,
+                }
+                self._db_task = self._db_manager.create_task(task_data)
+            
+            logger.info(
+                "タスクをデータベースに登録しました: uuid=%s, source=%s, type=%s, number=%d",
+                self.uuid,
+                task_source,
+                task_type,
+                number,
+            )
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.error("タスクのデータベース登録に失敗しました: %s", e, exc_info=True)
