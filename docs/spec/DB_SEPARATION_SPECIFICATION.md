@@ -9,62 +9,57 @@
 - **タスク情報DB（tasksテーブル）のみ**を対象とする
 - メッセージ履歴、要約履歴、ツール実行履歴（JSONLファイル）は対象外
 
-### 1.3 現在のテーブル構造（tasks テーブル）
-```
-uuid TEXT PRIMARY KEY,          -- タスクの一意識別子
-task_source TEXT NOT NULL,      -- タスクソース（github/gitlab）
-owner TEXT NOT NULL,            -- リポジトリオーナー
-repo TEXT NOT NULL,             -- リポジトリ名
-task_type TEXT NOT NULL,        -- タスクタイプ（issue/pull_request/merge_request）
-task_id TEXT NOT NULL,          -- タスクID（Issue番号等）
-status TEXT NOT NULL,           -- ステータス（running/completed/failed/stopped）
-created_at TEXT NOT NULL,       -- 作成日時
-started_at TEXT,                -- 開始日時
-completed_at TEXT,              -- 完了日時
-process_id INTEGER,             -- プロセスID
-hostname TEXT,                  -- ホスト名
-llm_provider TEXT,              -- LLMプロバイダー
-model TEXT,                     -- 使用モデル
-context_length INTEGER,         -- コンテキスト長
-llm_call_count INTEGER,         -- LLM呼び出し回数
-tool_call_count INTEGER,        -- ツール呼び出し回数
-total_tokens INTEGER,           -- 総トークン数
-compression_count INTEGER,      -- 圧縮回数
-error_message TEXT,             -- エラーメッセージ
-user TEXT                       -- ユーザー名
-```
+### 1.3 TaskKey構造の分析
+現在のTaskKeyは以下の4種類があり、それぞれ異なるフィールドを持つ：
+
+| TaskKey種別 | task_source | task_type | owner | repo | project_id | number |
+|------------|-------------|-----------|-------|------|------------|--------|
+| GitHubIssueTaskKey | github | issue | ○ | ○ | - | ○ |
+| GitHubPullRequestTaskKey | github | pull_request | ○ | ○ | - | ○ |
+| GitLabIssueTaskKey | gitlab | issue | - | - | ○ | ○(issue_iid) |
+| GitLabMergeRequestTaskKey | gitlab | merge_request | - | - | ○ | ○(mr_iid) |
+
+これらを統一的に扱うため、以下のフィールド構成でtask_keyを分解する：
+- `task_source`: タスクソース（github/gitlab）
+- `task_type`: タスクタイプ（issue/pull_request/merge_request）
+- `owner`: GitHubリポジトリオーナー（GitLabの場合はNULL）
+- `repo`: GitHubリポジトリ名（GitLabの場合はNULL）
+- `project_id`: GitLabプロジェクトID（GitHubの場合はNULL）
+- `number`: タスク番号（GitHub: number、GitLab: issue_iid/mr_iid）
 
 ---
 
 ## 2. 詳細設計
 
 ### 2.1 ファイル構成
-1ファイルにTaskモデルとDBアクセスロジックをまとめる：
+1ファイルにDBTaskモデルとDBアクセスロジックをまとめる：
 
 ```
 db/
-└── task_db.py    # Taskモデル定義 + DBアクセスロジッククラス
+└── task_db.py    # DBTaskモデル定義 + TaskDBManagerクラス
 ```
 
 ### 2.2 task_db.py の設計
 
-#### 2.2.1 Task モデル
+#### 2.2.1 DBTask モデル
 SQLAlchemy ORMを使用してtasksテーブルを定義する。
 
 **処理内容**:
 - SQLAlchemy 2.0スタイルの宣言的ベースクラスを使用する
 - PostgreSQL用の型定義を行う
-- インデックスを定義する
+- task_key分解フィールドのインデックスを定義する
+- `get_task_key()` メソッドでTaskKeyオブジェクトを復元する
 
 **カラム定義**:
 | カラム名 | 型 | PostgreSQL型 | 制約 | 説明 |
 |---------|-----|-------------|------|------|
 | uuid | String(36) | VARCHAR(36) | PRIMARY KEY | タスク一意識別子 |
-| task_source | String(50) | VARCHAR(50) | NOT NULL | タスクソース |
-| owner | String(255) | VARCHAR(255) | NOT NULL | リポジトリオーナー |
-| repo | String(255) | VARCHAR(255) | NOT NULL | リポジトリ名 |
-| task_type | String(50) | VARCHAR(50) | NOT NULL | タスクタイプ |
-| task_id | String(50) | VARCHAR(50) | NOT NULL | タスクID |
+| task_source | String(50) | VARCHAR(50) | NOT NULL | タスクソース（github/gitlab） |
+| task_type | String(50) | VARCHAR(50) | NOT NULL | タスクタイプ（issue/pull_request/merge_request） |
+| owner | String(255) | VARCHAR(255) | NULL可 | GitHubリポジトリオーナー |
+| repo | String(255) | VARCHAR(255) | NULL可 | GitHubリポジトリ名 |
+| project_id | String(255) | VARCHAR(255) | NULL可 | GitLabプロジェクトID |
+| number | Integer | INTEGER | NOT NULL | タスク番号 |
 | status | String(20) | VARCHAR(20) | NOT NULL | ステータス |
 | created_at | DateTime | TIMESTAMP WITH TIME ZONE | NOT NULL | 作成日時 |
 | started_at | DateTime | TIMESTAMP WITH TIME ZONE | - | 開始日時 |
@@ -87,8 +82,14 @@ SQLAlchemy ORMを使用してtasksテーブルを定義する。
 | ix_tasks_status | status | ステータス別検索の高速化 |
 | ix_tasks_created_at | created_at | 作成日時順ソートの高速化 |
 | ix_tasks_user | user | ユーザー別検索の高速化 |
+| ix_tasks_task_key | task_source, task_type, owner, repo, project_id, number | TaskKey検索の高速化 |
 
-#### 2.2.2 TaskDB クラス
+**DBTaskモデルのメソッド**:
+| メソッド名 | 引数 | 戻り値 | 説明 |
+|-----------|------|--------|------|
+| get_task_key | - | TaskKey | task_key分解フィールドからTaskKeyオブジェクトを復元する |
+
+#### 2.2.2 TaskDBManager クラス
 タスクのDB操作を行うロジッククラスを実装する。
 
 **初期化処理**:
@@ -110,13 +111,10 @@ SQLAlchemy ORMを使用してtasksテーブルを定義する。
 
 | メソッド名 | 引数 | 戻り値 | 説明 |
 |-----------|------|--------|------|
-| create_task | task_data: dict | Task | 新規タスクを作成する |
-| get_task | uuid: str | Task または None | UUIDでタスクを取得する |
-| update_task | uuid: str, updates: dict | bool | タスクを更新する |
-| update_status | uuid: str, status: str, error_message: str (optional) | bool | ステータスを更新する |
-| update_statistics | uuid: str, llm_calls: int, tool_calls: int, tokens: int, compressions: int | bool | 統計情報を加算更新する |
-| complete_task | uuid: str | bool | タスクを完了状態に更新する |
-| fail_task | uuid: str, error_message: str | bool | タスクを失敗状態に更新する |
+| create_task | task_data: dict | DBTask | 新規タスクを作成する |
+| get_task | uuid: str | DBTask または None | UUIDでタスクを取得する |
+| get_task_by_key | task_key: TaskKey | DBTask または None | TaskKeyでタスクを取得する |
+| save_task | db_task: DBTask | DBTask | DBTaskオブジェクトを保存（更新）する |
 
 **処理内容**:
 - セッション管理をコンテキストマネージャーで自動化する
@@ -126,19 +124,19 @@ SQLAlchemy ORMを使用してtasksテーブルを定義する。
 ### 2.3 既存コード修正設計
 
 #### 2.3.1 TaskContextManager の修正（context_storage/task_context_manager.py）
-現在のSQLite直接操作を、TaskDBクラスを使用したアクセスに変更する。
+現在のSQLite直接操作を、TaskDBManagerクラスを使用したアクセスに変更する。
 
 **修正対象メソッド**:
 | メソッド | 修正内容 |
 |---------|---------|
-| `__init__` | TaskDBクラスのインスタンスを作成する |
-| `_init_database` | 削除。初期化はTaskDBクラスで行う |
-| `_register_or_update_task` | TaskDB.create_task または TaskDB.update_task を使用する |
-| `update_status` | TaskDB.update_status を使用する |
-| `update_statistics` | TaskDB.update_statistics を使用する |
-| `complete` | TaskDB.complete_task を使用する |
-| `stop` | TaskDB.update_status を使用する |
-| `fail` | TaskDB.fail_task を使用する |
+| `__init__` | TaskDBManagerクラスのインスタンスを作成する |
+| `_init_database` | 削除。初期化はTaskDBManagerクラスで行う |
+| `_register_or_update_task` | TaskDBManager.create_task または TaskDBManager.save_task を使用する |
+| `update_status` | DBTaskオブジェクトを取得し、ステータスを変更後、save_taskを使用する |
+| `update_statistics` | DBTaskオブジェクトを取得し、統計情報を更新後、save_taskを使用する |
+| `complete` | DBTaskオブジェクトを取得し、完了状態に変更後、save_taskを使用する |
+| `stop` | DBTaskオブジェクトを取得し、停止状態に変更後、save_taskを使用する |
+| `fail` | DBTaskオブジェクトを取得し、失敗状態に変更後、save_taskを使用する |
 
 ### 2.4 設定ファイル設計
 
@@ -220,7 +218,7 @@ PostgreSQLコンテナを追加する。
 
 | テストファイル | 対象 | 内容 |
 |--------------|------|------|
-| test_task_db.py | db/task_db.py | TaskDBクラスのテスト |
+| test_task_db.py | db/task_db.py | TaskDBManagerクラスのテスト |
 
 ### 5.2 テスト用データベース
 テスト実行時はテスト用PostgreSQLコンテナを使用する。
@@ -232,7 +230,7 @@ PostgreSQLコンテナを追加する。
 ### 6.1 修正対象ファイル
 | ファイル | 修正内容 |
 |---------|---------|
-| context_storage/task_context_manager.py | DB操作をTaskDBクラス経由に変更 |
+| context_storage/task_context_manager.py | DB操作をTaskDBManagerクラス経由に変更 |
 | config.yaml | database セクションを追加 |
 | docker-compose.yml | postgres サービスを追加 |
 | pyproject.toml | 依存パッケージを追加 |
@@ -241,7 +239,7 @@ PostgreSQLコンテナを追加する。
 ### 6.2 新規作成ファイル
 | ファイル | 内容 |
 |---------|------|
-| db/task_db.py | Taskモデル + TaskDBクラス |
+| db/task_db.py | DBTaskモデル + TaskDBManagerクラス |
 | scripts/create_db.py | DB作成ツール |
 
 ---
