@@ -15,12 +15,15 @@ services:
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       - API_SERVER_KEY=${API_SERVER_KEY:-your-secret-api-key-here}
       - DATABASE_URL=sqlite:///./data/users.db
+      - TASK_DB_URL=${TASK_DB_URL:-postgresql://coding_agent:${POSTGRES_PASSWORD:-coding_agent_password}@postgres:5432/coding_agent}
       - USE_MOCK_AD=${USE_MOCK_AD:-false}
     volumes:
       - user-config-data:/app/data
-      - ./contexts:/app/contexts:ro  # tasks.db読み取り専用マウント
     networks:
       - coding-agent-network
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # Streamlit管理画面サーバー
   user-config-web:
@@ -32,10 +35,10 @@ services:
       - AD_BIND_PASSWORD=${AD_BIND_PASSWORD:-admin_password}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       - DATABASE_URL=sqlite:///./data/users.db
+      - TASK_DB_URL=${TASK_DB_URL:-postgresql://coding_agent:${POSTGRES_PASSWORD:-coding_agent_password}@postgres:5432/coding_agent}
       - USE_MOCK_AD=${USE_MOCK_AD:-false}
     volumes:
       - user-config-data:/app/data
-      - ./contexts:/app/contexts:ro  # tasks.db読み取り専用マウント
     ports:
       - "8501:8501"
     networks:
@@ -43,6 +46,7 @@ services:
     depends_on:
       - user-config-api
       - openldap
+      - postgres
 
   # テスト用OpenLDAPサーバー
   openldap:
