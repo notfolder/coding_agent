@@ -256,6 +256,13 @@ class PlanningCoordinator:
                 plan_entry = self.history_store.get_latest_plan()
                 if plan_entry:
                     self.current_plan = plan_entry.get("plan") or plan_entry.get("updated_plan")
+                    if self.current_plan:
+                        # 履歴から選択環境を復元
+                        self.selected_environment = self._extract_selected_environment(self.current_plan)
+                        self.logger.info(
+                            "履歴に保存された実行環境: %s",
+                            self.selected_environment,
+                        )
                     self.current_phase = "execution"
                     self._post_phase_comment("planning", "completed", "Loaded existing plan from history.")
             else:
@@ -287,6 +294,11 @@ class PlanningCoordinator:
 
             # Check for new comments after planning phase
             self._check_and_add_new_comments()
+
+            # Ensure execution environment is ready before execution phase
+            if not self._ensure_execution_environment_ready():
+                self.logger.error("Execution environment preparation failed. Aborting task.")
+                return False
 
             # Post execution start
             self._post_phase_comment("execution", "started", "Beginning execution of planned actions...")
@@ -764,6 +776,59 @@ class PlanningCoordinator:
             return selected_env
 
         return None
+
+    def _ensure_execution_environment_ready(self) -> bool:
+        """実行フェーズ開始前に実行環境コンテナを準備する.
+
+        Returns:
+            実行環境が利用可能な場合はTrue、準備に失敗した場合はFalse
+
+        """
+        if self.execution_manager is None:
+            # コマンド実行機能が無効な場合は処理不要
+            return True
+
+        if not self.task.uuid:
+            # UUIDがないとコンテナ名を一意にできないため実行不能
+            warning_msg = "タスクにUUIDがないため実行環境を準備できません。"
+            self.logger.warning(warning_msg)
+            self.task.comment(f"⚠️ {warning_msg}")
+            return False
+
+        container_info = self.execution_manager.get_container_info(self.task.uuid)
+        if container_info is not None and container_info.status == "ready":
+            # 既に準備済みのコンテナを再利用する
+            self.logger.info(
+                "既存の実行環境を再利用します: %s (%s)",
+                container_info.container_id,
+                container_info.environment_name,
+            )
+            if self.selected_environment is None:
+                self.selected_environment = container_info.environment_name
+            return True
+
+        # 計画で選択された環境がない場合はデフォルトを使用
+        environment_name = self.selected_environment or self.execution_manager.get_default_environment()
+        if self.selected_environment is None:
+            self.selected_environment = environment_name
+
+        try:
+            # コンテナを起動し、利用可能状態まで準備する
+            container_info = self.execution_manager.prepare(self.task, environment_name)
+            self.logger.info(
+                "実行環境を起動しました: %s (%s)",
+                container_info.container_id,
+                container_info.environment_name,
+            )
+            self.task.comment(
+                f"選択された実行環境({container_info.environment_name})を起動しました。"
+            )
+            return True
+        except Exception as error:
+            error_msg = f"実行環境の準備に失敗しました: {error}"
+            self.logger.exception(error_msg)
+            self.task.comment(f"⚠️ {error_msg}")
+            return False
 
     def _execute_action(self) -> dict[str, Any] | None:
         """Execute the next action from the plan.

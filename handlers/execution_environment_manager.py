@@ -467,9 +467,7 @@ class ExecutionEnvironmentManager:
             "--workdir", "/workspace",
             # 非特権モードで実行
             "--security-opt", "no-new-privileges",
-            # コンテナを継続実行（sleepコマンド）
             image,
-            "sleep", "infinity",
         ]
 
         try:
