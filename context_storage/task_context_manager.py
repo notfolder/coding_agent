@@ -352,7 +352,11 @@ class TaskContextManager:
         try:
             # LLMクライアントを取得（要約生成に必要）
             from clients.lm_client import get_llm_client
-            llm_client = get_llm_client(self.config, "planning")
+            llm_client = get_llm_client(
+                self.config,
+                message_store=self.message_store,
+                context_dir=self.context_dir,
+            )
             
             # ContextCompressorを初期化
             from .context_compressor import ContextCompressor
