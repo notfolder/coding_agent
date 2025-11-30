@@ -286,9 +286,40 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 
 ---
 
-## 12. Command Executor MCP Server連携
+## 12. テキスト編集MCP Server連携
 
 ### 12.1 概要
+
+`bhouston/mcp-server-text-editor`を使用して、コマンド実行Docker環境内でテキストファイルの生成・編集を行う機能です。ClaudeのテキストエディタツールAPIと同一のインターフェースを提供します。
+
+### 12.2 主要機能
+
+- **ファイル表示**: `view`コマンドでファイル内容やディレクトリ構造を表示
+- **ファイル作成**: `create`コマンドで新規ファイルを作成
+- **文字列置換**: `str_replace`コマンドでファイル内の文字列を置換
+- **行挿入**: `insert`コマンドで指定行にテキストを挿入
+- **編集取り消し**: `undo_edit`コマンドで直前の編集を取り消し
+
+### 12.3 GitHub/GitLab MCPの無効化
+
+テキスト編集MCP機能が有効な場合（デフォルト）、GitHub/GitLab MCPをLLMに提供せず、以下で代替します：
+
+| 従来の機能 | 代替手段 |
+|-----------|---------|
+| ファイル作成・更新 | text_editor（create, str_replace） |
+| ファイル取得 | text_editor（view） |
+| ブランチ操作 | gitコマンド（command-executor経由） |
+| コミット・プッシュ | gitコマンド（command-executor経由） |
+
+### 12.4 詳細仕様
+
+→ 詳細は [TEXT_EDITOR_MCP_SPECIFICATION.md](spec/TEXT_EDITOR_MCP_SPECIFICATION.md) を参照
+
+---
+
+## 13. Command Executor MCP Server連携
+
+### 13.1 概要
 
 コーディングエージェントからExecutionEnvironmentManagerを通じてDocker実行環境でコマンド実行を行う機能です。ビルド、テスト、リンター等のコマンドを安全なDocker環境で実行します。
 
@@ -297,7 +328,7 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 - Function callingツール名: `command-executor_execute_command`
 - PlanningCoordinatorが内部でExecutionEnvironmentManagerを呼び出し
 
-### 12.2 主要機能
+### 13.2 主要機能
 
 - **Docker実行環境**: タスク毎に独立したDockerコンテナを作成
 - **プロジェクトクローン**: Git経由でプロジェクトファイルを自動ダウンロード（git自動インストール）
@@ -306,7 +337,7 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 - **Docker in Docker**: ホストのDocker socketをマウントして実行環境コンテナを管理
 - **SSL対応**: セルフホストGitLab対応（http.sslVerify=false）
 
-### 12.3 処理フロー
+### 13.3 処理フロー
 
 1. タスク開始時にDockerコンテナを作成（ExecutionEnvironmentManager.prepare）
 2. コンテナ内にgitをインストール（apt-get install git）
@@ -316,26 +347,26 @@ IssueやMerge Request/Pull Requestの処理を行う際、対象プロジェク�
 6. PlanningCoordinatorがExecutionEnvironmentManager.execute_command()を実行
 7. タスク終了時にコンテナを削除（TaskHandler.finally）
 
-### 12.4 詳細仕様
+### 13.4 詳細仕様
 
 → 詳細は [COMMAND_EXECUTOR_MCP_SPECIFICATION.md](spec/COMMAND_EXECUTOR_MCP_SPECIFICATION.md) を参照
 
 ---
 
-## 13. IssueからMR/PR変換機能
+## 14. IssueからMR/PR変換機能
 
-### 13.1 概要
+### 14.1 概要
 
 GitHub/GitLabのIssueで依頼された内容を自動的にMerge Request (MR) / Pull Request (PR) として作成する機能です。Issueの内容に基づいてLLMがブランチ名を決定し、新しいタスクとしてMR/PRを作成・処理します。
 
-### 13.2 主要機能
+### 14.2 主要機能
 
 - **ブランチ名自動生成**: LLMがIssue内容を分析し、Bot名とIssue番号を含む適切なブランチ名を決定
 - **内容転記**: Issue本文とコメントをMR/PRに転記
 - **自動タスク化**: MR/PRにBotをアサイン・ラベル付与することで自動的にタスク処理開始
 - **元Issueへの報告**: 作成されたMR/PRへのリンクを元Issueにコメント
 
-### 13.3 処理フロー
+### 14.3 処理フロー
 
 1. `coding agent`ラベルが付与されたIssueを検知
 2. Issue内容をLLMに送信し、ブランチ名を生成（Bot名+Issue番号を含む）
@@ -346,19 +377,21 @@ GitHub/GitLabのIssueで依頼された内容を自動的にMerge Request (MR) /
 7. 元Issueを`coding agent done`に更新
 8. MR/PRが自動的にタスクとして処理開始
 
-### 13.4 詳細仕様
+### 14.4 詳細仕様
 
 → 詳細は [ISSUE_TO_MR_CONVERSION_SPECIFICATION.md](spec/ISSUE_TO_MR_CONVERSION_SPECIFICATION.md) を参照
 
-## 14. 過去コンテキスト引き継ぎ機能
+---
 
-### 14.1 概要
+## 15. 過去コンテキスト引き継ぎ機能
+
+### 15.1 概要
 
 同一のIssue、Merge Request、Pull Requestに対して、過去にコーディングエージェントが処理した際のコンテキストを引き継ぎ、処理の継続性と効率性を向上させる機能です。
 
 本機能は、通常モードと計画実行モード（Planning Mode）の両方で動作します。
 
-### 14.2 主要機能
+### 15.2 主要機能
 
 - **過去コンテキスト検索**: TaskKeyのハッシュ値を使用した高速検索
 - **引き継ぎデータ管理**: 要約、計画履歴、ツール実行履歴の引き継ぎ
@@ -366,7 +399,7 @@ GitHub/GitLabのIssueで依頼された内容を自動的にMerge Request (MR) /
 - **トークン制限対応**: 引き継ぎコンテキストのトークン数制御
 - **ユーザー制御**: コメントコマンドによる引き継ぎ動作の制御
 
-### 14.3 引き継ぎ対象
+### 15.3 引き継ぎ対象
 
 通常モードとPlanning Modeで以下のデータを引き継ぎます：
 
@@ -380,13 +413,13 @@ GitHub/GitLabのIssueで依頼された内容を自動的にMerge Request (MR) /
 | リフレクション | - | ✅ |
 | 再計画判断 | - | ✅ |
 
-### 14.4 詳細仕様
+### 15.4 詳細仕様
 
 → 詳細は [CONTEXT_INHERITANCE_SPECIFICATION.md](spec/CONTEXT_INHERITANCE_SPECIFICATION.md) を参照
 
 ---
 
-## 15. 外部API仕様
+## 16. 外部API仕様
 
 本プロジェクトで使用する外部APIの仕様については、以下を参照してください。
 
@@ -399,7 +432,7 @@ GitHub/GitLabのIssueで依頼された内容を自動的にMerge Request (MR) /
 
 ---
 
-## 16. 仕様書一覧
+## 17. 仕様書一覧
 
 | ファイル名 | 内容 |
 |-----------|------|
@@ -417,11 +450,13 @@ GitHub/GitLabのIssueで依頼された内容を自動的にMerge Request (MR) /
 | [PROJECT_FILE_LIST_CONTEXT_SPECIFICATION.md](spec/PROJECT_FILE_LIST_CONTEXT_SPECIFICATION.md) | プロジェクトファイル一覧コンテキスト仕様 |
 | [USER_CONFIG_WEB_SPECIFICATION.md](spec/USER_CONFIG_WEB_SPECIFICATION.md) | ユーザー設定Web仕様 |
 | [user_management_api_spec.md](spec/user_management_api_spec.md) | ユーザー管理API仕様 |
+| [TEXT_EDITOR_MCP_SPECIFICATION.md](spec/TEXT_EDITOR_MCP_SPECIFICATION.md) | テキスト編集MCP Server連携仕様 |
 | [COMMAND_EXECUTOR_MCP_SPECIFICATION.md](spec/COMMAND_EXECUTOR_MCP_SPECIFICATION.md) | Command Executor MCP Server連携仕様 |
+| [MULTI_LANGUAGE_ENVIRONMENT_SPECIFICATION.md](spec/MULTI_LANGUAGE_ENVIRONMENT_SPECIFICATION.md) | 複数言語対応実行環境仕様 |
 | [ISSUE_TO_MR_CONVERSION_SPECIFICATION.md](spec/ISSUE_TO_MR_CONVERSION_SPECIFICATION.md) | IssueからMR/PR変換仕様 |
 
 ---
 
-**文書バージョン:** 1.1  
-**最終更新日:** 2024-11-29  
+**文書バージョン:** 1.2  
+**最終更新日:** 2024-11-30  
 **ステータス:** 統合ドキュメント
