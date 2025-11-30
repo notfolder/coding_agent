@@ -15,12 +15,15 @@ services:
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       - API_SERVER_KEY=${API_SERVER_KEY:-your-secret-api-key-here}
       - DATABASE_URL=sqlite:///./data/users.db
+      - TASK_DB_URL=${TASK_DB_URL:-postgresql://coding_agent:${POSTGRES_PASSWORD:-coding_agent_password}@postgres:5432/coding_agent}
       - USE_MOCK_AD=${USE_MOCK_AD:-false}
     volumes:
       - user-config-data:/app/data
-      - ./contexts:/app/contexts:ro  # tasks.db読み取り専用マウント
     networks:
       - coding-agent-network
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # Streamlit管理画面サーバー
   user-config-web:
@@ -32,10 +35,10 @@ services:
       - AD_BIND_PASSWORD=${AD_BIND_PASSWORD:-admin_password}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
       - DATABASE_URL=sqlite:///./data/users.db
+      - TASK_DB_URL=${TASK_DB_URL:-postgresql://coding_agent:${POSTGRES_PASSWORD:-coding_agent_password}@postgres:5432/coding_agent}
       - USE_MOCK_AD=${USE_MOCK_AD:-false}
     volumes:
       - user-config-data:/app/data
-      - ./contexts:/app/contexts:ro  # tasks.db読み取り専用マウント
     ports:
       - "8501:8501"
     networks:
@@ -43,6 +46,7 @@ services:
     depends_on:
       - user-config-api
       - openldap
+      - postgres
 
   # テスト用OpenLDAPサーバー
   openldap:
@@ -121,6 +125,28 @@ services:
     networks:
       - coding-agent-network
 
+  # PostgreSQL - タスク情報の永続化
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    restart: always
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_DB: coding_agent
+      POSTGRES_USER: coding_agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-coding_agent_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - coding-agent-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coding_agent -d coding_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   # Producer サービス - タスクを継続的に取得してキューに追加
   coding-agent-producer:
     build: .
@@ -132,6 +158,8 @@ services:
       user-config-api:
         condition: service_started
       web:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     networks:
       - coding-agent-network
@@ -149,6 +177,13 @@ services:
       - RABBITMQ_PORT=5672
       - RABBITMQ_USER=guest
       - RABBITMQ_PASSWORD=guest
+
+      # PostgreSQL設定
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=coding_agent
+      - DATABASE_USER=coding_agent
+      - DATABASE_PASSWORD=${POSTGRES_PASSWORD:-coding_agent_password}
 
       # LLM設定
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
@@ -186,6 +221,8 @@ services:
         condition: service_started
       web:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     networks:
       - coding-agent-network
     environment:
@@ -202,6 +239,13 @@ services:
       - RABBITMQ_PORT=5672
       - RABBITMQ_USER=guest
       - RABBITMQ_PASSWORD=guest
+
+      # PostgreSQL設定
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=coding_agent
+      - DATABASE_USER=coding_agent
+      - DATABASE_PASSWORD=${POSTGRES_PASSWORD:-coding_agent_password}
 
       # LLM設定
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
@@ -288,6 +332,7 @@ services:
 
 volumes:
   rabbitmq_data:
+  postgres_data:
   user-config-data:
   openldap-data:
   openldap-config:

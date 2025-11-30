@@ -6,241 +6,150 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
-from datetime import datetime, timedelta, timezone
+import os
+from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Iterator, List
+
+from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, create_engine, func, select
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, sessionmaker
 
 logger = logging.getLogger(__name__)
+
+_METADATA = MetaData()
+tasks_table = Table(
+    "tasks",
+    _METADATA,
+    Column("uuid", String(36), primary_key=True),
+    Column("user", String(255)),
+    Column("total_tokens", Integer),
+    Column("created_at", DateTime(timezone=True)),
+)
 
 
 class TokenUsageService:
     """トークン使用量サービス.
 
-    tasks.dbからユーザー毎のトークン使用量を集計・取得します。
+    PostgreSQLなどのSQLデータベース上に保存されたtasksテーブルを参照します。
     """
 
-    # 全ユーザー取得時の上限数
     MAX_USERS_LIMIT = 20
 
-    def __init__(self, tasks_db_path: str | Path | None = None) -> None:
-        """TokenUsageServiceを初期化する.
+    def __init__(
+        self,
+        tasks_db_path: str | Path | None = None,
+        *,
+        database_url: str | None = None,
+        engine: Engine | None = None,
+    ) -> None:
+        """TokenUsageServiceを初期化する."""
 
-        Args:
-            tasks_db_path: tasks.dbのパス (Noneの場合は自動検出)
+        self._tasks_db_path = Path(tasks_db_path) if tasks_db_path else None
+        self._database_url = self._resolve_database_url(database_url)
+        self._engine = engine or self._create_engine()
+        self._session_factory = sessionmaker(bind=self._engine, autoflush=False, expire_on_commit=False)
 
-        """
-        self.tasks_db_path = self._resolve_db_path(tasks_db_path)
+    @contextmanager
+    def _get_session(self) -> Iterator[Session]:
+        """SQLAlchemyセッションを取得する."""
 
-    def _resolve_db_path(self, tasks_db_path: str | Path | None) -> Path:
-        """tasks.dbのパスを解決する.
-
-        Args:
-            tasks_db_path: 指定されたパス (Noneの場合は自動検出)
-
-        Returns:
-            tasks.dbのパス
-
-        """
-        if tasks_db_path is not None:
-            return Path(tasks_db_path)
-
-        # 自動検出のパス候補
-        candidates = [
-            Path("/app/contexts/tasks.db"),  # Dockerコンテナ内
-            Path("contexts/tasks.db"),  # 通常の実行
-            Path(__file__).parent.parent.parent.parent / "contexts" / "tasks.db",
-        ]
-
-        for path in candidates:
-            if path.exists():
-                return path
-
-        # 見つからない場合はデフォルトパスを返す (存在チェックは呼び出し側で行う)
-        return Path("contexts/tasks.db")
-
-    def _get_connection(self) -> sqlite3.Connection:
-        """データベース接続を取得する.
-
-        Returns:
-            SQLite接続オブジェクト
-
-        Raises:
-            FileNotFoundError: データベースファイルが存在しない場合
-
-        """
-        if not self.tasks_db_path.exists():
-            raise FileNotFoundError(f"tasks.db not found: {self.tasks_db_path}")
-
-        # 読み取り専用モードで接続 (URIモード使用)
-        conn = sqlite3.connect(
-            f"file:{self.tasks_db_path}?mode=ro",
-            uri=True,
-            timeout=10.0,
-        )
-        conn.row_factory = sqlite3.Row
-        return conn
+        session = self._session_factory()
+        try:
+            yield session
+        except SQLAlchemyError:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     def _get_now(self) -> datetime:
-        """現在時刻を取得する (ローカルタイムゾーン).
+        """現在時刻をUTC基準で取得する."""
 
-        Returns:
-            現在時刻
+        return datetime.now(tz=UTC).astimezone()
 
-        """
-        # UTC時刻を取得してローカルタイムに変換
-        return datetime.now(tz=timezone.utc).astimezone()
+    def get_user_token_usage(self, username: str) -> Dict[str, Any]:
+        """指定ユーザーの期間別トークン使用量を取得する."""
 
-    def get_user_token_usage(self, username: str) -> dict[str, Any]:
-        """指定ユーザーの期間別トークン使用量を取得する.
-
-        Args:
-            username: ユーザー名
-
-        Returns:
-            今日・今週・今月のトークン使用量を含む辞書
-            {
-                "username": str,
-                "today": int,
-                "this_week": int,
-                "this_month": int,
-                "last_updated": str (ISO 8601形式)
-            }
-
-        """
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-
-                # 日付の基準を計算
+            with self._get_session() as session:
                 now = self._get_now()
+                # 日時の基準ポイントを算出
                 today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-                # 週の開始 (月曜日を週の開始とする)
                 week_start = today_start - timedelta(days=today_start.weekday())
-
-                # 月の開始
                 month_start = today_start.replace(day=1)
 
-                # 各期間のトークン合計を取得
-                today_tokens = self._get_tokens_since(
-                    cursor, username, today_start.isoformat(),
+                today_tokens = self._get_tokens_since(session, username, today_start)
+                week_tokens = self._get_tokens_since(session, username, week_start)
+                month_tokens = self._get_tokens_since(session, username, month_start)
+
+                total_stmt = select(func.coalesce(func.sum(tasks_table.c.total_tokens), 0)).where(
+                    tasks_table.c.user == username
                 )
-                week_tokens = self._get_tokens_since(
-                    cursor, username, week_start.isoformat(),
-                )
-                month_tokens = self._get_tokens_since(
-                    cursor, username, month_start.isoformat(),
-                )
+                total_tokens = session.execute(total_stmt).scalar() or 0
 
                 return {
                     "username": username,
                     "today": today_tokens,
                     "this_week": week_tokens,
                     "this_month": month_tokens,
+                    "total": max(0, int(total_tokens)),
                     "last_updated": now.isoformat(),
                 }
 
-        except FileNotFoundError:
-            logger.warning("tasks.db not found, returning zero usage")
-            return {
-                "username": username,
-                "today": 0,
-                "this_week": 0,
-                "this_month": 0,
-                "last_updated": self._get_now().isoformat(),
-            }
-        except sqlite3.Error:
+        except SQLAlchemyError:
             logger.exception("Database error while getting token usage")
-            return {
-                "username": username,
-                "today": 0,
-                "this_week": 0,
-                "this_month": 0,
-                "last_updated": self._get_now().isoformat(),
-            }
+        except Exception:
+            logger.exception("Unexpected error while getting token usage")
 
-    def _get_tokens_since(
-        self,
-        cursor: sqlite3.Cursor,
-        username: str,
-        since: str,
-    ) -> int:
-        """指定日時以降のトークン数を取得する.
+        return {
+            "username": username,
+            "today": 0,
+            "this_week": 0,
+            "this_month": 0,
+            "total": 0,
+            "last_updated": self._get_now().isoformat(),
+        }
 
-        Args:
-            cursor: SQLiteカーソル
-            username: ユーザー名
-            since: 開始日時 (ISO 8601形式)
+    def get_user_daily_history(self, username: str, days: int = 30) -> Dict[str, Any]:
+        """指定ユーザーの日別トークン履歴を取得する."""
 
-        Returns:
-            トークン数 (負の値は0として扱う)
-
-        """
-        cursor.execute(
-            """
-            SELECT COALESCE(SUM(total_tokens), 0) as total
-            FROM tasks
-            WHERE user = ? AND created_at >= ?
-            """,
-            (username, since),
-        )
-        result = cursor.fetchone()
-        total = result["total"] if result else 0
-        # 負の値は0として扱う
-        return max(0, total)
-
-    def get_user_daily_history(
-        self,
-        username: str,
-        days: int = 30,
-    ) -> dict[str, Any]:
-        """指定ユーザーの日別トークン使用履歴を取得する.
-
-        Args:
-            username: ユーザー名
-            days: 取得日数 (デフォルト30日)
-
-        Returns:
-            日付とトークン数のリストを含む辞書
-            {
-                "username": str,
-                "history": [{"date": str, "tokens": int}, ...],
-                "period_start": str,
-                "period_end": str
-            }
-
-        """
-        # daysの範囲制限 (1-365日)
         days = max(1, min(365, days))
 
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-
+            with self._get_session() as session:
                 now = self._get_now()
+                # 表示期間の開始・終了日を決定
                 end_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
                 start_date = end_date - timedelta(days=days - 1)
 
-                # 日別の集計クエリ
-                cursor.execute(
-                    """
-                    SELECT DATE(created_at) as date, SUM(total_tokens) as tokens
-                    FROM tasks
-                    WHERE user = ? AND DATE(created_at) >= DATE(?)
-                    GROUP BY DATE(created_at)
-                    ORDER BY date
-                    """,
-                    (username, start_date.isoformat()),
+                stmt = (
+                    select(
+                        func.date(tasks_table.c.created_at).label("date"),
+                        func.coalesce(func.sum(tasks_table.c.total_tokens), 0).label("tokens"),
+                    )
+                    .where(
+                        tasks_table.c.user == username,
+                        tasks_table.c.created_at.is_not(None),
+                        tasks_table.c.created_at >= start_date,
+                    )
+                    .group_by(func.date(tasks_table.c.created_at))
+                    .order_by(func.date(tasks_table.c.created_at))
                 )
 
-                # 結果を辞書に変換
+                rows = session.execute(stmt).all()
                 db_results = {
-                    row["date"]: max(0, row["tokens"]) for row in cursor.fetchall()
+                    (
+                        mapping["date"].strftime("%Y-%m-%d")
+                        if hasattr(mapping["date"], "strftime")
+                        else str(mapping["date"])
+                    ): max(0, int(mapping["tokens"] or 0))
+                    for mapping in (row._mapping for row in rows)
                 }
 
-                # 欠損日を0で補完
-                history = []
+                history: List[Dict[str, Any]] = []
                 current_date = start_date
                 while current_date <= end_date:
                     date_str = current_date.strftime("%Y-%m-%d")
@@ -253,31 +162,122 @@ class TokenUsageService:
                     "history": history,
                     "period_start": start_date.strftime("%Y-%m-%d"),
                     "period_end": end_date.strftime("%Y-%m-%d"),
+                    "last_updated": now.isoformat(),
                 }
 
-        except FileNotFoundError:
-            logger.warning("tasks.db not found, returning empty history")
-            return self._empty_history(username, days)
-        except sqlite3.Error:
+        except SQLAlchemyError:
             logger.exception("Database error while getting daily history")
-            return self._empty_history(username, days)
+        except Exception:
+            logger.exception("Unexpected error while getting daily history")
 
-    def _empty_history(self, username: str, days: int) -> dict[str, Any]:
-        """空の履歴データを生成する.
+        return self._empty_history(username, days)
 
-        Args:
-            username: ユーザー名
-            days: 日数
+    def get_all_users_token_usage(self) -> List[Dict[str, Any]]:
+        """全ユーザーのトークン使用量を取得する (上位20件)."""
 
-        Returns:
-            0埋めされた履歴データ
+        try:
+            with self._get_session() as session:
+                now = self._get_now()
+                # 期間別に集計するための基準日時を準備
+                today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                week_start = today_start - timedelta(days=today_start.weekday())
+                month_start = today_start.replace(day=1)
 
-        """
+                month_stmt = (
+                    select(
+                        tasks_table.c.user.label("user"),
+                        func.coalesce(func.sum(tasks_table.c.total_tokens), 0).label("this_month"),
+                    )
+                    .where(
+                        tasks_table.c.user.is_not(None),
+                        tasks_table.c.created_at.is_not(None),
+                        tasks_table.c.created_at >= month_start,
+                    )
+                    .group_by(tasks_table.c.user)
+                )
+                month_results = {
+                    mapping["user"]: max(0, int(mapping["this_month"] or 0))
+                    for mapping in (row._mapping for row in session.execute(month_stmt).all())
+                    if mapping["user"]
+                }
+
+                if not month_results:
+                    return []
+
+                total_stmt = (
+                    select(
+                        tasks_table.c.user.label("user"),
+                        func.coalesce(func.sum(tasks_table.c.total_tokens), 0).label("total"),
+                    )
+                    .where(tasks_table.c.user.is_not(None))
+                    .group_by(tasks_table.c.user)
+                )
+                total_results = {
+                    mapping["user"]: max(0, int(mapping["total"] or 0))
+                    for mapping in (row._mapping for row in session.execute(total_stmt).all())
+                    if mapping["user"]
+                }
+
+                users_sorted = sorted(
+                    month_results.items(),
+                    key=lambda item: item[1],
+                    reverse=True,
+                )[: self.MAX_USERS_LIMIT]
+
+                results: List[Dict[str, Any]] = []
+                for user, month_tokens in users_sorted:
+                    today_tokens = self._get_tokens_since(session, user, today_start)
+                    week_tokens = self._get_tokens_since(session, user, week_start)
+                    total_tokens = total_results.get(user, 0)
+
+                    results.append(
+                        {
+                            "username": user,
+                            "today": today_tokens,
+                            "this_week": week_tokens,
+                            "this_month": month_tokens,
+                            "total": total_tokens,
+                        }
+                    )
+
+                return results
+
+        except SQLAlchemyError:
+            logger.exception("Database error while getting all users token usage")
+        except Exception:
+            logger.exception("Unexpected error while getting all users token usage")
+
+        return []
+
+    def _get_tokens_since(self, session: Session, username: str, since: datetime) -> int:
+        """指定日時以降のトークン数を取得する."""
+
+        if not username:
+            return 0
+
+        stmt = (
+            select(func.coalesce(func.sum(tasks_table.c.total_tokens), 0))
+            .where(
+                tasks_table.c.user == username,
+                tasks_table.c.total_tokens.is_not(None),
+                tasks_table.c.total_tokens > 0,
+                tasks_table.c.created_at.is_not(None),
+                tasks_table.c.created_at >= since,
+            )
+        )
+        total = session.execute(stmt).scalar()
+        if total is None:
+            return 0
+        return max(0, int(total))
+
+    def _empty_history(self, username: str, days: int) -> Dict[str, Any]:
+        """空の履歴を作成する."""
+
         now = self._get_now()
         end_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
         start_date = end_date - timedelta(days=days - 1)
 
-        history = []
+        history: List[Dict[str, Any]] = []
         current_date = start_date
         while current_date <= end_date:
             history.append({"date": current_date.strftime("%Y-%m-%d"), "tokens": 0})
@@ -288,82 +288,60 @@ class TokenUsageService:
             "history": history,
             "period_start": start_date.strftime("%Y-%m-%d"),
             "period_end": end_date.strftime("%Y-%m-%d"),
+            "last_updated": now.isoformat(),
         }
 
-    def get_all_users_token_usage(self) -> list[dict[str, Any]]:
-        """全ユーザーのトークン使用量を取得する (上位20人).
+    def _resolve_database_url(self, override_url: str | None) -> str:
+        """接続先データベースURLを決定する."""
 
-        Returns:
-            ユーザー毎の今日・今週・今月のトークン使用量リスト
-            トークン使用量が多い順でソートして上位20人を返却
+        if override_url:
+            return override_url
 
-        """
+        # 環境変数で直接URLが渡されている場合は最優先で利用
+        env_url = os.environ.get("TASK_DB_URL") or os.environ.get("TASKS_DATABASE_URL")
+        if env_url:
+            return env_url
+
+        # 個別の接続情報（ホスト等）が与えられている場合はURLを組み立てる
+        host = os.environ.get("TASK_DB_HOST")
+        if host:
+            port = os.environ.get("TASK_DB_PORT", "5432")
+            name = os.environ.get("TASK_DB_NAME", "coding_agent")
+            user = os.environ.get("TASK_DB_USER", "")
+            password = os.environ.get("TASK_DB_PASSWORD", "")
+
+            auth = ""
+            if user and password:
+                auth = f"{user}:{password}@"
+            elif user:
+                auth = f"{user}@"
+            elif password:
+                auth = f":{password}@"
+
+            return f"postgresql://{auth}{host}:{port}/{name}"
+
+        # 引数でパスが指定されている場合はSQLite接続として扱う
+        if self._tasks_db_path:
+            return f"sqlite:///{self._tasks_db_path}"
+
+        default_sqlite = Path("./contexts/tasks.db")
+        return f"sqlite:///{default_sqlite}"
+
+    def _create_engine(self) -> Engine:
+        """SQLAlchemy Engineを生成する."""
+
+        connect_args: Dict[str, Any] = {}
+        if self._database_url.startswith("sqlite"):
+            # SQLiteはスレッド毎に接続を共有できないため、この引数で緩和する
+            connect_args = {"check_same_thread": False}
+
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-
-                # 日付の基準を計算
-                now = self._get_now()
-                today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-                week_start = today_start - timedelta(days=today_start.weekday())
-                month_start = today_start.replace(day=1)
-
-                # 全ユーザーの今月のトークン数を取得 (上位20人)
-                cursor.execute(
-                    """
-                    SELECT user, SUM(total_tokens) as month_total
-                    FROM tasks
-                    WHERE user IS NOT NULL AND created_at >= ?
-                    GROUP BY user
-                    ORDER BY month_total DESC
-                    LIMIT ?
-                    """,
-                    (month_start.isoformat(), self.MAX_USERS_LIMIT),
-                )
-
-                top_users = [row["user"] for row in cursor.fetchall()]
-
-                if not top_users:
-                    return []
-
-                # 各ユーザーの詳細を取得
-                results = []
-                for username in top_users:
-                    today_tokens = self._get_tokens_since(
-                        cursor, username, today_start.isoformat(),
-                    )
-                    week_tokens = self._get_tokens_since(
-                        cursor, username, week_start.isoformat(),
-                    )
-                    month_tokens = self._get_tokens_since(
-                        cursor, username, month_start.isoformat(),
-                    )
-
-                    # 累計トークン数を取得
-                    cursor.execute(
-                        """
-                        SELECT COALESCE(SUM(total_tokens), 0) as total
-                        FROM tasks
-                        WHERE user = ?
-                        """,
-                        (username,),
-                    )
-                    total_result = cursor.fetchone()
-                    total_tokens = max(0, total_result["total"]) if total_result else 0
-
-                    results.append({
-                        "username": username,
-                        "today": today_tokens,
-                        "this_week": week_tokens,
-                        "this_month": month_tokens,
-                        "total": total_tokens,
-                    })
-
-                return results
-
-        except FileNotFoundError:
-            logger.warning("tasks.db not found, returning empty list")
-            return []
-        except sqlite3.Error:
-            logger.exception("Database error while getting all users token usage")
-            return []
+            return create_engine(
+                self._database_url,
+                pool_pre_ping=True,
+                future=True,
+                connect_args=connect_args,
+            )
+        except SQLAlchemyError:
+            logger.exception("Failed to initialize SQLAlchemy engine; falling back to in-memory database")
+            return create_engine("sqlite:///:memory:", future=True)

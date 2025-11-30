@@ -27,6 +27,20 @@ mcp_servers:
   #     - "-m"
   #     - "mcp_server_fetch"
 
+# データベース設定
+# タスク情報の永続化に使用するPostgreSQLの接続設定
+database:
+  # PostgreSQL設定
+  host: "localhost"
+  port: 5432
+  name: "coding_agent"
+  user: ""
+  password: ""
+  
+  # コネクションプール設定
+  pool_size: 5
+  max_overflow: 10
+
 # APIサーバー設定
 api_server:
   api_key: "your-secret-api-key-here"
