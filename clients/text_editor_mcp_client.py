@@ -278,6 +278,19 @@ class TextEditorMCPClient:
                 error=str(e),
             )
 
+    def _ensure_process_available(self) -> bool:
+        """MCPサーバープロセスが利用可能かどうかを確認する.
+
+        Returns:
+            プロセスとstdin/stdoutが利用可能な場合True
+
+        """
+        return (
+            self._process is not None
+            and self._process.stdin is not None
+            and self._process.stdout is not None
+        )
+
     def _send_request(self, request: dict[str, Any]) -> dict[str, Any]:
         """JSON-RPCリクエストを送信し、レスポンスを受信する.
 
@@ -291,7 +304,7 @@ class TextEditorMCPClient:
             RuntimeError: 通信エラーの場合
 
         """
-        if self._process is None or self._process.stdin is None or self._process.stdout is None:
+        if not self._ensure_process_available():
             msg = "MCP server process not available"
             raise RuntimeError(msg)
 
@@ -324,7 +337,7 @@ class TextEditorMCPClient:
             notification: JSON-RPC通知辞書
 
         """
-        if self._process is None or self._process.stdin is None:
+        if not self._ensure_process_available():
             return
 
         try:
