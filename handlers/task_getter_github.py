@@ -370,6 +370,15 @@ class TaskGitHubPullRequest(Task):
         
         return comments
 
+    @property
+    def source_branch(self) -> str | None:
+        """Pull Requestのソースブランチ名を取得する.
+
+        Returns:
+            ソースブランチ名、取得できない場合はNone
+        """
+        return self.pr.get("head", {}).get("ref")
+
 
 class TaskGetterFromGitHub(TaskGetter):
     def __init__(self, config: dict[str, Any], mcp_clients: dict[str, MCPToolClient]) -> None:
