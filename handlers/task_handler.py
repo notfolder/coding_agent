@@ -99,6 +99,20 @@ class TaskHandler:
         # タスク固有の設定を取得
         task_config = self._get_task_config(task)
 
+        # Issue → MR/PR 変換処理のチェック
+        # Issueタスクの場合、MR/PRに変換して処理を終了する（MRは次回スケジュールで処理される）
+        if self._should_convert_issue_to_mr(task, task_config):
+            conversion_result = self._convert_issue_to_mr(task, task_config)
+            if conversion_result:
+                self.logger.info(
+                    "Issue #%s をMR/PR #%s に変換しました。MR/PRは次回スケジュールで処理されます。",
+                    self._get_issue_number(task),
+                    conversion_result.mr_number,
+                )
+                return
+            # 変換に失敗した場合は通常処理に進む（エラーはログに記録済み）
+            self.logger.warning("Issue→MR/PR変換に失敗しました。通常処理を継続します。")
+
         # 計画機能の有効可否を先に判定する
         planning_config = task_config.get("planning", {})
         planning_enabled = planning_config.get("enabled", True)
@@ -1290,3 +1304,203 @@ class TaskHandler:
             self.logger.info("コメント検出状態を保存しました: %s", state_path)
         except Exception as e:
             self.logger.warning("コメント検出状態の保存に失敗: %s", e)
+
+    # =========================================
+    # Issue → MR/PR 変換機能
+    # =========================================
+
+    def _is_issue_task(self, task: Task) -> bool:
+        """タスクがIssueかどうかを判定する.
+
+        GitHub Issue または GitLab Issue の場合に True を返します。
+        Pull Request や Merge Request の場合は False を返します。
+
+        Args:
+            task: タスクオブジェクト
+
+        Returns:
+            Issue タスクの場合 True、それ以外は False
+
+        """
+        from handlers.task_getter_github import TaskGitHubIssue
+        from handlers.task_getter_gitlab import TaskGitLabIssue
+
+        return isinstance(task, (TaskGitHubIssue, TaskGitLabIssue))
+
+    def _should_convert_issue_to_mr(self, task: Task, task_config: dict[str, Any]) -> bool:
+        """Issue → MR/PR 変換を実行すべきかどうかを判定する.
+
+        以下の条件がすべて満たされる場合に True を返します：
+        1. タスクが Issue である
+        2. issue_to_mr_conversion が有効である
+
+        Args:
+            task: タスクオブジェクト
+            task_config: タスク固有の設定
+
+        Returns:
+            変換を実行すべき場合 True
+
+        """
+        import os
+
+        # Issue タスクでない場合は変換不要
+        if not self._is_issue_task(task):
+            return False
+
+        # 環境変数による有効/無効チェック
+        env_enabled = os.environ.get("ISSUE_TO_MR_ENABLED", "").lower()
+        if env_enabled:
+            return env_enabled == "true"
+
+        # 設定ファイルによる有効/無効チェック
+        conversion_config = task_config.get("issue_to_mr_conversion", {})
+        return conversion_config.get("enabled", True)
+
+    def _get_platform_for_task(self, task: Task) -> str:
+        """タスクのプラットフォームを判定する.
+
+        Args:
+            task: タスクオブジェクト
+
+        Returns:
+            "github" または "gitlab"
+
+        """
+        from handlers.task_getter_github import TaskGitHubIssue
+
+        if isinstance(task, TaskGitHubIssue):
+            return "github"
+        return "gitlab"
+
+    def _get_mcp_client_for_task(self, task: Task) -> Any:
+        """タスクに対応する MCP クライアントを取得する.
+
+        Args:
+            task: タスクオブジェクト
+
+        Returns:
+            MCP クライアント
+
+        """
+        platform = self._get_platform_for_task(task)
+        return self.mcp_clients.get(platform)
+
+    def _get_issue_number(self, task: Task) -> int:
+        """Issue番号を取得する.
+
+        Args:
+            task: タスクオブジェクト
+
+        Returns:
+            Issue 番号
+
+        """
+        task_key = task.get_task_key()
+        # GitHub: number, GitLab: issue_iid
+        if hasattr(task_key, "number"):
+            return task_key.number
+        if hasattr(task_key, "issue_iid"):
+            return task_key.issue_iid
+        return 0
+
+    def _convert_issue_to_mr(
+        self,
+        task: Task,
+        task_config: dict[str, Any],
+    ) -> Any:
+        """Issue を MR/PR に変換する.
+
+        IssueToMRConverter を使用して Issue を MR/PR に変換します。
+        変換が成功した場合、元の Issue は done ラベルに更新され、
+        作成された MR/PR は次回のスケジューリングで処理されます。
+
+        Args:
+            task: Issue タスクオブジェクト
+            task_config: タスク固有の設定
+
+        Returns:
+            変換結果（ConversionResult）、変換に失敗した場合は None
+
+        """
+        import tempfile
+        from pathlib import Path
+
+        from clients.lm_client import get_llm_client
+        from context_storage.message_store import MessageStore
+        from handlers.issue_to_mr_converter import IssueToMRConverter
+
+        try:
+            # プラットフォームの判定
+            platform = self._get_platform_for_task(task)
+
+            # MCP クライアントの取得
+            mcp_client = self._get_mcp_client_for_task(task)
+            if mcp_client is None:
+                self.logger.error(
+                    "MCP クライアントが見つかりません: platform=%s",
+                    platform,
+                )
+                return None
+
+            # Issue→MR変換用の一時LLMクライアントを作成
+            # LLMクライアントにはmessage_storeが必要なため、一時ディレクトリを使用
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_context_dir = Path(temp_dir)
+
+                # メッセージストアを初期化
+                temp_message_store = MessageStore(temp_context_dir, task_config)
+
+                # 変換用のLLMクライアントを作成
+                conversion_llm_client = get_llm_client(
+                    task_config,
+                    functions=None,  # Issue→MR変換にfunctionsは不要
+                    tools=None,
+                    message_store=temp_message_store,
+                    context_dir=temp_context_dir,
+                )
+
+                # IssueToMRConverter のインスタンス化
+                if platform == "gitlab":
+                    # GitLabの場合はGitLabClientを渡す
+                    converter = IssueToMRConverter(
+                        task=task,
+                        llm_client=conversion_llm_client,
+                        config=task_config,
+                        platform=platform,
+                        gitlab_client=task.gitlab_client if hasattr(task, "gitlab_client") else None,
+                    )
+                else:
+                    # GitHubの場合はGithubClientを渡す
+                    converter = IssueToMRConverter(
+                        task=task,
+                        llm_client=conversion_llm_client,
+                        config=task_config,
+                        platform=platform,
+                        github_client=task.github_client if hasattr(task, "github_client") else None,
+                    )
+
+                # 変換の実行
+                result = converter.convert()
+
+            if result.success:
+                self.logger.info(
+                    "Issue→MR/PR変換が成功しました: MR/PR #%s, ブランチ: %s",
+                    result.mr_number,
+                    result.branch_name,
+                )
+                return result
+
+            self.logger.error(
+                "Issue→MR/PR変換が失敗しました: %s",
+                result.error_message,
+            )
+            # 変換失敗時は Issue にエラーコメントを投稿
+            task.comment(f"⚠️ MR/PR への変換に失敗しました: {result.error_message}")
+            return None
+
+        except Exception as e:
+            self.logger.exception("Issue→MR/PR変換中に例外が発生しました")
+            # 変換失敗時は Issue にエラーコメントを投稿
+            task.comment(f"⚠️ MR/PR への変換中にエラーが発生しました: {e}")
+            return None

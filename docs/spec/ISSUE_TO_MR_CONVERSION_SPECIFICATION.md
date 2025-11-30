@@ -206,7 +206,7 @@ LLM は以下の JSON 形式で応答することを期待します：
 
 以下の情報を設定して MR/PR を作成する：
 
-- **タイトル**: 「WIP: 」プレフィックスを必ず付与し、その後に Issue のタイトルを使用
+- **タイトル**: Issue のタイトルを使用
 - **本文**: Issue の内容を転記（詳細は 4.3 参照）
 - **ソースブランチ**: 作成した新規ブランチ
 - **ターゲットブランチ**: デフォルトブランチ
@@ -337,7 +337,7 @@ MR/PR 作成後、元の Issue に対して以下の処理を行います：
 
 #### 6.2.2 GitLab 固有の処理
 
-- Merge Request の WIP ステータス設定
+- Merge Request の draft ステータス設定
 - Issue と MR の関連付け設定
 
 ---
@@ -477,7 +477,7 @@ sequenceDiagram
     IC->>MCP: create_empty_commit()
     MCP-->>IC: success
     
-    IC->>MCP: create_pull_request(pr_info with WIP prefix)
+    IC->>MCP: create_pull_request(pr_info)
     MCP-->>IC: pr_data
     
     IC->>CTM: transfer_content(issue, pr)
