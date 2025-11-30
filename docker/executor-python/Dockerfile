@@ -7,6 +7,7 @@ FROM python:3.11-slim-bookworm
 # curl/wget: ファイルダウンロード
 # jq: JSON処理
 # tree: ディレクトリ構造表示
+# nodejs/npm: text-editor MCPサーバー用
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
@@ -14,6 +15,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     tree \
     ca-certificates \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.jsをインストール(text-editor MCP用)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # 作業ディレクトリの設定
