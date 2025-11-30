@@ -427,5 +427,138 @@ class TestTaskHandlerWithDifferentTasks(unittest.TestCase):
         assert result is None
 
 
+class TestIssueToMRConversion(unittest.TestCase):
+    """Issue → MR/PR 変換機能のテスト."""
+
+    def setUp(self) -> None:
+        """Set up test environment."""
+        self.config = {
+            "github": {
+                "owner": "testorg",
+                "repo": "testrepo",
+                "bot_label": "coding agent",
+                "processing_label": "coding agent processing",
+                "done_label": "coding agent done",
+            },
+            "issue_to_mr_conversion": {
+                "enabled": True,
+            },
+            "max_llm_process_num": 10,
+        }
+
+        # Create mock MCP clients
+        github_server_config = {"mcp_server_name": "github"}
+        self.github_mcp_client = MockMCPToolClient(github_server_config)
+
+        # Create mock LLM client
+        self.llm_client = MockLLMClient(self.config)
+
+        # Create sample GitHub Issue task
+        sample_github_issue = {
+            "number": 1,
+            "title": "Test Issue",
+            "body": "Test issue body",
+            "repository_url": "https://api.github.com/repos/testorg/testrepo",
+            "labels": [{"name": "coding agent", "color": "blue"}],
+        }
+
+        self.github_issue_task = TaskGitHubIssue(
+            issue=sample_github_issue,
+            mcp_client=self.github_mcp_client,
+            github_client=MagicMock(),
+            config=self.config,
+        )
+
+    def test_is_issue_task_returns_true_for_github_issue(self) -> None:
+        """GitHub Issue タスクに対して _is_issue_task が True を返すことをテスト."""
+        task_handler = TaskHandler(
+            llm_client=self.llm_client,
+            mcp_clients={"github": self.github_mcp_client},
+            config=self.config,
+        )
+
+        assert task_handler._is_issue_task(self.github_issue_task) is True
+
+    def test_is_issue_task_returns_true_for_gitlab_issue(self) -> None:
+        """GitLab Issue タスクに対して _is_issue_task が True を返すことをテスト."""
+        gitlab_config = {
+            "gitlab": {
+                "project_id": 123,
+                "bot_label": "coding agent",
+            },
+        }
+
+        sample_gitlab_issue = {
+            "iid": 1,
+            "title": "Test GitLab Issue",
+            "description": "Test issue",
+            "project_id": 123,
+            "labels": ["coding agent"],
+        }
+
+        gitlab_mcp_client = MockMCPToolClient({"mcp_server_name": "gitlab"})
+        gitlab_task = TaskGitLabIssue(
+            issue=sample_gitlab_issue,
+            mcp_client=gitlab_mcp_client,
+            gitlab_client=MagicMock(),
+            config=gitlab_config,
+        )
+
+        task_handler = TaskHandler(
+            llm_client=self.llm_client,
+            mcp_clients={"gitlab": gitlab_mcp_client},
+            config=gitlab_config,
+        )
+
+        assert task_handler._is_issue_task(gitlab_task) is True
+
+    def test_should_convert_issue_to_mr_enabled(self) -> None:
+        """issue_to_mr_conversion が有効な場合に変換すべきと判定されることをテスト."""
+        task_handler = TaskHandler(
+            llm_client=self.llm_client,
+            mcp_clients={"github": self.github_mcp_client},
+            config=self.config,
+        )
+
+        assert task_handler._should_convert_issue_to_mr(
+            self.github_issue_task, self.config,
+        ) is True
+
+    def test_should_convert_issue_to_mr_disabled_by_config(self) -> None:
+        """issue_to_mr_conversion が無効な場合に変換しないと判定されることをテスト."""
+        config_disabled = self.config.copy()
+        config_disabled["issue_to_mr_conversion"] = {"enabled": False}
+
+        task_handler = TaskHandler(
+            llm_client=self.llm_client,
+            mcp_clients={"github": self.github_mcp_client},
+            config=config_disabled,
+        )
+
+        assert task_handler._should_convert_issue_to_mr(
+            self.github_issue_task, config_disabled,
+        ) is False
+
+    def test_get_platform_for_task_github(self) -> None:
+        """GitHub タスクに対して 'github' が返ることをテスト."""
+        task_handler = TaskHandler(
+            llm_client=self.llm_client,
+            mcp_clients={"github": self.github_mcp_client},
+            config=self.config,
+        )
+
+        assert task_handler._get_platform_for_task(self.github_issue_task) == "github"
+
+    def test_get_issue_number_github(self) -> None:
+        """GitHub Issue番号が正しく取得されることをテスト."""
+        task_handler = TaskHandler(
+            llm_client=self.llm_client,
+            mcp_clients={"github": self.github_mcp_client},
+            config=self.config,
+        )
+
+        assert task_handler._get_issue_number(self.github_issue_task) == 1
+
+
 if __name__ == "__main__":
     unittest.main()
