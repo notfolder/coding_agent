@@ -796,13 +796,16 @@ class IssueToMRConverter:
         try:
             if self.platform == "github":
                 bot_label = self.config.get("github", {}).get("bot_label", "coding agent")
+                processing_label = self.config.get("github", {}).get("processing_label", "coding agent processing")
                 done_label = self.config.get("github", {}).get("done_label", "coding agent done")
             else:
                 bot_label = self.config.get("gitlab", {}).get("bot_label", "coding agent")
+                processing_label = self.config.get("gitlab", {}).get("processing_label", "coding agent processing")
                 done_label = self.config.get("gitlab", {}).get("done_label", "coding agent done")
 
-            # bot_label を削除
+            # bot_label と processing_label を削除
             self.task.remove_label(bot_label)
+            self.task.remove_label(processing_label)
             # done_label を追加
             self.task.add_label(done_label)
         except Exception as e:
