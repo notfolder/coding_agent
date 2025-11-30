@@ -433,7 +433,10 @@ class TaskContextManager:
             number = 0
             
             if task_source == "gitlab":
-                number = int(task_dict.get("issue_iid", 0) or task_dict.get("mr_iid", 0))
+                # issue_iid または mr_iid を取得（Noneの場合は0）
+                issue_iid = task_dict.get("issue_iid")
+                mr_iid = task_dict.get("mr_iid")
+                number = int(issue_iid if issue_iid is not None else (mr_iid if mr_iid is not None else 0))
             else:
                 number = int(task_dict.get("number", 0))
             

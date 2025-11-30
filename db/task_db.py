@@ -154,6 +154,43 @@ class DBTask(Base):
         raise ValueError(msg)
 
 
+def _parse_task_key_dict(task_dict: dict[str, Any]) -> tuple[str, str, str | None, str | None, int | None, int]:
+    """TaskKeyのto_dict()結果をデータベース形式に変換するヘルパー関数.
+
+    Args:
+        task_dict: TaskKey.to_dict()の結果
+
+    Returns:
+        tuple: (task_source, task_type, owner, repo, project_id, number)
+
+    """
+    # type: "github_issue" -> task_source: "github", task_type: "issue"
+    task_type_full = task_dict.get("type", "unknown")
+    if "_" in task_type_full:
+        parts = task_type_full.split("_", 1)
+        task_source = parts[0]
+        task_type = parts[1]
+    else:
+        task_source = task_type_full
+        task_type = task_type_full
+
+    # フィールドの抽出
+    owner = task_dict.get("owner")
+    repo = task_dict.get("repo")
+    project_id = task_dict.get("project_id")
+    number = 0
+
+    if task_source == "gitlab":
+        # issue_iid または mr_iid を取得（Noneの場合は0）
+        issue_iid = task_dict.get("issue_iid")
+        mr_iid = task_dict.get("mr_iid")
+        number = int(issue_iid if issue_iid is not None else (mr_iid if mr_iid is not None else 0))
+    else:
+        number = int(task_dict.get("number", 0))
+
+    return task_source, task_type, owner, repo, int(project_id) if project_id is not None else None, number
+
+
 class TaskDBManager:
     """タスクのDB操作を行うマネージャークラス.
 
@@ -269,26 +306,8 @@ class TaskDBManager:
         task_key = task.task_key
         task_dict = task_key.to_dict()
 
-        # TaskKeyのto_dict()から、データベース形式に変換
-        task_type_full = task_dict.get("type", "unknown")
-        if "_" in task_type_full:
-            parts = task_type_full.split("_", 1)
-            task_source = parts[0]
-            task_type = parts[1]
-        else:
-            task_source = task_type_full
-            task_type = task_type_full
-
-        # フィールドの抽出
-        owner = task_dict.get("owner")
-        repo = task_dict.get("repo")
-        project_id = task_dict.get("project_id")
-        number = 0
-
-        if task_source == "gitlab":
-            number = int(task_dict.get("issue_iid", 0) or task_dict.get("mr_iid", 0))
-        else:
-            number = int(task_dict.get("number", 0))
+        # ヘルパー関数でTaskKey情報を変換
+        task_source, task_type, owner, repo, project_id, number = _parse_task_key_dict(task_dict)
 
         now = datetime.now(timezone.utc)
 
@@ -298,7 +317,7 @@ class TaskDBManager:
             "task_type": task_type,
             "owner": owner,
             "repo": repo,
-            "project_id": int(project_id) if project_id is not None else None,
+            "project_id": project_id,
             "number": number,
             "status": "pending",
             "created_at": now,
@@ -338,15 +357,8 @@ class TaskDBManager:
         """
         task_dict = task_key.to_dict()
 
-        # TaskKeyのto_dict()から、データベース形式に変換
-        task_type_full = task_dict.get("type", "unknown")
-        if "_" in task_type_full:
-            parts = task_type_full.split("_", 1)
-            task_source = parts[0]
-            task_type = parts[1]
-        else:
-            task_source = task_type_full
-            task_type = task_type_full
+        # ヘルパー関数でTaskKey情報を変換
+        task_source, task_type, owner, repo, project_id, number = _parse_task_key_dict(task_dict)
 
         with self.get_session() as session:
             query = session.query(DBTask).filter(
@@ -356,9 +368,6 @@ class TaskDBManager:
 
             # GitHubの場合
             if task_source == "github":
-                owner = task_dict.get("owner")
-                repo = task_dict.get("repo")
-                number = task_dict.get("number")
                 query = query.filter(
                     DBTask.owner == owner,
                     DBTask.repo == repo,
@@ -366,8 +375,6 @@ class TaskDBManager:
                 )
             # GitLabの場合
             elif task_source == "gitlab":
-                project_id = task_dict.get("project_id")
-                number = task_dict.get("issue_iid") or task_dict.get("mr_iid")
                 query = query.filter(
                     DBTask.project_id == project_id,
                     DBTask.number == number,

@@ -281,12 +281,11 @@ class TestTaskDBManagerWithMock:
             "DATABASE_PASSWORD": "env-pass",
         }
         
-        with patch.dict("os.environ", env_vars, clear=False):
-            # DATABASE_URLを削除して環境変数の組み立てをテスト
-            import os
-            if "DATABASE_URL" in os.environ:
-                del os.environ["DATABASE_URL"]
-            
+        # DATABASE_URLを含めない環境変数を設定（clear=Falseで他の環境変数は保持）
+        # DATABASE_URLがあった場合に備えて空文字列で上書き
+        env_vars_with_no_url = {**env_vars, "DATABASE_URL": ""}
+        
+        with patch.dict("os.environ", env_vars_with_no_url, clear=False):
             manager = TaskDBManager({})  # 空のconfigでも環境変数が使われる
             
         # 環境変数から構築されたURLが使用されていることを確認
