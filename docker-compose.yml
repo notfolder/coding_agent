@@ -286,8 +286,6 @@ services:
       context: ./docker/executor-python
       dockerfile: Dockerfile
     image: coding-agent-executor-python:latest
-    profiles:
-      - executor-build
     command: ["echo", "Build only"]
 
   # Miniforge（conda）実行環境イメージ
@@ -296,8 +294,6 @@ services:
       context: ./docker/executor-miniforge
       dockerfile: Dockerfile
     image: coding-agent-executor-miniforge:latest
-    profiles:
-      - executor-build
     command: ["echo", "Build only"]
 
   # Node.js実行環境イメージ
@@ -306,8 +302,6 @@ services:
       context: ./docker/executor-node
       dockerfile: Dockerfile
     image: coding-agent-executor-node:latest
-    profiles:
-      - executor-build
     command: ["echo", "Build only"]
 
   # Java実行環境イメージ
@@ -316,8 +310,6 @@ services:
       context: ./docker/executor-java
       dockerfile: Dockerfile
     image: coding-agent-executor-java:latest
-    profiles:
-      - executor-build
     command: ["echo", "Build only"]
 
   # Go実行環境イメージ
@@ -326,8 +318,6 @@ services:
       context: ./docker/executor-go
       dockerfile: Dockerfile
     image: coding-agent-executor-go:latest
-    profiles:
-      - executor-build
     command: ["echo", "Build only"]
 
 volumes:

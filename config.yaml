@@ -268,6 +268,22 @@ gitlab:
   project_id: "coding-agent-project"
   query: ''
 
+# Issue → MR/PR 変換機能の設定
+# Issueで依頼された内容を自動的にMR/PRとして作成する機能
+issue_to_mr_conversion:
+  # 機能の有効/無効（デフォルト: true）
+  # 環境変数 ISSUE_TO_MR_ENABLED で上書き可能
+  enabled: true
+  
+  # MR/PRをドラフト状態で作成するか（デフォルト: true）
+  auto_draft: true
+  
+  # Issueのコメントを転記するか（デフォルト: true）
+  transfer_comments: true
+  
+  # ボットのコメントを除外するか（デフォルト: true）
+  exclude_bot_comments: true
+
 scheduling:
   interval: 300  # 秒
 

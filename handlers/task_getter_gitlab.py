@@ -451,6 +451,15 @@ class TaskGitLabMergeRequest(Task):
         
         return comments
 
+    @property
+    def source_branch(self) -> str | None:
+        """Merge Requestのソースブランチ名を取得する.
+
+        Returns:
+            ソースブランチ名、取得できない場合はNone
+        """
+        return self.mr.get("source_branch")
+
     def _fetch_merge_request_notes(self) -> list[dict[str, Any]]:
         """MRに紐づくノートを設定に応じて全件取得する."""
         per_page: int = 100
