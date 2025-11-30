@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -139,8 +140,6 @@ Examples:
 
     def _get_bot_name(self) -> str:
         """ボット名を取得する."""
-        import os
-
         # 環境変数から取得
         bot_name = os.environ.get("GITHUB_BOT_NAME") or os.environ.get("GITLAB_BOT_NAME")
         if bot_name:
@@ -376,8 +375,6 @@ class ContentTransferManager:
 
     def _is_bot_comment(self, author: str) -> bool:
         """コメントがボットによるものかどうかを判定する."""
-        import os
-
         # ボット名を取得
         bot_names = []
 
@@ -433,8 +430,6 @@ class IssueToMRConverter:
 
     def is_enabled(self) -> bool:
         """Issue→MR/PR変換機能が有効かどうかを確認する."""
-        import os
-
         # 環境変数による有効/無効チェック
         env_enabled = os.environ.get("ISSUE_TO_MR_ENABLED", "").lower()
         if env_enabled:
@@ -681,18 +676,19 @@ class IssueToMRConverter:
                     },
                 )
                 return result
-            task_key = self.task.get_task_key()
-            result = self.mcp_client.call_tool(
-                "create_merge_request",
-                {
-                    "project_id": str(task_key.project_id),
-                    "title": title,
-                    "description": body,
-                    "source_branch": branch_name,
-                    "target_branch": "main",
-                },
-            )
-            return result
+            else:
+                task_key = self.task.get_task_key()
+                result = self.mcp_client.call_tool(
+                    "create_merge_request",
+                    {
+                        "project_id": str(task_key.project_id),
+                        "title": title,
+                        "description": body,
+                        "source_branch": branch_name,
+                        "target_branch": "main",
+                    },
+                )
+                return result
         except Exception as e:
             self.logger.warning("MR/PRの作成に失敗: %s", e)
             return None
@@ -754,7 +750,6 @@ class IssueToMRConverter:
                 )
 
                 # アサインを設定
-                import os
                 assignee = os.environ.get("GITHUB_BOT_NAME") or self.config.get("github", {}).get(
                     "assignee",
                 )
@@ -784,7 +779,6 @@ class IssueToMRConverter:
                 )
 
                 # アサインを設定
-                import os
                 assignee = os.environ.get("GITLAB_BOT_NAME") or self.config.get("gitlab", {}).get(
                     "assignee",
                 )
