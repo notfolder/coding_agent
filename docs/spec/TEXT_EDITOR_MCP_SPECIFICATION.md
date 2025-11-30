@@ -241,15 +241,14 @@ text_editor_<command>
 各Dockerfileに以下を追加します：
 
 - Node.js（text-editor MCPサーバー実行用）
-- `mcp-server-text-editor`パッケージ（特定バージョンを指定）
+- `mcp-server-text-editor`パッケージ（バージョン固定）
 
 #### 4.1.2 Dockerfile変更例（Python環境）
 
 ```dockerfile
 # 既存のベース構成に追加
 # Node.js インストール（text-editor MCP用）
-# バージョンは20.xのLTSを使用し、公式APTリポジトリから取得
-# セキュリティ向上のため、特定バージョンをインストール時に確認
+# セキュリティ向上のため、GPG署名付きの公式リポジトリを使用
 ENV NODE_MAJOR=20
 RUN apt-get update && \
     apt-get install -y ca-certificates curl gnupg && \
@@ -262,16 +261,10 @@ RUN apt-get update && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# mcp-server-text-editorのプリインストール
-# 再現性のため特定バージョンを指定（実装時に最新安定版を確認して設定）
-# バージョン例: npm install -g mcp-server-text-editor@1.0.0
-RUN npm install -g mcp-server-text-editor
+# mcp-server-text-editorのプリインストール（バージョン固定）
+ARG TEXT_EDITOR_MCP_VERSION=1.0.0
+RUN npm install -g mcp-server-text-editor@${TEXT_EDITOR_MCP_VERSION}
 ```
-
-**注意:** 本番環境では、以下のセキュリティ対策を推奨します：
-- `mcp-server-text-editor`パッケージのバージョンを明示的に指定（例：`mcp-server-text-editor@1.0.0`）
-- Node.jsのインストールにはGPG署名付きの公式リポジトリを使用
-- package-lock.jsonを使用した依存関係の固定
 
 ### 4.2 MCPサーバー起動方式
 
@@ -312,12 +305,6 @@ sequenceDiagram
     Container-->>EM: MCP準備完了
 ```
 
-#### 4.3.2 プロセス監視
-
-- text-editor MCPプロセスの生存確認
-- 異常終了時の自動再起動
-- コンテナ終了時のクリーンアップ
-
 ---
 
 ## 5. GitHub/GitLab MCP無効化
@@ -331,21 +318,7 @@ sequenceDiagram
 
 ### 5.2 無効化方式
 
-#### 5.2.1 MCPツール一覧のフィルタリング
-
-MCPToolClientがLLMに提供するツール一覧から、GitHub/GitLab MCPのツールを除外します。
-
-#### 5.2.2 設定による制御
-
-```yaml
-# config.yaml
-text_editor_mcp:
-  # テキスト編集MCP機能の有効/無効（デフォルト: true）
-  enabled: true
-  
-  # GitHub/GitLab MCPの無効化（text_editor_mcp.enabled=trueの場合に自動適用）
-  disable_git_platform_mcp: true
-```
+テキスト編集MCP機能が有効な場合、GitHub/GitLab MCPのツールはシステムプロンプトおよびLLMに提供するツール一覧から自動的に除外されます。
 
 ### 5.3 代替機能の提供
 
@@ -607,11 +580,9 @@ If push fails due to remote changes:
 text_editor_mcp:
   # 機能の有効/無効（デフォルト: true）
   # 環境変数 TEXT_EDITOR_MCP_ENABLED で上書き可能
+  # 有効時はGitHub/GitLab MCPが自動的に無効化され、
+  # ファイル操作はtext_editorとgitコマンドで行う
   enabled: true
-  
-  # GitHub/GitLab MCPの無効化（enabled=trueの場合に自動適用）
-  # 無効化すると、ファイル操作はtext_editorとgitコマンドで行う
-  disable_git_platform_mcp: true
   
   # MCP Server設定
   mcp_server:
@@ -622,13 +593,6 @@ text_editor_mcp:
       - "npx"
       - "-y"
       - "mcp-server-text-editor"
-  
-  # git自動コミット設定
-  git_workflow:
-    # 変更後の自動ステージング推奨をプロンプトに含める
-    recommend_auto_stage: true
-    # コミットメッセージのプレフィックス推奨
-    commit_prefix_recommendation: true
 ```
 
 ### 8.2 環境変数
@@ -827,10 +791,9 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# mcp-server-text-editorのプリインストール
-# 再現性のため特定バージョンを指定することを推奨
-# 例: npm install -g mcp-server-text-editor@1.0.0
-RUN npm install -g mcp-server-text-editor
+# mcp-server-text-editorのプリインストール（バージョン固定）
+ARG TEXT_EDITOR_MCP_VERSION=1.0.0
+RUN npm install -g mcp-server-text-editor@${TEXT_EDITOR_MCP_VERSION}
 ```
 
 #### 11.1.2 Node.js環境の場合
@@ -838,22 +801,14 @@ RUN npm install -g mcp-server-text-editor
 Node.js環境イメージでは既にNode.jsがインストールされているため、mcp-server-text-editorのインストールのみ追加します。
 
 ```dockerfile
-# mcp-server-text-editorのプリインストール
-# 再現性のため特定バージョンを指定することを推奨
-RUN npm install -g mcp-server-text-editor
+# mcp-server-text-editorのプリインストール（バージョン固定）
+ARG TEXT_EDITOR_MCP_VERSION=1.0.0
+RUN npm install -g mcp-server-text-editor@${TEXT_EDITOR_MCP_VERSION}
 ```
-
-#### 11.1.3 セキュリティ・再現性に関する注意事項
-
-本番環境での使用時は、以下の点に注意してください：
-
-1. **パッケージバージョンの固定**: `mcp-server-text-editor@<version>`の形式で特定バージョンを指定
-2. **GPG署名の検証**: Node.jsインストール時は公式GPGキーで署名検証を実施
-3. **依存関係の監査**: `npm audit`を定期的に実行し、脆弱性を確認
 
 ### 11.2 docker-compose.yml変更
 
-特別な変更は不要です。既存のプロファイルベースのビルド方式を維持します。
+特別な変更は不要です。各言語別Dockerfileで直接`docker build`を実行します。
 
 ---
 
