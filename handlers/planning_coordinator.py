@@ -56,10 +56,32 @@ class PlanningCoordinator:
 
         """
         self.config = config
-        self.mcp_clients = mcp_clients
         self.task = task
         self.context_manager = context_manager
         self.logger = logging.getLogger(__name__)
+        
+        # GitHub/GitLab MCPをタスクソース用として分離
+        self.task_source_mcp: dict[str, MCPToolClient] = {}
+        self.mcp_clients = mcp_clients.copy()  # シャローコピー
+        
+        # configからtext-editor MCP有効かチェック
+        text_editor_config = config.get("main_config", {}).get("text_editor", {})
+        text_editor_enabled = text_editor_config.get("enabled", False)
+        
+        # text-editor有効時はGitHub/GitLab MCPを分離
+        if text_editor_enabled:
+            for client_name in ("github", "gitlab"):
+                if client_name in self.mcp_clients:
+                    self.task_source_mcp[client_name] = self.mcp_clients.pop(client_name)
+                    self.logger.info(
+                        "text-editor MCP有効のため%s MCPをLLMから分離しました",
+                        client_name
+                    )
+        else:
+            # text-editor無効時は両方に含める
+            for client_name in ("github", "gitlab"):
+                if client_name in self.mcp_clients:
+                    self.task_source_mcp[client_name] = self.mcp_clients[client_name]
 
         # Get stores from context manager
         self.history_store = context_manager.get_planning_store()
@@ -95,18 +117,11 @@ class PlanningCoordinator:
                 text_editor_enabled = self.execution_manager.is_text_editor_enabled()
 
             # Get functions and tools from MCP clients
+            # self.mcp_clientsには既にtext-editor除外済みのMCPのみ含まれている
             functions = []
             tools = []
             if main_config.get("llm", {}).get("function_calling", True):
-                for client_name, mcp_client in mcp_clients.items():
-                    # text-editor MCP有効時はGitHub/GitLab MCPを除外
-                    if text_editor_enabled and client_name in ("github", "gitlab"):
-                        self.logger.info(
-                            "text-editor MCP有効のため%s MCPをLLMから除外します",
-                            client_name
-                        )
-                        continue
-                    
+                for client_name, mcp_client in self.mcp_clients.items():
                     functions.extend(mcp_client.get_function_calling_functions())
                     tools.extend(mcp_client.get_function_calling_tools())
 
@@ -200,7 +215,7 @@ class PlanningCoordinator:
         self.pre_planning_manager = PrePlanningManager(
             config=pre_planning_config,
             llm_client=self.llm_client,
-            mcp_clients=self.mcp_clients,
+            mcp_clients=self.task_source_mcp,
             task=self.task,
         )
         # コンテキストマネージャを設定
@@ -3077,26 +3092,37 @@ Maintain the same JSON format as before for action_plan.actions."""
 
         # タスクからowner/repo (GitHub) または project_id (GitLab) を取得してMCPモードで読み込み
         try:
+            import os
+            
+            # 環境変数からタスクソースを取得
+            task_source = os.environ.get("TASK_SOURCE", "github").lower()
+            
             task_key = self.task.get_task_key()
             owner = getattr(task_key, "owner", None)
             repo = getattr(task_key, "repo", None)
             project_id = getattr(task_key, "project_id", None)
 
             # GitHub の場合
-            if owner and repo and "github" in self.mcp_clients:
+            if task_source == "github" and owner and repo:
+                if "github" not in self.task_source_mcp:
+                    self.logger.warning("GitHub MCPが利用できません")
+                    return ""
                 loader = ProjectAgentRulesLoader(
                     config=self.config,
-                    mcp_client=self.mcp_clients["github"],
+                    mcp_client=self.task_source_mcp["github"],
                     owner=owner,
                     repo=repo,
                 )
                 return loader.load_rules()
 
             # GitLab の場合
-            if project_id and "gitlab" in self.mcp_clients:
+            if task_source == "gitlab" and project_id:
+                if "gitlab" not in self.task_source_mcp:
+                    self.logger.warning("GitLab MCPが利用できません")
+                    return ""
                 loader = ProjectAgentRulesLoader(
                     config=self.config,
-                    mcp_client=self.mcp_clients["gitlab"],
+                    mcp_client=self.task_source_mcp["gitlab"],
                     project_id=str(project_id),
                 )
                 return loader.load_rules()
@@ -3153,7 +3179,7 @@ Maintain the same JSON format as before for action_plan.actions."""
         try:
             loader = FileListContextLoader(
                 config=self.config,
-                mcp_clients=self.mcp_clients,
+                mcp_clients=self.task_source_mcp,
             )
             return loader.load_file_list(self.task)
         except Exception as e:
