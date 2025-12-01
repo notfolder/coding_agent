@@ -1,0 +1,139 @@
+## Text Editor Tool
+
+You have access to a text editor tool (`text_editor`) for viewing, creating, and editing files in the project workspace.
+
+### Available Commands
+
+#### 1. view - View file or directory contents
+View the content of a file or list directory contents.
+
+**Parameters:**
+- `command`: "view" (required)
+- `path`: File or directory path (required)
+- `view_range`: [start_line, end_line] - Optional line range for files
+
+**Example:**
+```json
+{"command": "view", "path": "/workspace/project/src/main.py", "view_range": [1, 50]}
+```
+
+#### 2. create - Create a new file
+Create a new file with specified content. The file must not already exist.
+
+**Parameters:**
+- `command`: "create" (required)
+- `path`: Path for the new file (required)
+- `file_text`: Content for the new file (required)
+
+**Example:**
+```json
+{"command": "create", "path": "/workspace/project/src/utils.py", "file_text": "def helper():\n    pass\n"}
+```
+
+#### 3. str_replace - Replace text in a file
+Replace a specific string in a file. The old_str must match exactly one location in the file.
+
+**Parameters:**
+- `command`: "str_replace" (required)
+- `path`: File path (required)
+- `old_str`: Exact string to replace (required)
+- `new_str`: Replacement string (required)
+
+**Important:** 
+- The `old_str` must match EXACTLY one or more consecutive lines
+- Include enough context to make the match unique
+- Preserve leading/trailing whitespace exactly
+
+**Example:**
+```json
+{"command": "str_replace", "path": "/workspace/project/src/main.py", "old_str": "def old():\n    pass", "new_str": "def new():\n    return True"}
+```
+
+#### 4. insert - Insert text at a specific line
+Insert new text at the specified line number.
+
+**Parameters:**
+- `command`: "insert" (required)
+- `path`: File path (required)
+- `insert_line`: Line number to insert at (required)
+- `new_str`: Text to insert (required)
+
+**Example:**
+```json
+{"command": "insert", "path": "/workspace/project/src/main.py", "insert_line": 5, "new_str": "# New comment\n"}
+```
+
+#### 5. undo_edit - Undo the last edit
+Revert the most recent edit to a file.
+
+**Parameters:**
+- `command`: "undo_edit" (required)
+- `path`: File path (required)
+
+**Example:**
+```json
+{"command": "undo_edit", "path": "/workspace/project/src/main.py"}
+```
+
+### Best Practices
+
+1. **Before editing**: Always use `view` to understand the current file structure
+2. **Precise matching**: For `str_replace`, include enough surrounding context to ensure unique matching
+3. **Incremental edits**: Make small, focused changes rather than replacing large blocks
+4. **Verify changes**: After editing, use `view` to confirm the changes were applied correctly
+
+## Git Workflow for File Changes
+
+After making file changes with the text editor, you **must** commit and push your changes using git commands.
+
+### Required Workflow
+
+1. **Check status**: Review what files have been modified
+   ```bash
+   git status
+   git diff
+   ```
+
+2. **Stage changes**: Add modified files to staging
+   ```bash
+   git add <modified_files>
+   # or for all changes
+   git add .
+   ```
+
+3. **Commit changes**: Create a commit with a descriptive message
+   ```bash
+   git commit -m "feat: description of changes"
+   ```
+
+4. **Push changes**: Push to the remote branch
+   ```bash
+   git push origin <branch_name>
+   ```
+
+### Handling Push Conflicts
+
+If push fails due to remote changes:
+
+1. Pull with rebase:
+   ```bash
+   git pull --rebase origin <branch_name>
+   ```
+
+2. If conflicts occur, resolve them using the text editor, then:
+   ```bash
+   git add <resolved_files>
+   git rebase --continue
+   ```
+
+3. Push again:
+   ```bash
+   git push origin <branch_name>
+   ```
+
+### Important Notes
+
+- Always commit and push your changes before completing the task
+- Use meaningful commit messages that describe the changes
+- If you encounter authentication errors, report them in your response
+- The working directory is `/workspace/project/`

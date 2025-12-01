@@ -56,10 +56,32 @@ class PlanningCoordinator:
 
         """
         self.config = config
-        self.mcp_clients = mcp_clients
         self.task = task
         self.context_manager = context_manager
         self.logger = logging.getLogger(__name__)
+        
+        # GitHub/GitLab MCPをタスクソース用として分離
+        self.task_source_mcp: dict[str, MCPToolClient] = {}
+        self.mcp_clients = mcp_clients.copy()  # シャローコピー
+        
+        # configからtext-editor MCP有効かチェック
+        text_editor_config = config.get("main_config", {}).get("text_editor", {})
+        text_editor_enabled = text_editor_config.get("enabled", False)
+        
+        # text-editor有効時はGitHub/GitLab MCPを分離
+        if text_editor_enabled:
+            for client_name in ("github", "gitlab"):
+                if client_name in self.mcp_clients:
+                    self.task_source_mcp[client_name] = self.mcp_clients.pop(client_name)
+                    self.logger.info(
+                        "text-editor MCP有効のため%s MCPをLLMから分離しました",
+                        client_name
+                    )
+        else:
+            # text-editor無効時は両方に含める
+            for client_name in ("github", "gitlab"):
+                if client_name in self.mcp_clients:
+                    self.task_source_mcp[client_name] = self.mcp_clients[client_name]
 
         # Get stores from context manager
         self.history_store = context_manager.get_planning_store()
@@ -89,11 +111,17 @@ class PlanningCoordinator:
             # Get the main config for LLM client initialization
             main_config = config.get("main_config", {})
 
+            # Check if text-editor MCP is enabled
+            text_editor_enabled = False
+            if self.execution_manager is not None:
+                text_editor_enabled = self.execution_manager.is_text_editor_enabled()
+
             # Get functions and tools from MCP clients
+            # self.mcp_clientsには既にtext-editor除外済みのMCPのみ含まれている
             functions = []
             tools = []
             if main_config.get("llm", {}).get("function_calling", True):
-                for mcp_client in mcp_clients.values():
+                for client_name, mcp_client in self.mcp_clients.items():
                     functions.extend(mcp_client.get_function_calling_functions())
                     tools.extend(mcp_client.get_function_calling_tools())
 
@@ -187,7 +215,7 @@ class PlanningCoordinator:
         self.pre_planning_manager = PrePlanningManager(
             config=pre_planning_config,
             llm_client=self.llm_client,
-            mcp_clients=self.mcp_clients,
+            mcp_clients=self.task_source_mcp,
             task=self.task,
         )
         # コンテキストマネージャを設定
@@ -1001,6 +1029,91 @@ class PlanningCoordinator:
                     self.llm_client.send_function_result(name, f"error: {error_msg}")
 
                     # Check if we should abort
+                    if error_state["tool_error_count"] >= MAX_CONSECUTIVE_TOOL_ERRORS:
+                        self.task.comment(
+                            f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。",
+                        )
+                        return True
+
+                    return False
+
+            # Check if this is a text_editor tool
+            if mcp_server == "text":
+                # Handle text editor through ExecutionEnvironmentManager
+                if self.execution_manager is None:
+                    error_msg = "Execution environment not available"
+                    self.logger.error(error_msg)
+                    self.llm_client.send_function_result(name, f"error: {error_msg}")
+                    return False
+
+                if not self.execution_manager.is_text_editor_enabled():
+                    error_msg = "Text editor MCP is not enabled"
+                    self.logger.error(error_msg)
+                    self.llm_client.send_function_result(name, f"error: {error_msg}")
+                    return False
+
+                try:
+                    # Execute text editor tool through execution manager
+                    result = self.execution_manager.call_text_editor_tool(
+                        arguments=args,
+                    )
+
+                    # Reset error count on success
+                    if result.get("success"):
+                        if error_state["last_tool"] == tool_name:
+                            error_state["tool_error_count"] = 0
+
+                        # Send result back to LLM
+                        self.llm_client.send_function_result(
+                            name, json.dumps(result, ensure_ascii=False),
+                        )
+
+                        # ツール完了コメントを投稿(成功)
+                        self._post_tool_call_after_comment(name, success=True)
+                        return False
+
+                    # Handle error result
+                    error_msg = result.get("error", "Unknown text editor error")
+                    self.logger.warning("Text editor tool failed: %s", error_msg)
+
+                    # ツール完了コメントを投稿(失敗)
+                    self._post_tool_call_after_comment(name, success=False)
+                    self._post_tool_error_comment(name, error_msg, task_id)
+
+                    # Update error count
+                    if error_state["last_tool"] == tool_name:
+                        error_state["tool_error_count"] += 1
+                    else:
+                        error_state["tool_error_count"] = 1
+                        error_state["last_tool"] = tool_name
+
+                    self.llm_client.send_function_result(name, f"error: {error_msg}")
+
+                    if error_state["tool_error_count"] >= MAX_CONSECUTIVE_TOOL_ERRORS:
+                        self.task.comment(
+                            f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。",
+                        )
+                        return True
+
+                    return False
+
+                except Exception as e:
+                    error_msg = str(e)
+                    self.logger.exception("Text editor execution failed: %s", error_msg)
+
+                    # ツール完了コメントを投稿(失敗)
+                    self._post_tool_call_after_comment(name, success=False)
+                    self._post_tool_error_comment(name, error_msg, task_id)
+
+                    # Update error count
+                    if error_state["last_tool"] == tool_name:
+                        error_state["tool_error_count"] += 1
+                    else:
+                        error_state["tool_error_count"] = 1
+                        error_state["last_tool"] = tool_name
+
+                    self.llm_client.send_function_result(name, f"error: {error_msg}")
+
                     if error_state["tool_error_count"] >= MAX_CONSECUTIVE_TOOL_ERRORS:
                         self.task.comment(
                             f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。",
@@ -2391,6 +2504,12 @@ Maintain the same JSON format as before for action_plan.actions."""
             # Replace placeholder with MCP prompts
             planning_prompt = planning_prompt.replace("{mcp_prompt}", mcp_prompt)
 
+            # text-editor MCP機能が有効な場合、その説明を追加
+            text_editor_prompt = self._load_text_editor_prompt()
+            if text_editor_prompt:
+                planning_prompt = planning_prompt + "\n" + text_editor_prompt
+                self.logger.info("Added text-editor prompt to planning prompt")
+
             # プロジェクト固有のエージェントルールを読み込み
             project_rules = self._load_project_agent_rules()
             if project_rules:
@@ -2973,26 +3092,37 @@ Maintain the same JSON format as before for action_plan.actions."""
 
         # タスクからowner/repo (GitHub) または project_id (GitLab) を取得してMCPモードで読み込み
         try:
+            import os
+            
+            # 環境変数からタスクソースを取得
+            task_source = os.environ.get("TASK_SOURCE", "github").lower()
+            
             task_key = self.task.get_task_key()
             owner = getattr(task_key, "owner", None)
             repo = getattr(task_key, "repo", None)
             project_id = getattr(task_key, "project_id", None)
 
             # GitHub の場合
-            if owner and repo and "github" in self.mcp_clients:
+            if task_source == "github" and owner and repo:
+                if "github" not in self.task_source_mcp:
+                    self.logger.warning("GitHub MCPが利用できません")
+                    return ""
                 loader = ProjectAgentRulesLoader(
                     config=self.config,
-                    mcp_client=self.mcp_clients["github"],
+                    mcp_client=self.task_source_mcp["github"],
                     owner=owner,
                     repo=repo,
                 )
                 return loader.load_rules()
 
             # GitLab の場合
-            if project_id and "gitlab" in self.mcp_clients:
+            if task_source == "gitlab" and project_id:
+                if "gitlab" not in self.task_source_mcp:
+                    self.logger.warning("GitLab MCPが利用できません")
+                    return ""
                 loader = ProjectAgentRulesLoader(
                     config=self.config,
-                    mcp_client=self.mcp_clients["gitlab"],
+                    mcp_client=self.task_source_mcp["gitlab"],
                     project_id=str(project_id),
                 )
                 return loader.load_rules()
@@ -3000,6 +3130,42 @@ Maintain the same JSON format as before for action_plan.actions."""
             self.logger.warning("プロジェクトルールの読み込みに失敗しました: %s", e)
 
         return ""
+
+    def _load_text_editor_prompt(self) -> str:
+        """text-editor MCP機能のシステムプロンプトを読み込む.
+
+        text-editor MCP機能が有効な場合、プロンプトテンプレートを読み込んで返します。
+
+        Returns:
+            text-editorのシステムプロンプト文字列(無効な場合は空文字列)
+
+        """
+        import os
+
+        # 環境変数による有効/無効チェック
+        env_enabled = os.environ.get("TEXT_EDITOR_MCP_ENABLED", "").lower()
+        if env_enabled:
+            if env_enabled != "true":
+                return ""
+        else:
+            # 設定ファイルによる有効/無効チェック
+            text_editor_config = self.config.get("text_editor_mcp", {})
+            if not text_editor_config.get("enabled", True):
+                return ""
+
+        # プロンプトテンプレートを読み込む
+        prompt_path = Path("system_prompt_text_editor.txt")
+        if not prompt_path.exists():
+            self.logger.warning("text-editorプロンプトファイルが見つかりません: %s", prompt_path)
+            return ""
+
+        try:
+            with prompt_path.open() as f:
+                return f.read()
+
+        except Exception as e:
+            self.logger.warning("text-editorプロンプトの読み込みに失敗: %s", e)
+            return ""
 
     def _load_file_list_context(self) -> str:
         """プロジェクトファイル一覧を読み込む.
@@ -3013,7 +3179,7 @@ Maintain the same JSON format as before for action_plan.actions."""
         try:
             loader = FileListContextLoader(
                 config=self.config,
-                mcp_clients=self.mcp_clients,
+                mcp_clients=self.task_source_mcp,
             )
             return loader.load_file_list(self.task)
         except Exception as e:

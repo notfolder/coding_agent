@@ -276,11 +276,24 @@ class TaskHandler:
             summary_store = context_manager.get_summary_store()
             tool_store = context_manager.get_tool_store()
             
+            # Check if text-editor MCP is enabled
+            text_editor_enabled = False
+            if hasattr(self, 'execution_manager') and self.execution_manager is not None:
+                text_editor_enabled = self.execution_manager.is_text_editor_enabled()
+            
             # Get functions and tools from MCP clients
             functions = []
             tools = []
             if task_config.get("llm", {}).get("function_calling", True):
-                for mcp_client in self.mcp_clients.values():
+                for client_name, mcp_client in self.mcp_clients.items():
+                    # text-editor MCP有効時はGitHub/GitLab MCPを除外
+                    if text_editor_enabled and client_name in ("github", "gitlab"):
+                        self.logger.info(
+                            "text-editor MCP有効のため%s MCPをLLMから除外します",
+                            client_name
+                        )
+                        continue
+                    
                     functions.extend(mcp_client.get_function_calling_functions())
                     tools.extend(mcp_client.get_function_calling_tools())
             
@@ -437,6 +450,21 @@ class TaskHandler:
                 
                 self.logger.info("実行環境のツールをLLMクライアントに追加しました: %d functions, %d tools", 
                                len(exec_functions), len(exec_tools))
+                
+                # Add text-editor tools if enabled
+                if execution_manager.is_text_editor_enabled():
+                    text_editor_functions = execution_manager.get_text_editor_functions()
+                    text_editor_tools = execution_manager.get_text_editor_tools()
+                    
+                    if hasattr(self.llm_client, 'functions') and self.llm_client.functions is not None:
+                        self.llm_client.functions.extend(text_editor_functions)
+                    if hasattr(self.llm_client, 'tools') and self.llm_client.tools is not None:
+                        self.llm_client.tools.extend(text_editor_tools)
+                    
+                    self.logger.info(
+                        "text-editorツールをLLMクライアントに追加しました: %d functions, %d tools",
+                        len(text_editor_functions), len(text_editor_tools),
+                    )
             
             # Create planning coordinator with context_manager
             coordinator = PlanningCoordinator(
@@ -819,6 +847,11 @@ class TaskHandler:
         if command_executor_prompt:
             prompt = prompt + "\n" + command_executor_prompt
 
+        # text-editor MCP機能が有効な場合、その説明を追加
+        text_editor_prompt = self._load_text_editor_prompt(task_config)
+        if text_editor_prompt:
+            prompt = prompt + "\n" + text_editor_prompt
+
         # プロジェクト固有のエージェントルールを取得して追加
         project_rules = self._load_project_agent_rules(task_config, task)
         if project_rules:
@@ -881,6 +914,48 @@ class TaskHandler:
 
         except Exception as e:
             self.logger.warning("Command Executorプロンプトの読み込みに失敗: %s", e)
+            return ""
+
+    def _load_text_editor_prompt(
+        self,
+        task_config: dict[str, Any],
+    ) -> str:
+        """text-editor MCP機能のシステムプロンプトを読み込む.
+
+        text-editor MCP機能が有効な場合、プロンプトテンプレートを読み込んで返します。
+
+        Args:
+            task_config: タスク固有の設定
+
+        Returns:
+            text-editorのシステムプロンプト文字列(無効な場合は空文字列)
+
+        """
+        import os
+
+        # 環境変数による有効/無効チェック
+        env_enabled = os.environ.get("TEXT_EDITOR_MCP_ENABLED", "").lower()
+        if env_enabled:
+            if env_enabled != "true":
+                return ""
+        else:
+            # 設定ファイルによる有効/無効チェック
+            text_editor_config = task_config.get("text_editor_mcp", {})
+            if not text_editor_config.get("enabled", True):
+                return ""
+
+        # プロンプトテンプレートを読み込む
+        prompt_path = Path("system_prompt_text_editor.txt")
+        if not prompt_path.exists():
+            self.logger.warning("text-editorプロンプトファイルが見つかりません: %s", prompt_path)
+            return ""
+
+        try:
+            with prompt_path.open() as f:
+                return f.read()
+
+        except Exception as e:
+            self.logger.warning("text-editorプロンプトの読み込みに失敗: %s", e)
             return ""
 
     def _load_project_agent_rules(

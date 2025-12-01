@@ -149,6 +149,13 @@ class ExecutionEnvironmentManager:
         # 現在のタスク参照（コマンド実行時に使用）
         self._current_task: Task | None = None
 
+        # テキスト編集MCP設定を取得
+        self._text_editor_config = config.get("text_editor_mcp", {})
+        self._text_editor_enabled = self._is_text_editor_enabled()
+
+        # アクティブなtext-editor MCPクライアントの追跡
+        self._text_editor_clients: dict[str, Any] = {}
+
     def get_available_environments(self) -> dict[str, str]:
         """利用可能な環境のリストを取得する.
         
@@ -389,6 +396,14 @@ class ExecutionEnvironmentManager:
                 self._install_dependencies(container_id)
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
                 self.logger.warning("依存関係のインストールに失敗: %s", e)
+
+        # text-editor MCPサーバーを起動(有効な場合)
+        if self._text_editor_enabled:
+            try:
+                self._start_text_editor_mcp(container_id, task_uuid)
+            except Exception as e:
+                self.logger.warning("text-editor MCPの起動に失敗しました: %s", e)
+                # MCPの起動失敗はワーニングとして記録し、処理は続行
 
         # アクティブコンテナに登録
         self._active_containers[task_uuid] = container_info
@@ -681,6 +696,9 @@ class ExecutionEnvironmentManager:
 
         """
         self.logger.info("実行環境をクリーンアップします: %s", task_uuid)
+
+        # text-editor MCPサーバーを停止(有効な場合)
+        self._stop_text_editor_mcp(task_uuid)
 
         try:
             self._remove_container(task_uuid)
@@ -1015,4 +1033,209 @@ class ExecutionEnvironmentManager:
             }
             for func in functions
         ]
+
+    # ==========================================================================
+    # テキスト編集MCP関連メソッド
+    # ==========================================================================
+
+    def _is_text_editor_enabled(self) -> bool:
+        """テキスト編集MCP機能が有効かどうかを確認する.
+        
+        Returns:
+            有効な場合True、無効な場合False
+        """
+        # 環境変数による有効/無効チェック
+        env_enabled = os.environ.get("TEXT_EDITOR_MCP_ENABLED", "").lower()
+        if env_enabled:
+            return env_enabled == "true"
+
+        # 設定ファイルによる有効/無効チェック
+        return self._text_editor_config.get("enabled", True)
+
+    def is_text_editor_enabled(self) -> bool:
+        """テキスト編集MCP機能が有効かどうかを外部から確認する.
+        
+        Returns:
+            有効な場合True、無効な場合False
+        """
+        return self._text_editor_enabled
+
+    def _start_text_editor_mcp(self, container_id: str, task_uuid: str) -> None:
+        """コンテナ内でtext-editor MCPサーバーを起動する.
+        
+        Args:
+            container_id: DockerコンテナID
+            task_uuid: タスクのUUID
+            
+        Raises:
+            RuntimeError: MCPサーバーの起動に失敗した場合
+        """
+        if not self._text_editor_enabled:
+            return
+
+        from clients.text_editor_mcp_client import TextEditorMCPClient
+
+        self.logger.info("text-editor MCPサーバーを起動します: %s", task_uuid)
+
+        try:
+            client = TextEditorMCPClient(
+                container_id=container_id,
+                workspace_path="/workspace/project",
+                timeout_seconds=self._timeout_seconds,
+            )
+            client.start()
+            self._text_editor_clients[task_uuid] = client
+            self.logger.info("text-editor MCPサーバーが起動しました: %s", task_uuid)
+        except Exception as e:
+            self.logger.exception("text-editor MCPサーバーの起動に失敗しました: %s", e)
+            raise RuntimeError(f"Failed to start text-editor MCP: {e}") from e
+
+    def _stop_text_editor_mcp(self, task_uuid: str) -> None:
+        """text-editor MCPサーバーを停止する.
+        
+        Args:
+            task_uuid: タスクのUUID
+        """
+        client = self._text_editor_clients.pop(task_uuid, None)
+        if client is not None:
+            try:
+                client.stop()
+                self.logger.info("text-editor MCPサーバーを停止しました: %s", task_uuid)
+            except Exception as e:
+                self.logger.warning("text-editor MCPサーバーの停止に失敗しました: %s", e)
+
+    def call_text_editor_tool(
+        self,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """text-editorツールを呼び出す.
+        
+        Args:
+            arguments: コマンドの引数
+            
+        Returns:
+            実行結果の辞書 {"success": bool, "content": str, "error": str}
+            
+        Raises:
+            RuntimeError: 現在のタスクが設定されていない場合、
+                         またはtext-editor MCPが有効でない場合
+        """
+        if self._current_task is None:
+            raise RuntimeError("Current task not set. Call set_current_task() first.")
+
+        task_uuid = self._current_task.uuid
+        client = self._text_editor_clients.get(task_uuid)
+
+        if client is None:
+            raise RuntimeError(f"Text editor MCP not started for task {task_uuid}")
+
+        # Noneの値を持つキーを削除
+        cleaned_arguments = {k: v for k, v in arguments.items() if v is not None}
+
+        self.logger.info("text_editorツールを呼び出します: %s", cleaned_arguments)
+
+        try:
+            result = client.call_tool(cleaned_arguments)
+            return {
+                "success": result.success,
+                "content": result.content,
+                "error": result.error,
+            }
+        except Exception as e:
+            self.logger.exception("text_editorツール呼び出し中にエラー発生: %s", e)
+            return {
+                "success": False,
+                "content": "",
+                "error": str(e),
+            }
+
+    def get_text_editor_client(self, task_uuid: str) -> Any | None:
+        """タスクのtext-editor MCPクライアントを取得する.
+        
+        Args:
+            task_uuid: タスクのUUID
+            
+        Returns:
+            TextEditorMCPClientインスタンス、存在しない場合はNone
+        """
+        return self._text_editor_clients.get(task_uuid)
+
+    def get_text_editor_functions(self) -> list[dict[str, Any]]:
+        """text-editorツールのFunction calling用関数定義を取得する.
+        
+        Returns:
+            関数定義のリスト
+        """
+        if not self._text_editor_enabled:
+            return []
+
+        return [
+            {
+                "name": "text_editor",
+                "description": (
+                    "A text editor tool for viewing, creating, and editing files in the project workspace. "
+                    "Supports multiple commands specified via the 'command' parameter:\n"
+                    "- view: View file contents or list directory contents\n"
+                    "- create: Create a new file with specified content\n"
+                    "- str_replace: Replace a specific string in a file (must match exactly one location)\n"
+                    "- insert: Insert new text at a specific line number\n"
+                    "- undo_edit: Revert the most recent edit to a file"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "enum": ["view", "create", "str_replace", "insert", "undo_edit"],
+                            "description": "The command to execute",
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "File or directory path (required for all commands)",
+                        },
+                        "view_range": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "Optional line range [start, end] for 'view' command on files. Omit if not needed.",
+                        },
+                        "file_text": {
+                            "type": "string",
+                            "description": "File content (required for 'create' command)",
+                        },
+                        "old_str": {
+                            "type": "string",
+                            "description": "String to replace (required for 'str_replace' command)",
+                        },
+                        "new_str": {
+                            "type": "string",
+                            "description": "Replacement string (required for 'str_replace' and 'insert' commands)",
+                        },
+                        "insert_line": {
+                            "type": "integer",
+                            "description": "Line number to insert at (required for 'insert' command)",
+                        },
+                    },
+                    "required": ["command", "path"],
+                },
+            },
+        ]
+
+    def get_text_editor_tools(self) -> list[dict[str, Any]]:
+        """text-editorツールのFunction calling用ツール定義を取得する(OpenAI形式).
+        
+        Returns:
+            ツール定義のリスト
+        """
+        if not self._text_editor_enabled:
+            return []
+
+        functions = self.get_text_editor_functions()
+        return [
+            {
+                "type": "function",
+                "function": func,
+            }
+            for func in functions
+        ]
+
 

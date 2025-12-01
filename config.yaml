@@ -470,3 +470,21 @@ command_executor:
     additional: []
     # デフォルトから除外するコマンド
     exclude: []
+
+# テキスト編集MCP Server連携設定
+text_editor_mcp:
+  # 機能の有効/無効(デフォルト: true)
+  # 環境変数 TEXT_EDITOR_MCP_ENABLED で上書き可能
+  # 有効時はGitHub/GitLab MCPが自動的に無効化され、
+  # ファイル操作はtext_editorとgitコマンドで行う
+  enabled: true
+  
+  # MCP Server設定
+  mcp_server:
+    # サーバー名
+    name: "text-editor"
+    # コマンド
+    command:
+      - "npx"
+      - "-y"
+      - "mcp-server-text-editor"
