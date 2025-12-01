@@ -111,11 +111,6 @@ class PlanningCoordinator:
             # Get the main config for LLM client initialization
             main_config = config.get("main_config", {})
 
-            # Check if text-editor MCP is enabled
-            text_editor_enabled = False
-            if self.execution_manager is not None:
-                text_editor_enabled = self.execution_manager.is_text_editor_enabled()
-
             # Get functions and tools from MCP clients
             # self.mcp_clientsには既にtext-editor除外済みのMCPのみ含まれている
             functions = []
