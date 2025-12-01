@@ -212,6 +212,20 @@ class TextEditorMCPClient:
             msg = "MCP server not initialized. Call start() first."
             raise RuntimeError(msg)
 
+        # commandに基づいてdescriptionを生成
+        command = arguments.get("command", "")
+        description_map = {
+            "view": "View file or directory",
+            "create": "Create new file",
+            "str_replace": "Replace string in file",
+            "insert": "Insert text at line",
+            "undo_edit": "Undo last edit",
+        }
+        description = description_map.get(command, "Execute text editor command")
+        
+        # descriptionをargumentsに追加
+        arguments_with_desc = {**arguments, "description": description}
+
         # ツール呼び出しリクエスト
         request = {
             "jsonrpc": "2.0",
@@ -219,11 +233,11 @@ class TextEditorMCPClient:
             "method": "tools/call",
             "params": {
                 "name": "text_editor",
-                "arguments": arguments,
+                "arguments": arguments_with_desc,
             },
         }
 
-        self.logger.debug("text_editorツール呼び出し: %s", arguments)
+        self.logger.debug("text_editorツール呼び出し: %s", arguments_with_desc)
 
         try:
             response = self._send_request(request)
@@ -479,7 +493,7 @@ class TextEditorMCPClient:
                         "view_range": {
                             "type": "array",
                             "items": {"type": "integer"},
-                            "description": "Optional line range [start, end] for 'view' command on files",
+                            "description": "Optional line range [start, end] for 'view' command on files. Omit if not needed.",
                         },
                         "file_text": {
                             "type": "string",

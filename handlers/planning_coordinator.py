@@ -89,11 +89,24 @@ class PlanningCoordinator:
             # Get the main config for LLM client initialization
             main_config = config.get("main_config", {})
 
+            # Check if text-editor MCP is enabled
+            text_editor_enabled = False
+            if self.execution_manager is not None:
+                text_editor_enabled = self.execution_manager.is_text_editor_enabled()
+
             # Get functions and tools from MCP clients
             functions = []
             tools = []
             if main_config.get("llm", {}).get("function_calling", True):
-                for mcp_client in mcp_clients.values():
+                for client_name, mcp_client in mcp_clients.items():
+                    # text-editor MCP有効時はGitHub/GitLab MCPを除外
+                    if text_editor_enabled and client_name in ("github", "gitlab"):
+                        self.logger.info(
+                            "text-editor MCP有効のため%s MCPをLLMから除外します",
+                            client_name
+                        )
+                        continue
+                    
                     functions.extend(mcp_client.get_function_calling_functions())
                     tools.extend(mcp_client.get_function_calling_tools())
 

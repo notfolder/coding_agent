@@ -1129,10 +1129,13 @@ class ExecutionEnvironmentManager:
         if client is None:
             raise RuntimeError(f"Text editor MCP not started for task {task_uuid}")
 
-        self.logger.info("text_editorツールを呼び出します: %s", arguments)
+        # Noneの値を持つキーを削除
+        cleaned_arguments = {k: v for k, v in arguments.items() if v is not None}
+
+        self.logger.info("text_editorツールを呼び出します: %s", cleaned_arguments)
 
         try:
-            result = client.call_tool(arguments)
+            result = client.call_tool(cleaned_arguments)
             return {
                 "success": result.success,
                 "content": result.content,
@@ -1193,7 +1196,7 @@ class ExecutionEnvironmentManager:
                         "view_range": {
                             "type": "array",
                             "items": {"type": "integer"},
-                            "description": "Optional line range [start, end] for 'view' command on files",
+                            "description": "Optional line range [start, end] for 'view' command on files. Omit if not needed.",
                         },
                         "file_text": {
                             "type": "string",

@@ -276,11 +276,24 @@ class TaskHandler:
             summary_store = context_manager.get_summary_store()
             tool_store = context_manager.get_tool_store()
             
+            # Check if text-editor MCP is enabled
+            text_editor_enabled = False
+            if hasattr(self, 'execution_manager') and self.execution_manager is not None:
+                text_editor_enabled = self.execution_manager.is_text_editor_enabled()
+            
             # Get functions and tools from MCP clients
             functions = []
             tools = []
             if task_config.get("llm", {}).get("function_calling", True):
-                for mcp_client in self.mcp_clients.values():
+                for client_name, mcp_client in self.mcp_clients.items():
+                    # text-editor MCP有効時はGitHub/GitLab MCPを除外
+                    if text_editor_enabled and client_name in ("github", "gitlab"):
+                        self.logger.info(
+                            "text-editor MCP有効のため%s MCPをLLMから除外します",
+                            client_name
+                        )
+                        continue
+                    
                     functions.extend(mcp_client.get_function_calling_functions())
                     tools.extend(mcp_client.get_function_calling_tools())
             
