@@ -616,7 +616,7 @@ class PrePlanningManager:
         mcp_server, actual_tool = self._parse_tool_name(tool_name)
 
         if mcp_server not in self.mcp_clients:
-            self.logger.warning("MCPクライアントが見つかりません: %s", mcp_server)
+            self.logger.warning("MCPクライアントが見つかりません: %s in %s", mcp_server, self.mcp_clients.keys())
             return result
 
         mcp_client = self.mcp_clients[mcp_server]
@@ -646,7 +646,7 @@ class PrePlanningManager:
         """ツール名からMCPサーバー名と実際のツール名を分離する.
 
         Args:
-            tool_name: ツール名（例: "github_get_file_contents"）
+            tool_name: ツール名
 
         Returns:
             (MCPサーバー名, 実際のツール名)
