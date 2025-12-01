@@ -1,6 +1,10 @@
 # Java実行環境イメージ
-# Java/Kotlinプロジェクト用のDockerイメージ
+# Java/KotlinプロジェクトのDockerイメージ
 FROM eclipse-temurin:21-jdk-jammy
+
+# Gitユーザー設定用の引数
+ARG BOT_NAME=bot
+ARG BOT_EMAIL
 
 # 共通パッケージのインストール
 # git: バージョン管理
@@ -17,6 +21,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     gnupg \
     && rm -rf /var/lib/apt/lists/*
+
+# Gitグローバル設定
+RUN git config --global user.name "${BOT_NAME}" && \
+    git config --global user.email "${BOT_EMAIL:-${BOT_NAME}@example.com}"
 
 # Node.jsをインストール(text-editor MCP用)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
