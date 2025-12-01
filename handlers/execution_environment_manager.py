@@ -1106,13 +1106,11 @@ class ExecutionEnvironmentManager:
 
     def call_text_editor_tool(
         self,
-        command: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
         """text-editorツールを呼び出す.
         
         Args:
-            command: 実行するコマンド(view, create, str_replace, insert, undo_edit)
             arguments: コマンドの引数
             
         Returns:
@@ -1131,10 +1129,10 @@ class ExecutionEnvironmentManager:
         if client is None:
             raise RuntimeError(f"Text editor MCP not started for task {task_uuid}")
 
-        self.logger.info("text_editorツールを呼び出します: %s", command)
+        self.logger.info("text_editorツールを呼び出します: %s", arguments)
 
         try:
-            result = client.call_tool(command, arguments)
+            result = client.call_tool(arguments)
             return {
                 "success": result.success,
                 "content": result.content,
@@ -1170,98 +1168,51 @@ class ExecutionEnvironmentManager:
 
         return [
             {
-                "name": "text_editor_view",
-                "description": "View the content of a file or list directory contents. Use this to read file contents before editing.",
+                "name": "text_editor",
+                "description": (
+                    "A text editor tool for viewing, creating, and editing files in the project workspace. "
+                    "Supports multiple commands specified via the 'command' parameter:\n"
+                    "- view: View file contents or list directory contents\n"
+                    "- create: Create a new file with specified content\n"
+                    "- str_replace: Replace a specific string in a file (must match exactly one location)\n"
+                    "- insert: Insert new text at a specific line number\n"
+                    "- undo_edit: Revert the most recent edit to a file"
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
+                        "command": {
+                            "type": "string",
+                            "enum": ["view", "create", "str_replace", "insert", "undo_edit"],
+                            "description": "The command to execute",
+                        },
                         "path": {
                             "type": "string",
-                            "description": "File or directory path to view (e.g., '/workspace/project/src/main.py')",
+                            "description": "File or directory path (required for all commands)",
                         },
                         "view_range": {
                             "type": "array",
                             "items": {"type": "integer"},
-                            "description": "Optional line range [start, end] for files (1-indexed)",
-                        },
-                    },
-                    "required": ["path"],
-                },
-            },
-            {
-                "name": "text_editor_create",
-                "description": "Create a new file with specified content. The file must not already exist.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "Path for the new file (e.g., '/workspace/project/src/utils.py')",
+                            "description": "Optional line range [start, end] for 'view' command on files",
                         },
                         "file_text": {
                             "type": "string",
-                            "description": "Content for the new file",
-                        },
-                    },
-                    "required": ["path", "file_text"],
-                },
-            },
-            {
-                "name": "text_editor_str_replace",
-                "description": "Replace a specific string in a file. The old_str must match exactly one location in the file. Include enough context to make the match unique.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "File path to edit",
+                            "description": "File content (required for 'create' command)",
                         },
                         "old_str": {
                             "type": "string",
-                            "description": "Exact string to replace (must match exactly one location)",
+                            "description": "String to replace (required for 'str_replace' command)",
                         },
                         "new_str": {
                             "type": "string",
-                            "description": "Replacement string",
-                        },
-                    },
-                    "required": ["path", "old_str", "new_str"],
-                },
-            },
-            {
-                "name": "text_editor_insert",
-                "description": "Insert new text at the specified line number.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "File path to edit",
+                            "description": "Replacement string (required for 'str_replace' and 'insert' commands)",
                         },
                         "insert_line": {
                             "type": "integer",
-                            "description": "Line number to insert at (1-indexed)",
-                        },
-                        "new_str": {
-                            "type": "string",
-                            "description": "Text to insert",
+                            "description": "Line number to insert at (required for 'insert' command)",
                         },
                     },
-                    "required": ["path", "insert_line", "new_str"],
-                },
-            },
-            {
-                "name": "text_editor_undo_edit",
-                "description": "Revert the most recent edit to a file.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "File path to undo",
-                        },
-                    },
-                    "required": ["path"],
+                    "required": ["command", "path"],
                 },
             },
         ]

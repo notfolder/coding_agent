@@ -1010,7 +1010,7 @@ class PlanningCoordinator:
                     return False
 
             # Check if this is a text_editor tool
-            if mcp_server == "text_editor":
+            if mcp_server == "text":
                 # Handle text editor through ExecutionEnvironmentManager
                 if self.execution_manager is None:
                     error_msg = "Execution environment not available"
@@ -1027,7 +1027,6 @@ class PlanningCoordinator:
                 try:
                     # Execute text editor tool through execution manager
                     result = self.execution_manager.call_text_editor_tool(
-                        command=tool_name,
                         arguments=args,
                     )
 
