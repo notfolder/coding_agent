@@ -65,7 +65,7 @@ class PlanningCoordinator:
         self.mcp_clients = mcp_clients.copy()  # シャローコピー
         
         # configからtext-editor MCP有効かチェック
-        text_editor_config = config.get("main_config", {}).get("text_editor", {})
+        text_editor_config = config.get("main_config", {}).get("text_editor_mcp", {})
         text_editor_enabled = text_editor_config.get("enabled", False)
         
         # text-editor有効時はGitHub/GitLab MCPを分離
@@ -1059,161 +1059,27 @@ class PlanningCoordinator:
             # ツール呼び出し前のコメントを投稿
             self._post_tool_call_before_comment(name, args)
 
-            # Check if this is a command-executor tool
-            if mcp_server == "command-executor":
-                # Handle command execution through ExecutionEnvironmentManager
-                if self.execution_manager is None:
-                    error_msg = "Execution environment not available"
-                    self.logger.error(error_msg)
-                    self.llm_client.send_function_result(name, f"error: {error_msg}")
-                    return False
-
-                try:
-                    # Execute command through execution manager
-                    if tool_name == "execute_command":
-                        result = self.execution_manager.execute_command(
-                            command=args.get("command", ""),
-                            working_directory=args.get("working_directory"),
-                        )
-                    else:
-                        error_msg = f"Unknown command-executor tool: {tool_name}"
-                        raise ValueError(error_msg)
-
-                    # Reset error count on success
-                    if error_state["last_tool"] == tool_name:
-                        error_state["tool_error_count"] = 0
-
-                    # Send result back to LLM
-                    self.llm_client.send_function_result(name, json.dumps(result, ensure_ascii=False))
-
-                    # ツール完了コメントを投稿（成功）
-                    self._post_tool_call_after_comment(name, success=True)
-
-                    return False
-
-                except Exception as e:
-                    error_msg = str(e)
-                    self.logger.exception("Command execution failed: %s", error_msg)
-
-                    # ツール完了コメントを投稿（失敗）
-                    self._post_tool_call_after_comment(name, success=False)
-                    # ツールエラーコメントを投稿
-                    self._post_tool_error_comment(name, error_msg, task_id)
-
-                    # Update error count
-                    if error_state["last_tool"] == tool_name:
-                        error_state["tool_error_count"] += 1
-                    else:
-                        error_state["tool_error_count"] = 1
-                        error_state["last_tool"] = tool_name
-
-                    # Send error result to LLM
-                    self.llm_client.send_function_result(name, f"error: {error_msg}")
-
-                    # Check if we should abort
-                    if error_state["tool_error_count"] >= MAX_CONSECUTIVE_TOOL_ERRORS:
-                        self.task.comment(
-                            f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。",
-                        )
-                        return True
-
-                    return False
-
-            # Check if this is a text_editor tool
-            if mcp_server == "text":
-                # Handle text editor through ExecutionEnvironmentManager
-                if self.execution_manager is None:
-                    error_msg = "Execution environment not available"
-                    self.logger.error(error_msg)
-                    self.llm_client.send_function_result(name, f"error: {error_msg}")
-                    return False
-
-                if not self.execution_manager.is_text_editor_enabled():
-                    error_msg = "Text editor MCP is not enabled"
-                    self.logger.error(error_msg)
-                    self.llm_client.send_function_result(name, f"error: {error_msg}")
-                    return False
-
-                try:
-                    # Execute text editor tool through execution manager
-                    result = self.execution_manager.call_text_editor_tool(
-                        arguments=args,
-                    )
-
-                    # Reset error count on success
-                    if result.get("success"):
-                        if error_state["last_tool"] == tool_name:
-                            error_state["tool_error_count"] = 0
-
-                        # Send result back to LLM
-                        self.llm_client.send_function_result(
-                            name, json.dumps(result, ensure_ascii=False),
-                        )
-
-                        # ツール完了コメントを投稿(成功)
-                        self._post_tool_call_after_comment(name, success=True)
-                        return False
-
-                    # Handle error result
-                    error_msg = result.get("error", "Unknown text editor error")
-                    self.logger.warning("Text editor tool failed: %s", error_msg)
-
-                    # ツール完了コメントを投稿(失敗)
-                    self._post_tool_call_after_comment(name, success=False)
-                    self._post_tool_error_comment(name, error_msg, task_id)
-
-                    # Update error count
-                    if error_state["last_tool"] == tool_name:
-                        error_state["tool_error_count"] += 1
-                    else:
-                        error_state["tool_error_count"] = 1
-                        error_state["last_tool"] = tool_name
-
-                    self.llm_client.send_function_result(name, f"error: {error_msg}")
-
-                    if error_state["tool_error_count"] >= MAX_CONSECUTIVE_TOOL_ERRORS:
-                        self.task.comment(
-                            f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。",
-                        )
-                        return True
-
-                    return False
-
-                except Exception as e:
-                    error_msg = str(e)
-                    self.logger.exception("Text editor execution failed: %s", error_msg)
-
-                    # ツール完了コメントを投稿(失敗)
-                    self._post_tool_call_after_comment(name, success=False)
-                    self._post_tool_error_comment(name, error_msg, task_id)
-
-                    # Update error count
-                    if error_state["last_tool"] == tool_name:
-                        error_state["tool_error_count"] += 1
-                    else:
-                        error_state["tool_error_count"] = 1
-                        error_state["last_tool"] = tool_name
-
-                    self.llm_client.send_function_result(name, f"error: {error_msg}")
-
-                    if error_state["tool_error_count"] >= MAX_CONSECUTIVE_TOOL_ERRORS:
-                        self.task.comment(
-                            f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。",
-                        )
-                        return True
-
-                    return False
+            # MCP client lookup
+            mcp_client = self.mcp_clients.get(mcp_server)
+            if mcp_client is None:
+                error_msg = f"MCP client not found: {mcp_server}"
+                self.logger.error(error_msg)
+                self.llm_client.send_function_result(name, f"error: {error_msg}")
+                return False
 
             # Execute the tool through MCP client
             try:
-                result = self.mcp_clients[mcp_server].call_tool(tool_name, args)
+                result = mcp_client.call_tool(tool_name, args)
 
                 # Reset error count on success
                 if error_state["last_tool"] == tool_name:
                     error_state["tool_error_count"] = 0
 
-                # Send result back to LLM
-                self.llm_client.send_function_result(name, str(result))
+                # Send result back to LLM (handle both dict and string results)
+                if isinstance(result, dict):
+                    self.llm_client.send_function_result(name, json.dumps(result, ensure_ascii=False))
+                else:
+                    self.llm_client.send_function_result(name, str(result))
 
                 # ツール完了コメントを投稿（成功）
                 self._post_tool_call_after_comment(name, success=True)

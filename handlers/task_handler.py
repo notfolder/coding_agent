@@ -163,6 +163,7 @@ class TaskHandler:
 
         """
         from handlers.execution_environment_manager import ExecutionEnvironmentManager
+        from handlers.execution_environment_mcp_wrapper import ExecutionEnvironmentMCPWrapper
 
         try:
             # ExecutionEnvironmentManagerを初期化
@@ -187,12 +188,34 @@ class TaskHandler:
                     "Command Executor実行環境の準備を遅延します: %s",
                     task.uuid,
                 )
-                return manager
-
-            # 実行環境を準備
-            self.logger.info("Command Executor実行環境を準備します: %s", task.uuid)
-            container_info = manager.prepare(task)
-            self.logger.info("実行環境の準備が完了しました: %s", container_info.container_id)
+            else:
+                # 実行環境を準備
+                self.logger.info("Command Executor実行環境を準備します: %s", task.uuid)
+                container_info = manager.prepare(task)
+                self.logger.info("実行環境の準備が完了しました: %s", container_info.container_id)
+            
+            # 現在のタスクを設定
+            manager.set_current_task(task)
+            
+            # MCPクライアントとしてラップしてmcp_clientsに追加
+            command_executor_wrapper = ExecutionEnvironmentMCPWrapper(
+                execution_manager=manager,
+                mcp_server_name="command-executor",
+            )
+            self.mcp_clients["command-executor"] = command_executor_wrapper
+            
+            # text-editor有効時は別途追加
+            if manager.is_text_editor_enabled():
+                text_editor_wrapper = ExecutionEnvironmentMCPWrapper(
+                    execution_manager=manager,
+                    mcp_server_name="text",
+                )
+                self.mcp_clients["text"] = text_editor_wrapper
+            
+            self.logger.info(
+                "実行環境をMCPクライアントとして登録: command-executor%s",
+                ", text" if manager.is_text_editor_enabled() else "",
+            )
             
             return manager
             
@@ -433,39 +456,6 @@ class TaskHandler:
             # Add main config for LLM client initialization
             planning_config["main_config"] = self.config
             
-            # Add execution environment tools to LLM client if available
-            if execution_manager is not None:
-                # Set current task for execution manager
-                execution_manager.set_current_task(task)
-                
-                # Get function calling definitions
-                exec_functions = execution_manager.get_function_calling_functions()
-                exec_tools = execution_manager.get_function_calling_tools()
-                
-                # Add to LLM client if it has these attributes
-                if hasattr(self.llm_client, 'functions') and self.llm_client.functions is not None:
-                    self.llm_client.functions.extend(exec_functions)
-                if hasattr(self.llm_client, 'tools') and self.llm_client.tools is not None:
-                    self.llm_client.tools.extend(exec_tools)
-                
-                self.logger.info("実行環境のツールをLLMクライアントに追加しました: %d functions, %d tools", 
-                               len(exec_functions), len(exec_tools))
-                
-                # Add text-editor tools if enabled
-                if execution_manager.is_text_editor_enabled():
-                    text_editor_functions = execution_manager.get_text_editor_functions()
-                    text_editor_tools = execution_manager.get_text_editor_tools()
-                    
-                    if hasattr(self.llm_client, 'functions') and self.llm_client.functions is not None:
-                        self.llm_client.functions.extend(text_editor_functions)
-                    if hasattr(self.llm_client, 'tools') and self.llm_client.tools is not None:
-                        self.llm_client.tools.extend(text_editor_tools)
-                    
-                    self.logger.info(
-                        "text-editorツールをLLMクライアントに追加しました: %d functions, %d tools",
-                        len(text_editor_functions), len(text_editor_tools),
-                    )
-            
             # Create planning coordinator with context_manager
             coordinator = PlanningCoordinator(
                 config=planning_config,
@@ -495,6 +485,7 @@ class TaskHandler:
             coordinator.comment_detection_manager = comment_detection_manager
             
             # Pass execution environment manager to coordinator
+            # (環境準備・切り替え処理で必要)
             coordinator.execution_manager = execution_manager
             
             # Execute with planning
