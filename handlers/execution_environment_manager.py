@@ -28,8 +28,8 @@ DEFAULT_ENVIRONMENTS: dict[str, str] = {
     "go": "coding-agent-executor-go:latest",
 }
 
-# デフォルト環境名
-DEFAULT_ENVIRONMENT_NAME = "python"
+# デフォルト環境名（フォールバック用定数）
+DEFAULT_ENVIRONMENT = "python"
 
 
 @dataclass
@@ -48,7 +48,7 @@ class ContainerInfo:
 
     container_id: str
     task_uuid: str
-    environment_name: str = DEFAULT_ENVIRONMENT_NAME
+    environment_name: str = DEFAULT_ENVIRONMENT
     workspace_path: str = "/workspace/project"
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     status: str = "created"
@@ -101,9 +101,10 @@ class ExecutionEnvironmentManager:
             "environments", DEFAULT_ENVIRONMENTS.copy(),
         )
 
-        # デフォルト環境名
-        self._default_environment = self._executor_config.get(
-            "default_environment", DEFAULT_ENVIRONMENT_NAME,
+        # デフォルト環境名（環境変数 > config > デフォルト定数の優先順位）
+        self._default_environment = os.environ.get(
+            "EXECUTOR_DEFAULT_ENVIRONMENT",
+            self._executor_config.get("default_environment", DEFAULT_ENVIRONMENT),
         )
 
         # Docker設定

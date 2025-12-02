@@ -117,15 +117,18 @@ class TaskHandler:
         planning_config = task_config.get("planning", {})
         planning_enabled = planning_config.get("enabled", True)
 
-        # 実行環境の初期化（計画利用時はコンテナ起動を後回し）
+        # 実行環境の初期化（計画前情報収集でもツールが必要なため常に準備）
         execution_manager = self._init_execution_environment(
             task,
             task_config,
-            prepare=not planning_enabled,
+            prepare=True,
         )
 
         try:
+            # 実行環境のMCPラッパーが登録されたので、LLMクライアントを更新
             if planning_enabled and task.uuid:
+                # LLMクライアントのツール定義を更新（実行環境ラッパー含む）
+                self._update_llm_client_tools()
                 # Use planning-based task handling
                 self._handle_with_planning(task, task_config, execution_manager)
             else:
@@ -224,6 +227,47 @@ class TaskHandler:
             # 実行環境の初期化失敗は警告として記録し、処理は続行
             task.comment(f"⚠️ 実行環境の初期化に失敗しました: {e}")
             return None
+
+    def _update_llm_client_tools(self) -> None:
+        """LLMクライアントのツール定義を更新する.
+        
+        実行環境ラッパーが登録された後に、LLMクライアントに
+        最新のfunctionsとtoolsを設定します。
+        """
+        if not self.llm_client:
+            return
+        
+        # function_callingが有効な場合のみ更新
+        llm_config = self.config.get("llm", {})
+        if not llm_config.get("function_calling", True):
+            return
+        
+        # 全MCPクライアントからツール定義を収集
+        functions = []
+        tools = []
+        for client_name, mcp_client in self.mcp_clients.items():
+            try:
+                functions.extend(mcp_client.get_function_calling_functions())
+                tools.extend(mcp_client.get_function_calling_tools())
+            except Exception as e:
+                self.logger.warning(
+                    "MCPクライアント '%s' からのツール取得に失敗: %s",
+                    client_name,
+                    e,
+                )
+        
+        # LLMクライアントに再設定
+        if hasattr(self.llm_client, "update_tools"):
+            # update_toolsメソッドがあれば使用
+            self.llm_client.update_tools(functions, tools)
+            self.logger.info("LLMクライアントのツール定義を更新しました")
+        else:
+            # 直接プロパティを更新
+            if functions:
+                self.llm_client.functions = functions
+            if tools:
+                self.llm_client.tools = tools
+            self.logger.info("LLMクライアントのツール定義を直接更新しました")
 
     def _cleanup_execution_environment(
         self,

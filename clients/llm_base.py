@@ -52,5 +52,22 @@ class LLMClient(ABC):
             message: アシスタントメッセージの内容
 
         """
+
+    def update_tools(
+        self,
+        functions: list | None = None,
+        tools: list | None = None,
+    ) -> None:  # noqa: B027
+        """ツール定義を更新する.
+
+        実行環境ラッパー登録後など、動的にツールを追加する際に使用します。
+        この実装はデフォルトで何もしません。
+        サブクラスでツール管理を行う場合はオーバーライドしてください。
+
+        Args:
+            functions: 新しい関数定義リスト
+            tools: 新しいツール定義リスト
+
+        """
         # デフォルト実装は何もしない
         # message_storeを持つサブクラスでオーバーライド

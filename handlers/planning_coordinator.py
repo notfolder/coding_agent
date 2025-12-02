@@ -1802,12 +1802,12 @@ Maintain the same JSON format as before for action_plan.actions."""
         """
         # ExecutionEnvironmentManagerから環境リストを取得（利用可能な場合）
         from handlers.execution_environment_manager import (
-            DEFAULT_ENVIRONMENT_NAME,
+            DEFAULT_ENVIRONMENT,
             DEFAULT_ENVIRONMENTS,
         )
 
         environments = {}
-        default_env = DEFAULT_ENVIRONMENT_NAME
+        default_env = DEFAULT_ENVIRONMENT
 
         if self.execution_manager is not None:
             environments = self.execution_manager.get_available_environments()
