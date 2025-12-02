@@ -85,6 +85,25 @@ class LMStudioClient(LLMClient):
         """
         self.message_store.add_message("assistant", message)
 
+    def update_tools(
+        self,
+        functions: list[dict[str, Any]] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """ツール定義を更新する.
+
+        実行環境ラッパー登録後など、動的にツールを追加する際に使用します。
+
+        Args:
+            functions: 新しい関数定義リスト
+            tools: 新しいツール定義リスト
+
+        """
+        if functions is not None:
+            self.functions = functions
+        if tools is not None:
+            self.tools = tools
+
     def get_response(self) -> tuple[str, list, int]:
         """LLMからの応答を取得する.
 

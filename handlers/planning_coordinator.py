@@ -65,7 +65,7 @@ class PlanningCoordinator:
         self.mcp_clients = mcp_clients.copy()  # シャローコピー
         
         # configからtext-editor MCP有効かチェック
-        text_editor_config = config.get("main_config", {}).get("text_editor", {})
+        text_editor_config = config.get("main_config", {}).get("text_editor_mcp", {})
         text_editor_enabled = text_editor_config.get("enabled", False)
         
         # text-editor有効時はGitHub/GitLab MCPを分離
@@ -191,6 +191,9 @@ class PlanningCoordinator:
 
         # 計画で選択された実行環境名
         self.selected_environment: str | None = None
+        
+        # デフォルト環境準備済みフラグ
+        self.default_environment_prepared = False
 
         # PrePlanningManagerの初期化（有効な場合）
         self.pre_planning_manager: Any = None
@@ -210,7 +213,7 @@ class PlanningCoordinator:
         self.pre_planning_manager = PrePlanningManager(
             config=pre_planning_config,
             llm_client=self.llm_client,
-            mcp_clients=self.task_source_mcp,
+            mcp_clients=self.mcp_clients,
             task=self.task,
         )
         # コンテキストマネージャを設定
@@ -759,6 +762,58 @@ class PlanningCoordinator:
             self._post_llm_error_comment("planning", str(e))
             return None
 
+    def _prepare_default_environment(self) -> None:
+        """計画フェーズ前にデフォルト実行環境を準備する.
+        
+        計画で選択される環境と一致する可能性が高いデフォルト環境を事前に準備することで、
+        環境が一致した場合のコンテナ再作成オーバーヘッドを回避します。
+        
+        準備に失敗した場合は警告ログのみで処理を継続し、
+        計画フェーズ後の_ensure_execution_environment_ready()で再準備します。
+        """
+        if self.execution_manager is None:
+            # コマンド実行機能が無効な場合は処理不要
+            return
+
+        if not self.task.uuid:
+            # UUIDがないとコンテナ名を一意にできないため準備不能
+            self.logger.warning("タスクにUUIDがないためデフォルト環境を準備できません")
+            return
+
+        try:
+            # デフォルト環境名を取得
+            default_environment = self.execution_manager.get_default_environment()
+            
+            self.logger.info(
+                "計画フェーズ前にデフォルト実行環境(%s)を準備します",
+                default_environment,
+            )
+            
+            # デフォルト環境でコンテナを起動
+            container_info = self.execution_manager.prepare(self.task, default_environment)
+            
+            self.logger.info(
+                "デフォルト実行環境を準備しました: %s (%s)",
+                container_info.container_id,
+                container_info.environment_name,
+            )
+            
+            # 準備済みフラグを設定
+            self.default_environment_prepared = True
+            
+            # 選択環境が未設定の場合、デフォルト環境を設定
+            if self.selected_environment is None:
+                self.selected_environment = default_environment
+                
+        except Exception as error:
+            # デフォルト環境準備失敗は警告のみで処理継続
+            # 計画フェーズ後の_ensure_execution_environment_ready()で再準備される
+            self.logger.warning(
+                "デフォルト実行環境の準備に失敗しました(計画後に再準備します): %s",
+                error,
+            )
+            self.default_environment_prepared = False
+
     def _extract_selected_environment(self, plan: dict[str, Any]) -> str | None:
         """計画応答から選択された実行環境を抽出する.
 
@@ -802,6 +857,9 @@ class PlanningCoordinator:
 
     def _ensure_execution_environment_ready(self) -> bool:
         """実行フェーズ開始前に実行環境コンテナを準備する.
+        
+        計画で選択された環境と既存コンテナの環境を比較し、
+        一致すればそのまま利用、不一致なら再作成します。
 
         Returns:
             実行環境が利用可能な場合はTrue、準備に失敗した場合はFalse
@@ -818,26 +876,55 @@ class PlanningCoordinator:
             self.task.comment(f"⚠️ {warning_msg}")
             return False
 
+        # 計画で選択された環境がない場合はデフォルトを使用
+        target_environment = self.selected_environment or self.execution_manager.get_default_environment()
+        if self.selected_environment is None:
+            self.selected_environment = target_environment
+
         container_info = self.execution_manager.get_container_info(self.task.uuid)
         if container_info is not None and container_info.status == "ready":
-            # 既に準備済みのコンテナを再利用する
-            self.logger.info(
-                "既存の実行環境を再利用します: %s (%s)",
-                container_info.container_id,
-                container_info.environment_name,
-            )
-            if self.selected_environment is None:
-                self.selected_environment = container_info.environment_name
-            return True
-
-        # 計画で選択された環境がない場合はデフォルトを使用
-        environment_name = self.selected_environment or self.execution_manager.get_default_environment()
-        if self.selected_environment is None:
-            self.selected_environment = environment_name
+            # 既存コンテナが存在する場合、環境名を比較
+            if container_info.environment_name == target_environment:
+                # 環境が一致する場合はそのまま再利用
+                self.logger.info(
+                    "既存の実行環境を再利用します: %s (%s)",
+                    container_info.container_id,
+                    container_info.environment_name,
+                )
+                return True
+            else:
+                # 環境が不一致の場合は再作成
+                self.logger.info(
+                    "計画で選択された環境(%s)が既存環境(%s)と異なるため、実行環境を再作成します",
+                    target_environment,
+                    container_info.environment_name,
+                )
+                
+                # 環境切り替えの通知コメントを投稿
+                self.task.comment(
+                    f"## 🔄 実行環境の切り替え\n\n"
+                    f"計画で選択された環境(**{target_environment}**)が\n"
+                    f"準備済みの環境(**{container_info.environment_name}**)と異なるため、\n"
+                    f"実行環境を再作成します。\n\n"
+                    f"*{datetime.now().strftime(DATETIME_FORMAT)}*"
+                )
+                
+                try:
+                    # 既存コンテナをクリーンアップ
+                    self.execution_manager.cleanup(self.task.uuid)
+                    self.logger.info(
+                        "既存の実行環境をクリーンアップしました: %s",
+                        container_info.container_id,
+                    )
+                except Exception as cleanup_error:
+                    self.logger.warning(
+                        "既存環境のクリーンアップに失敗しました(処理継続): %s",
+                        cleanup_error,
+                    )
 
         try:
             # コンテナを起動し、利用可能状態まで準備する
-            container_info = self.execution_manager.prepare(self.task, environment_name)
+            container_info = self.execution_manager.prepare(self.task, target_environment)
             self.logger.info(
                 "実行環境を起動しました: %s (%s)",
                 container_info.container_id,
@@ -972,161 +1059,27 @@ class PlanningCoordinator:
             # ツール呼び出し前のコメントを投稿
             self._post_tool_call_before_comment(name, args)
 
-            # Check if this is a command-executor tool
-            if mcp_server == "command-executor":
-                # Handle command execution through ExecutionEnvironmentManager
-                if self.execution_manager is None:
-                    error_msg = "Execution environment not available"
-                    self.logger.error(error_msg)
-                    self.llm_client.send_function_result(name, f"error: {error_msg}")
-                    return False
-
-                try:
-                    # Execute command through execution manager
-                    if tool_name == "execute_command":
-                        result = self.execution_manager.execute_command(
-                            command=args.get("command", ""),
-                            working_directory=args.get("working_directory"),
-                        )
-                    else:
-                        error_msg = f"Unknown command-executor tool: {tool_name}"
-                        raise ValueError(error_msg)
-
-                    # Reset error count on success
-                    if error_state["last_tool"] == tool_name:
-                        error_state["tool_error_count"] = 0
-
-                    # Send result back to LLM
-                    self.llm_client.send_function_result(name, json.dumps(result, ensure_ascii=False))
-
-                    # ツール完了コメントを投稿（成功）
-                    self._post_tool_call_after_comment(name, success=True)
-
-                    return False
-
-                except Exception as e:
-                    error_msg = str(e)
-                    self.logger.exception("Command execution failed: %s", error_msg)
-
-                    # ツール完了コメントを投稿（失敗）
-                    self._post_tool_call_after_comment(name, success=False)
-                    # ツールエラーコメントを投稿
-                    self._post_tool_error_comment(name, error_msg, task_id)
-
-                    # Update error count
-                    if error_state["last_tool"] == tool_name:
-                        error_state["tool_error_count"] += 1
-                    else:
-                        error_state["tool_error_count"] = 1
-                        error_state["last_tool"] = tool_name
-
-                    # Send error result to LLM
-                    self.llm_client.send_function_result(name, f"error: {error_msg}")
-
-                    # Check if we should abort
-                    if error_state["tool_error_count"] >= MAX_CONSECUTIVE_TOOL_ERRORS:
-                        self.task.comment(
-                            f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。",
-                        )
-                        return True
-
-                    return False
-
-            # Check if this is a text_editor tool
-            if mcp_server == "text":
-                # Handle text editor through ExecutionEnvironmentManager
-                if self.execution_manager is None:
-                    error_msg = "Execution environment not available"
-                    self.logger.error(error_msg)
-                    self.llm_client.send_function_result(name, f"error: {error_msg}")
-                    return False
-
-                if not self.execution_manager.is_text_editor_enabled():
-                    error_msg = "Text editor MCP is not enabled"
-                    self.logger.error(error_msg)
-                    self.llm_client.send_function_result(name, f"error: {error_msg}")
-                    return False
-
-                try:
-                    # Execute text editor tool through execution manager
-                    result = self.execution_manager.call_text_editor_tool(
-                        arguments=args,
-                    )
-
-                    # Reset error count on success
-                    if result.get("success"):
-                        if error_state["last_tool"] == tool_name:
-                            error_state["tool_error_count"] = 0
-
-                        # Send result back to LLM
-                        self.llm_client.send_function_result(
-                            name, json.dumps(result, ensure_ascii=False),
-                        )
-
-                        # ツール完了コメントを投稿(成功)
-                        self._post_tool_call_after_comment(name, success=True)
-                        return False
-
-                    # Handle error result
-                    error_msg = result.get("error", "Unknown text editor error")
-                    self.logger.warning("Text editor tool failed: %s", error_msg)
-
-                    # ツール完了コメントを投稿(失敗)
-                    self._post_tool_call_after_comment(name, success=False)
-                    self._post_tool_error_comment(name, error_msg, task_id)
-
-                    # Update error count
-                    if error_state["last_tool"] == tool_name:
-                        error_state["tool_error_count"] += 1
-                    else:
-                        error_state["tool_error_count"] = 1
-                        error_state["last_tool"] = tool_name
-
-                    self.llm_client.send_function_result(name, f"error: {error_msg}")
-
-                    if error_state["tool_error_count"] >= MAX_CONSECUTIVE_TOOL_ERRORS:
-                        self.task.comment(
-                            f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。",
-                        )
-                        return True
-
-                    return False
-
-                except Exception as e:
-                    error_msg = str(e)
-                    self.logger.exception("Text editor execution failed: %s", error_msg)
-
-                    # ツール完了コメントを投稿(失敗)
-                    self._post_tool_call_after_comment(name, success=False)
-                    self._post_tool_error_comment(name, error_msg, task_id)
-
-                    # Update error count
-                    if error_state["last_tool"] == tool_name:
-                        error_state["tool_error_count"] += 1
-                    else:
-                        error_state["tool_error_count"] = 1
-                        error_state["last_tool"] = tool_name
-
-                    self.llm_client.send_function_result(name, f"error: {error_msg}")
-
-                    if error_state["tool_error_count"] >= MAX_CONSECUTIVE_TOOL_ERRORS:
-                        self.task.comment(
-                            f"同じツール({name})で{MAX_CONSECUTIVE_TOOL_ERRORS}回連続エラーが発生したため処理を中止します。",
-                        )
-                        return True
-
-                    return False
+            # MCP client lookup
+            mcp_client = self.mcp_clients.get(mcp_server)
+            if mcp_client is None:
+                error_msg = f"MCP client not found: {mcp_server}"
+                self.logger.error(error_msg)
+                self.llm_client.send_function_result(name, f"error: {error_msg}")
+                return False
 
             # Execute the tool through MCP client
             try:
-                result = self.mcp_clients[mcp_server].call_tool(tool_name, args)
+                result = mcp_client.call_tool(tool_name, args)
 
                 # Reset error count on success
                 if error_state["last_tool"] == tool_name:
                     error_state["tool_error_count"] = 0
 
-                # Send result back to LLM
-                self.llm_client.send_function_result(name, str(result))
+                # Send result back to LLM (handle both dict and string results)
+                if isinstance(result, dict):
+                    self.llm_client.send_function_result(name, json.dumps(result, ensure_ascii=False))
+                else:
+                    self.llm_client.send_function_result(name, str(result))
 
                 # ツール完了コメントを投稿（成功）
                 self._post_tool_call_after_comment(name, success=True)
@@ -1849,12 +1802,12 @@ Maintain the same JSON format as before for action_plan.actions."""
         """
         # ExecutionEnvironmentManagerから環境リストを取得（利用可能な場合）
         from handlers.execution_environment_manager import (
-            DEFAULT_ENVIRONMENT_NAME,
+            DEFAULT_ENVIRONMENT,
             DEFAULT_ENVIRONMENTS,
         )
 
         environments = {}
-        default_env = DEFAULT_ENVIRONMENT_NAME
+        default_env = DEFAULT_ENVIRONMENT
 
         if self.execution_manager is not None:
             environments = self.execution_manager.get_available_environments()
@@ -2946,6 +2899,11 @@ Maintain the same JSON format as before for action_plan.actions."""
         if saved_selected_environment is not None:
             self.selected_environment = saved_selected_environment
 
+        # Restore default environment prepared flag if available
+        saved_default_env_prepared = planning_state.get("default_environment_prepared")
+        if saved_default_env_prepared is not None:
+            self.default_environment_prepared = saved_default_env_prepared
+
         # Restore pre-planning manager state if available
         saved_pre_planning_state = planning_state.get("pre_planning_state")
         if saved_pre_planning_state and self.pre_planning_manager:
@@ -2953,13 +2911,14 @@ Maintain the same JSON format as before for action_plan.actions."""
 
         self.logger.info(
             "Planning状態を復元しました: phase=%s, action_counter=%d, revision_counter=%d, "
-            "llm_call_count=%d, checklist_id=%s, selected_environment=%s",
+            "llm_call_count=%d, checklist_id=%s, selected_environment=%s, default_env_prepared=%s",
             self.current_phase,
             self.action_counter,
             self.revision_counter,
             self.llm_call_count,
             self.checklist_comment_id,
             self.selected_environment,
+            self.default_environment_prepared,
         )
 
         # Load existing plan from history
@@ -2991,6 +2950,7 @@ Maintain the same JSON format as before for action_plan.actions."""
             "total_actions": total_actions,
             "pre_planning_result": self.pre_planning_result,
             "selected_environment": self.selected_environment,
+            "default_environment_prepared": self.default_environment_prepared,
         }
 
         # Add pre-planning manager state if available

@@ -411,11 +411,17 @@ class PrePlanningManager:
             self.understanding_result, indent=2, ensure_ascii=False
         )
 
+        # 利用可能なツールのリストを取得
+        available_tools = self._get_available_tools_list()
+
         prompt_parts = [
             "以下の理解に基づいて、計画を立てるために必要な情報を特定してください。",
             "",
             "=== 依頼内容の理解結果 ===",
             understanding_summary,
+            "",
+            "=== 利用可能なツール ===",
+            available_tools,
             "",
             "=== 収集対象となる情報カテゴリ ===",
             "1. codebase: プロジェクト構造、関連コード、依存関係、テスト構造、設定ファイル",
@@ -423,6 +429,8 @@ class PrePlanningManager:
             "3. external: 関連Issue/PR、外部ドキュメント",
             "",
             "タスクが非常にシンプルな場合や、追加情報が不要な場合は、skip_collectionをtrueにしてください。",
+            "",
+            "**重要**: collection_methodのtoolフィールドには、上記「利用可能なツール」に記載された正確なツール名を使用してください。",
             "",
             "以下のJSON形式で応答してください：",
             "```json",
@@ -616,7 +624,7 @@ class PrePlanningManager:
         mcp_server, actual_tool = self._parse_tool_name(tool_name)
 
         if mcp_server not in self.mcp_clients:
-            self.logger.warning("MCPクライアントが見つかりません: %s", mcp_server)
+            self.logger.warning("MCPクライアントが見つかりません: %s in %s", mcp_server, self.mcp_clients.keys())
             return result
 
         mcp_client = self.mcp_clients[mcp_server]
@@ -642,11 +650,39 @@ class PrePlanningManager:
 
         return result
 
+    def _get_available_tools_list(self) -> str:
+        """利用可能なツールのリストを取得する.
+
+        Returns:
+            ツールリストの文字列
+
+        """
+        tools_info = []
+        
+        for mcp_name, mcp_client in self.mcp_clients.items():
+            try:
+                # Get function definitions from MCP client
+                functions = mcp_client.get_function_calling_functions()
+                
+                if functions:
+                    tools_info.append(f"\n**{mcp_name} MCP:**")
+                    for func in functions:
+                        tool_name = func.get("name", "unknown")
+                        description = func.get("description", "説明なし")
+                        tools_info.append(f"- `{tool_name}`: {description}")
+            except Exception as e:
+                self.logger.warning("MCPクライアント %s からツール情報を取得できませんでした: %s", mcp_name, e)
+        
+        if not tools_info:
+            return "利用可能なツールがありません"
+        
+        return "\n".join(tools_info)
+
     def _parse_tool_name(self, tool_name: str) -> tuple[str, str]:
         """ツール名からMCPサーバー名と実際のツール名を分離する.
 
         Args:
-            tool_name: ツール名（例: "github_get_file_contents"）
+            tool_name: ツール名
 
         Returns:
             (MCPサーバー名, 実際のツール名)
