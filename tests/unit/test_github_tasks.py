@@ -141,7 +141,8 @@ class TestTaskGitHubIssue(BaseTestCase):
         # Verify prompt contains expected information
         self._verify_isinstance(prompt, str)
         self._verify_in("ISSUE:", prompt)
-        self._verify_in("COMMENTS:", prompt)
+        # プロンプト形式が変更: COMMENTS → REFERENCE_COMMENTS / LATEST_REQUEST
+        self._verify_in("REFERENCE_COMMENTS", prompt)
         self._verify_in("Test GitHub Issue", prompt)
         self._verify_in("This is a test issue", prompt)
         self._verify_in("testorg", prompt)

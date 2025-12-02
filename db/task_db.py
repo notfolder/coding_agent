@@ -385,6 +385,63 @@ class TaskDBManager:
                 session.expunge(db_task)
             return db_task
 
+    def find_completed_tasks_by_key(
+        self,
+        task_key: TaskKey,
+        since: datetime | None = None,
+    ) -> list[DBTask]:
+        """TaskKeyで完了済みタスクを検索する.
+
+        同じTaskKeyを持つ、statusがcompletedまたはstoppedのタスクを
+        完了日時の降順で返します。
+
+        Args:
+            task_key: TaskKeyオブジェクト
+            since: この日時以降に完了したタスクのみを取得（オプション）
+
+        Returns:
+            list[DBTask]: 見つかったDBTaskオブジェクトのリスト（完了日時降順）
+
+        """
+        task_dict = task_key.to_dict()
+
+        # ヘルパー関数でTaskKey情報を変換
+        task_source, task_type, owner, repo, project_id, number = _parse_task_key_dict(task_dict)
+
+        with self.get_session() as session:
+            query = session.query(DBTask).filter(
+                DBTask.task_source == task_source,
+                DBTask.task_type == task_type,
+                DBTask.status.in_(["completed", "stopped"]),
+            )
+
+            # GitHubの場合
+            if task_source == "github":
+                query = query.filter(
+                    DBTask.owner == owner,
+                    DBTask.repo == repo,
+                    DBTask.number == number,
+                )
+            # GitLabの場合
+            elif task_source == "gitlab":
+                query = query.filter(
+                    DBTask.project_id == project_id,
+                    DBTask.number == number,
+                )
+
+            # 日時フィルタ
+            if since:
+                query = query.filter(DBTask.completed_at >= since)
+
+            # 完了日時の降順でソート
+            db_tasks = query.order_by(DBTask.completed_at.desc()).all()
+
+            # デタッチ状態にする
+            for db_task in db_tasks:
+                session.expunge(db_task)
+
+            return db_tasks
+
     def save_task(self, db_task: DBTask) -> DBTask:
         """DBTaskオブジェクトを保存（更新）する.
 

@@ -136,7 +136,7 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
         prompt = task.get_prompt()
         self._verify_isinstance(prompt, str)
         self._verify_in("ISSUE:", prompt)
-        self._verify_in("COMMENTS:", prompt)
+        self._verify_in("REFERENCE_COMMENTS", prompt)
 
         # 5. Handle task with LLM
         task_handler = TaskHandler(

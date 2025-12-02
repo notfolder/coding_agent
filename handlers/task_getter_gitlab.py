@@ -51,17 +51,41 @@ class TaskGitLabIssue(Task):
         # issue本体取得（最新情報を取得してself.issueに代入）
         self._refresh_issue()
         discussions = self._fetch_issue_discussions()
-        comments = [
-            [note.get("body", "") for note in discussion.get("notes", [])]
+        
+        # ボット自身のユーザー名を取得（GitLab設定から）
+        bot_username = self.config.get("gitlab", {}).get("bot_username", "notfolder-bot")
+        
+        # 全コメントをフラット化（システムイベント、空のbody、ボット自身の投稿を除外）
+        all_comments = [
+            note.get("body", "")
             for discussion in discussions
+            for note in discussion.get("notes", [])
+            if note.get("body", "").strip()  # 空のbodyを除外
+            and not note.get("system", False)  # システムイベントを除外
+            and note.get("author", {}).get("username") != bot_username  # ボット自身の投稿を除外
         ]
-        return (
+        
+        # 最新コメントを主要依頼、それ以前を参考情報として分離
+        latest_comment = all_comments[-1] if all_comments else None
+        previous_comments = all_comments[:-1] if len(all_comments) > 1 else []
+        
+        prompt_parts = [
             f"ISSUE: {{'title': '{self.issue.get('title', '')}', "
             f"'description': '{self.issue.get('description', '')}', "
-            f"'project_id': '{self.issue.get('project_id', '')}'\n"
-            f"'issue_iid': '{self.issue.get('iid', '')}'}}\n"
-            f"COMMENTS: {comments}"
-        )
+            f"'project_id': '{self.issue.get('project_id', '')}'"
+            f"'issue_iid': '{self.issue.get('iid', '')}'}}"
+        ]
+        
+        if previous_comments:
+            prompt_parts.append(f"\n\nREFERENCE_COMMENTS (参考情報): {previous_comments}")
+        
+        if latest_comment:
+            prompt_parts.append(f"\n\nLATEST_REQUEST (最新の依頼): {latest_comment}")
+        elif not all_comments:
+            # コメントがない場合はIssue本文が主要依頼
+            prompt_parts.append("\n\n(主要依頼はIssue本文を参照)")
+        
+        return "".join(prompt_parts)
 
     def comment(self, text: str, *, mention: bool = False) -> dict[str, Any] | None:
         if mention:
@@ -312,16 +336,42 @@ class TaskGitLabMergeRequest(Task):
         """GitLabからコメント情報を取得してプロンプトを生成する."""
         # 最新のMR情報を取得
         self._refresh_mr()
-        comments = self._fetch_merge_request_notes()
-        comments = [note.get("body", "") for note in comments]
-        return (
+        all_comments = self._fetch_merge_request_notes()
+        
+        # ボット自身のユーザー名を取得（GitLab設定から）
+        bot_username = self.config.get("gitlab", {}).get("bot_username", "notfolder-bot")
+        
+        # システムイベント、空のbody、ボット自身の投稿を除外
+        all_comments = [
+            note.get("body", "")
+            for note in all_comments
+            if note.get("body", "").strip()
+            and not note.get("system", False)
+            and note.get("author", {}).get("username") != bot_username
+        ]
+        
+        # 最新コメントを主要依頼、それ以前を参考情報として分離
+        latest_comment = all_comments[-1] if all_comments else None
+        previous_comments = all_comments[:-1] if len(all_comments) > 1 else []
+        
+        prompt_parts = [
             f"MERGE_REQUEST: {{'title': '{self.mr.get('title', '')}', "
             f"'description': '{self.mr.get('description', '')}', "
             f"'iid': '{self.mr.get('iid', '')}', "
             f"'source_branch': '{self.mr.get('source_branch', '')}', "
-            f"'project_id': '{self.mr.get('project_id', '')}'}}\n"
-            f"COMMENTS: {comments}"
-        )
+            f"'project_id': '{self.mr.get('project_id', '')}'}}"
+        ]
+        
+        if previous_comments:
+            prompt_parts.append(f"\n\nREFERENCE_COMMENTS (参考情報): {previous_comments}")
+        
+        if latest_comment:
+            prompt_parts.append(f"\n\nLATEST_REQUEST (最新の依頼): {latest_comment}")
+        elif not all_comments:
+            # コメントがない場合はMR本文が主要依頼
+            prompt_parts.append("\n\n(主要依頼はMerge Request本文を参照)")
+        
+        return "".join(prompt_parts)
 
     def comment(self, text: str, *, mention: bool = False) -> dict[str, Any] | None:
         if mention:

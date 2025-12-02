@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -100,8 +99,10 @@ class ContextInheritanceManager:
             "reuse_successful_patterns", True,
         )
 
-        # データベースパス
-        self.db_path = base_dir / "tasks.db"
+        # データベースマネージャーのインポートと初期化
+        from db.task_db import TaskDBManager
+
+        self.db_manager = TaskDBManager(config=config)
         self.completed_dir = base_dir / "completed"
 
     def find_previous_contexts(
@@ -119,105 +120,34 @@ class ContextInheritanceManager:
         if not self.enabled:
             return []
 
-        if not self.db_path.exists():
-            self.logger.debug("タスクデータベースが存在しません: %s", self.db_path)
-            return []
-
-        # TaskKeyから検索条件を取得
-        task_dict = task_key.to_dict()
-        task_type = task_dict.get("type", "")
-
-        # task_typeからtask_sourceとtask_typeを分離
-        # 例: github_issue -> github, issue
-        # 例: github_pull_request -> github, pull_request
-        if "_" in task_type:
-            parts = task_type.split("_", 1)
-            task_source = parts[0]
-            actual_task_type = parts[1] if len(parts) > 1 else task_type
-        else:
-            task_source = task_type
-            actual_task_type = task_type
-
-        # GitHubの場合
-        owner = task_dict.get("owner", "")
-        repo = task_dict.get("repo", "")
-        task_id = str(task_dict.get("number", ""))
-
-        # GitLabの場合
-        if not owner and not repo:
-            # GitLab形式: project_id, issue_iid or mr_iid
-            project_id = task_dict.get("project_id", "")
-            if project_id:
-                owner = ""  # GitLabはownerなし
-                repo = str(project_id)
-            task_id = str(
-                task_dict.get("issue_iid", "") or task_dict.get("mr_iid", ""),
-            )
-
         # 有効期限の計算
         expiry_date = datetime.now(timezone.utc) - timedelta(days=self.expiry_days)
 
         # データベースから検索
         previous_contexts = []
-        for retry in range(self.MAX_DB_RETRIES):
-            try:
-                with sqlite3.connect(self.db_path) as conn:
-                    conn.row_factory = sqlite3.Row
-                    cursor = conn.cursor()
+        try:
+            # TaskDBManagerのメソッドを使用して完了済みタスクを取得
+            db_tasks = self.db_manager.find_completed_tasks_by_key(
+                task_key=task_key,
+                since=expiry_date,
+            )
 
-                    # 検索クエリを実行
-                    # statusがcompletedまたはstoppedで、有効期限内のものを検索
-                    cursor.execute(
-                        """
-                        SELECT uuid, task_source, owner, repo, task_type, task_id,
-                               status, completed_at, user
-                        FROM tasks
-                        WHERE task_source = ?
-                          AND owner = ?
-                          AND repo = ?
-                          AND task_type = ?
-                          AND task_id = ?
-                          AND status IN ('completed', 'stopped')
-                          AND completed_at >= ?
-                        ORDER BY completed_at DESC
-                        """,
-                        (
-                            task_source,
-                            owner,
-                            repo,
-                            actual_task_type,
-                            task_id,
-                            expiry_date.isoformat(),
-                        ),
-                    )
+            for db_task in db_tasks:
+                # 過去コンテキストを構築
+                context = self._build_previous_context_from_db(db_task)
+                if context:
+                    previous_contexts.append(context)
 
-                    rows = cursor.fetchall()
+            self.logger.debug(
+                "過去コンテキストを %d 件検出しました", len(previous_contexts),
+            )
 
-                    for row in rows:
-                        # 過去コンテキストを構築
-                        context = self._build_previous_context(dict(row))
-                        if context:
-                            previous_contexts.append(context)
-
-                    self.logger.debug(
-                        "過去コンテキストを %d 件検出しました", len(previous_contexts),
-                    )
-                    break  # 成功したらループを抜ける
-
-            except sqlite3.Error as e:
-                self.logger.warning(
-                    "データベースエラー (リトライ %d/%d): %s",
-                    retry + 1,
-                    self.MAX_DB_RETRIES,
-                    e,
-                )
-                if retry == self.MAX_DB_RETRIES - 1:
-                    self.logger.error("データベース接続に失敗しました")
-                    return []
-                # 指数バックオフで待機
-                import time
-                wait_time = 0.1 * (2 ** retry)  # 0.1秒、0.2秒、0.4秒
-                time.sleep(wait_time)
+        except Exception as e:
+            self.logger.exception(
+                "データベース検索エラー: %s",
+                e,
+            )
+            return []
 
         return previous_contexts
 
@@ -293,7 +223,7 @@ class ContextInheritanceManager:
 
         Args:
             inheritance_context: 引き継ぎコンテキスト
-            user_request: 今回のユーザー依頼（Issue/MR/PRの内容）
+            user_request: 今回のユーザー依頼（Issue/MR/PRの内容、最新コメントを含む）
 
         Returns:
             初期コンテキストのメッセージリスト
@@ -313,6 +243,7 @@ class ContextInheritanceManager:
         })
 
         # 今回のユーザー依頼をuserロールで追加
+        # user_requestには既に最新コメントが主要依頼として分離されている
         messages.append({
             "role": "user",
             "content": user_request,
@@ -351,35 +282,21 @@ class ContextInheritanceManager:
 
         return "\n".join(comment_lines)
 
-    def _build_previous_context(
-        self, row: dict[str, Any],
+    def _build_previous_context_from_db(
+        self, db_task: Any,
     ) -> PreviousContext | None:
-        """データベース行から過去コンテキストを構築する.
+        """DBTaskオブジェクトから過去コンテキストを構築する.
 
         Args:
-            row: データベースの行データ
+            db_task: DBTaskオブジェクト（SQLAlchemy ORM）
 
         Returns:
             過去コンテキスト、または構築失敗時はNone
 
         """
-        uuid = row.get("uuid", "")
+        uuid = db_task.uuid
         if not uuid:
             return None
-
-        # 完了日時をパース
-        completed_at = None
-        completed_at_str = row.get("completed_at")
-        if completed_at_str:
-            try:
-                # ISO形式の日時をパース
-                completed_at = datetime.fromisoformat(
-                    completed_at_str.replace("Z", "+00:00"),
-                )
-            except ValueError:
-                self.logger.warning(
-                    "日時のパースに失敗: %s", completed_at_str,
-                )
 
         # コンテキストディレクトリから最終要約を取得
         final_summary = self._load_final_summary(uuid)
@@ -393,19 +310,15 @@ class ContextInheritanceManager:
             planning_history = self._load_planning_history(uuid)
 
         # TaskKey辞書を構築
-        task_key_dict = {
-            "task_source": row.get("task_source", ""),
-            "owner": row.get("owner", ""),
-            "repo": row.get("repo", ""),
-            "task_type": row.get("task_type", ""),
-            "task_id": row.get("task_id", ""),
-        }
+        # DBTaskから元のTaskKeyを復元して辞書化する
+        task_key = db_task.get_task_key()
+        task_key_dict = task_key.to_dict()
 
         return PreviousContext(
             uuid=uuid,
             task_key_dict=task_key_dict,
-            status=row.get("status", ""),
-            completed_at=completed_at,
+            status=db_task.status,
+            completed_at=db_task.completed_at,
             final_summary=final_summary,
             metadata=metadata,
             planning_history=planning_history,

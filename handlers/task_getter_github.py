@@ -54,18 +54,40 @@ class TaskGitHubIssue(Task):
             "repo": self.issue["repo"],
             "issue_number": self.issue["number"],
         }
-        comments = [
+        
+        # ボット自身のユーザー名を取得（GitHub設定から）
+        bot_username = self.config.get("github", {}).get("bot_username", "github-actions[bot]")
+        
+        # 空のbody、ボット自身の投稿を除外
+        all_comments = [
             comment.get("body", "")
             for comment in self.mcp_client.call_tool("get_issue_comments", args)
+            if comment.get("body", "").strip()
+            and comment.get("user", {}).get("login") != bot_username
         ]
-        return (
+        
+        # 最新コメントを主要依頼、それ以前を参考情報として分離
+        latest_comment = all_comments[-1] if all_comments else None
+        previous_comments = all_comments[:-1] if len(all_comments) > 1 else []
+        
+        prompt_parts = [
             f"ISSUE: {{'title': '{self.issue.get('title', '')}', "
             f"'body': '{self.issue.get('body', '')}', "
             f"'owner': '{self.issue.get('owner', '')}', "
-            f"'repo': '{self.issue.get('repo', '')}'}}\n"
-            f"'issue_number': '{self.issue.get('number', '')}'}}\n"
-            f"COMMENTS: {comments}"
-        )
+            f"'repo': '{self.issue.get('repo', '')}'}}"
+            f"'issue_number': '{self.issue.get('number', '')}'}}"
+        ]
+        
+        if previous_comments:
+            prompt_parts.append(f"\n\nREFERENCE_COMMENTS (参考情報): {previous_comments}")
+        
+        if latest_comment:
+            prompt_parts.append(f"\n\nLATEST_REQUEST (最新の依頼): {latest_comment}")
+        elif not all_comments:
+            # コメントがない場合はIssue本文が主要依頼
+            prompt_parts.append("\n\n(主要依頼はIssue本文を参照)")
+        
+        return "".join(prompt_parts)
 
     def comment(self, text: str, *, mention: bool = False) -> dict[str, Any] | None:
         if mention:
@@ -233,9 +255,24 @@ class TaskGitHubPullRequest(Task):
         )
 
     def get_prompt(self) -> str:
-        comments = self.github_client.get_pull_request_comments(
+        all_comments = self.github_client.get_pull_request_comments(
             owner=self.pr["owner"], repo=self.pr["repo"], pull_number=self.pr["number"],
         )
+        
+        # ボット自身のユーザー名を取得（GitHub設定から）
+        bot_username = self.config.get("github", {}).get("bot_username", "github-actions[bot]")
+        
+        # 空のコメント、ボット自身の投稿を除外
+        all_comments = [
+            comment for comment in all_comments
+            if (comment.strip() if isinstance(comment, str) else comment.get("body", "").strip())
+            and (comment.get("user", {}).get("login") != bot_username if isinstance(comment, dict) else True)
+        ]
+        
+        # 最新コメントを主要依頼、それ以前を参考情報として分離
+        latest_comment = all_comments[-1] if all_comments else None
+        previous_comments = all_comments[:-1] if len(all_comments) > 1 else []
+        
         pr_info = {
             "pull_request": {
                 "title": self.pr.get("title", ""),
@@ -245,9 +282,20 @@ class TaskGitHubPullRequest(Task):
                 "pullNumber": self.pr.get("number", ""),
                 "branch": self.pr.get("head", {}).get("ref", ""),
             },
-            "comments": comments,
         }
-        return f"PULL_REQUEST: {json.dumps(pr_info, ensure_ascii=False)}\n"
+        
+        prompt_parts = [f"PULL_REQUEST: {json.dumps(pr_info, ensure_ascii=False)}"]
+        
+        if previous_comments:
+            prompt_parts.append(f"\n\nREFERENCE_COMMENTS (参考情報): {json.dumps(previous_comments, ensure_ascii=False)}")
+        
+        if latest_comment:
+            prompt_parts.append(f"\n\nLATEST_REQUEST (最新の依頼): {json.dumps(latest_comment, ensure_ascii=False)}")
+        elif not all_comments:
+            # コメントがない場合はPR本文が主要依頼
+            prompt_parts.append("\n\n(主要依頼はPull Request本文を参照)")
+        
+        return "".join(prompt_parts) + "\n"
 
     def comment(self, text: str, *, mention: bool = False) -> dict[str, Any] | None:
         if mention:

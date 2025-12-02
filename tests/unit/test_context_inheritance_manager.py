@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 import shutil
-import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from context_storage.context_inheritance_manager import (
     ContextInheritanceManager,
@@ -45,46 +45,46 @@ class TestContextInheritanceManager(unittest.TestCase):
             },
         }
 
-        # テスト用データベースを作成
-        self._create_test_database()
+        # テスト用のタスクリストを保持
+        self.test_tasks = []
 
     def tearDown(self) -> None:
         """Clean up test fixtures."""
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def _create_test_database(self) -> None:
-        """テスト用のSQLiteデータベースを作成する."""
-        db_path = self.base_dir / "tasks.db"
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tasks (
-                    uuid TEXT PRIMARY KEY,
-                    task_source TEXT NOT NULL,
-                    owner TEXT NOT NULL,
-                    repo TEXT NOT NULL,
-                    task_type TEXT NOT NULL,
-                    task_id TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    started_at TEXT,
-                    completed_at TEXT,
-                    process_id INTEGER,
-                    hostname TEXT,
-                    llm_provider TEXT,
-                    model TEXT,
-                    context_length INTEGER,
-                    llm_call_count INTEGER DEFAULT 0,
-                    tool_call_count INTEGER DEFAULT 0,
-                    total_tokens INTEGER DEFAULT 0,
-                    compression_count INTEGER DEFAULT 0,
-                    error_message TEXT,
-                    user TEXT
-                )
-            """)
-            conn.commit()
+    def _create_mock_db_task(
+        self,
+        uuid: str,
+        task_source: str = "github",
+        owner: str = "testowner",
+        repo: str = "testrepo",
+        task_type: str = "issue",
+        number: int = 123,
+        status: str = "completed",
+        completed_at: datetime | None = None,
+    ) -> MagicMock:
+        """モックDBTaskオブジェクトを作成する."""
+        if completed_at is None:
+            completed_at = datetime.now(timezone.utc)
 
-    def _add_test_task_to_db(
+        mock_task = MagicMock()
+        mock_task.uuid = uuid
+        mock_task.task_source = task_source
+        mock_task.owner = owner
+        mock_task.repo = repo
+        mock_task.task_type = task_type
+        mock_task.number = number
+        mock_task.status = status
+        mock_task.created_at = datetime.now(timezone.utc)
+        mock_task.completed_at = completed_at
+
+        # get_task_keyメソッドのモック
+        if task_source == "github" and task_type == "issue":
+            mock_task.get_task_key.return_value = GitHubIssueTaskKey(owner, repo, number)
+
+        return mock_task
+
+    def _add_test_task(
         self,
         uuid: str,
         task_source: str = "github",
@@ -95,31 +95,18 @@ class TestContextInheritanceManager(unittest.TestCase):
         status: str = "completed",
         completed_at: datetime | None = None,
     ) -> None:
-        """テスト用タスクをDBに追加する."""
-        db_path = self.base_dir / "tasks.db"
-        if completed_at is None:
-            completed_at = datetime.now(timezone.utc)
-
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """INSERT INTO tasks (
-                    uuid, task_source, owner, repo, task_type, task_id,
-                    status, created_at, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    uuid,
-                    task_source,
-                    owner,
-                    repo,
-                    task_type,
-                    task_id,
-                    status,
-                    datetime.now(timezone.utc).isoformat(),
-                    completed_at.isoformat(),
-                ),
-            )
-            conn.commit()
+        """テスト用タスクをリストに追加する."""
+        mock_task = self._create_mock_db_task(
+            uuid=uuid,
+            task_source=task_source,
+            owner=owner,
+            repo=repo,
+            task_type=task_type,
+            number=int(task_id),
+            status=status,
+            completed_at=completed_at,
+        )
+        self.test_tasks.append(mock_task)
 
     def _create_test_context_dir(
         self,
@@ -185,7 +172,7 @@ class TestContextInheritanceManager(unittest.TestCase):
         """マッチするタスクがある場合のテスト."""
         # テストデータを作成
         test_uuid = "test-uuid-123"
-        self._add_test_task_to_db(
+        self._add_test_task(
             uuid=test_uuid,
             task_source="github",
             owner="testowner",
@@ -199,20 +186,27 @@ class TestContextInheritanceManager(unittest.TestCase):
             summary_text="Test summary content",
         )
 
-        manager = ContextInheritanceManager(self.base_dir, self.config)
-        task_key = GitHubIssueTaskKey("testowner", "testrepo", 123)
+        # TaskDBManagerをモック化
+        with patch('db.task_db.TaskDBManager') as mock_db_manager:
+            mock_instance = MagicMock()
+            mock_db_manager.return_value = mock_instance
+            # find_completed_tasks_by_keyが対象タスクを返すようにモック
+            mock_instance.find_completed_tasks_by_key.return_value = self.test_tasks
 
-        results = manager.find_previous_contexts(task_key)
+            manager = ContextInheritanceManager(self.base_dir, self.config)
+            task_key = GitHubIssueTaskKey("testowner", "testrepo", 123)
 
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].uuid, test_uuid)
-        self.assertEqual(results[0].status, "completed")
-        self.assertEqual(results[0].final_summary, "Test summary content")
+            results = manager.find_previous_contexts(task_key)
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].uuid, test_uuid)
+            self.assertEqual(results[0].status, "completed")
+            self.assertEqual(results[0].final_summary, "Test summary content")
 
     def test_find_previous_contexts_excludes_failed(self) -> None:
         """失敗タスクが除外されることのテスト."""
         # 失敗タスクを作成
-        self._add_test_task_to_db(
+        self._add_test_task(
             uuid="failed-uuid",
             task_source="github",
             owner="testowner",
@@ -222,17 +216,24 @@ class TestContextInheritanceManager(unittest.TestCase):
             status="failed",
         )
 
-        manager = ContextInheritanceManager(self.base_dir, self.config)
-        task_key = GitHubIssueTaskKey("testowner", "testrepo", 123)
+        # TaskDBManagerをモック化（failedステータスは除外される想定）
+        with patch('db.task_db.TaskDBManager') as mock_db_manager:
+            mock_instance = MagicMock()
+            mock_db_manager.return_value = mock_instance
+            # find_completed_tasks_by_keyはfailedを除外して空リストを返す
+            mock_instance.find_completed_tasks_by_key.return_value = []
 
-        results = manager.find_previous_contexts(task_key)
-        self.assertEqual(len(results), 0)
+            manager = ContextInheritanceManager(self.base_dir, self.config)
+            task_key = GitHubIssueTaskKey("testowner", "testrepo", 123)
+
+            results = manager.find_previous_contexts(task_key)
+            self.assertEqual(len(results), 0)
 
     def test_find_previous_contexts_excludes_expired(self) -> None:
         """有効期限切れタスクが除外されることのテスト."""
         # 100日前の完了日時を設定
         old_completed_at = datetime.now(timezone.utc) - timedelta(days=100)
-        self._add_test_task_to_db(
+        self._add_test_task(
             uuid="old-uuid",
             task_source="github",
             owner="testowner",
@@ -243,16 +244,23 @@ class TestContextInheritanceManager(unittest.TestCase):
             completed_at=old_completed_at,
         )
 
-        manager = ContextInheritanceManager(self.base_dir, self.config)
-        task_key = GitHubIssueTaskKey("testowner", "testrepo", 123)
+        # TaskDBManagerをモック化（期限切れは除外される想定）
+        with patch('db.task_db.TaskDBManager') as mock_db_manager:
+            mock_instance = MagicMock()
+            mock_db_manager.return_value = mock_instance
+            # 期限切れタスクは除外されて空リストを返す
+            mock_instance.find_completed_tasks_by_key.return_value = []
 
-        results = manager.find_previous_contexts(task_key)
-        self.assertEqual(len(results), 0)
+            manager = ContextInheritanceManager(self.base_dir, self.config)
+            task_key = GitHubIssueTaskKey("testowner", "testrepo", 123)
+
+            results = manager.find_previous_contexts(task_key)
+            self.assertEqual(len(results), 0)
 
     def test_get_inheritance_context_with_valid_context(self) -> None:
         """有効なコンテキストの引き継ぎテスト."""
         test_uuid = "test-uuid-456"
-        self._add_test_task_to_db(
+        self._add_test_task(
             uuid=test_uuid,
             task_source="github",
             owner="testowner",
@@ -265,22 +273,28 @@ class TestContextInheritanceManager(unittest.TestCase):
             summary_text="Previous execution summary",
         )
 
-        manager = ContextInheritanceManager(self.base_dir, self.config)
-        task_key = GitHubIssueTaskKey("testowner", "testrepo", 123)
+        # TaskDBManagerをモック化
+        with patch('db.task_db.TaskDBManager') as mock_db_manager:
+            mock_instance = MagicMock()
+            mock_db_manager.return_value = mock_instance
+            mock_instance.find_completed_tasks_by_key.return_value = self.test_tasks
 
-        inheritance = manager.get_inheritance_context(task_key)
+            manager = ContextInheritanceManager(self.base_dir, self.config)
+            task_key = GitHubIssueTaskKey("testowner", "testrepo", 123)
 
-        self.assertIsNotNone(inheritance)
-        self.assertEqual(
-            inheritance.final_summary,
-            "Previous execution summary",
-        )
-        self.assertEqual(inheritance.previous_context.uuid, test_uuid)
+            inheritance = manager.get_inheritance_context(task_key)
+
+            self.assertIsNotNone(inheritance)
+            self.assertEqual(
+                inheritance.final_summary,
+                "Previous execution summary",
+            )
+            self.assertEqual(inheritance.previous_context.uuid, test_uuid)
 
     def test_get_inheritance_context_no_summary(self) -> None:
         """要約がない場合のテスト."""
         test_uuid = "test-uuid-789"
-        self._add_test_task_to_db(
+        self._add_test_task(
             uuid=test_uuid,
             task_source="github",
             owner="testowner",
@@ -291,11 +305,17 @@ class TestContextInheritanceManager(unittest.TestCase):
         # summaries.jsonlを作成しない
         self._create_test_context_dir(test_uuid, summary_text=None)
 
-        manager = ContextInheritanceManager(self.base_dir, self.config)
-        task_key = GitHubIssueTaskKey("testowner", "testrepo", 123)
+        # TaskDBManagerをモック化
+        with patch('db.task_db.TaskDBManager') as mock_db_manager:
+            mock_instance = MagicMock()
+            mock_db_manager.return_value = mock_instance
+            mock_instance.find_completed_tasks_by_key.return_value = self.test_tasks
 
-        inheritance = manager.get_inheritance_context(task_key)
-        self.assertIsNone(inheritance)
+            manager = ContextInheritanceManager(self.base_dir, self.config)
+            task_key = GitHubIssueTaskKey("testowner", "testrepo", 123)
+
+            inheritance = manager.get_inheritance_context(task_key)
+            self.assertIsNone(inheritance)
 
     def test_get_inheritance_context_disabled(self) -> None:
         """機能が無効な場合のテスト."""
@@ -379,13 +399,13 @@ class TestContextInheritanceManager(unittest.TestCase):
         """最新のコンテキストが最初に返されることのテスト."""
         # 古いタスク
         old_completed_at = datetime.now(timezone.utc) - timedelta(days=30)
-        self._add_test_task_to_db(
+        old_task = self._create_mock_db_task(
             uuid="old-uuid",
             task_source="github",
             owner="testowner",
             repo="testrepo",
             task_type="issue",
-            task_id="123",
+            number=123,
             status="completed",
             completed_at=old_completed_at,
         )
@@ -393,27 +413,34 @@ class TestContextInheritanceManager(unittest.TestCase):
 
         # 新しいタスク
         new_completed_at = datetime.now(timezone.utc) - timedelta(days=1)
-        self._add_test_task_to_db(
+        new_task = self._create_mock_db_task(
             uuid="new-uuid",
             task_source="github",
             owner="testowner",
             repo="testrepo",
             task_type="issue",
-            task_id="123",
+            number=123,
             status="completed",
             completed_at=new_completed_at,
         )
         self._create_test_context_dir("new-uuid", summary_text="New summary")
 
-        manager = ContextInheritanceManager(self.base_dir, self.config)
-        task_key = GitHubIssueTaskKey("testowner", "testrepo", 123)
+        # TaskDBManagerをモック化（新しい順にソートされて返される）
+        with patch('db.task_db.TaskDBManager') as mock_db_manager:
+            mock_instance = MagicMock()
+            mock_db_manager.return_value = mock_instance
+            # 新しいタスクが最初に来るようにソート済みのリストを返す
+            mock_instance.find_completed_tasks_by_key.return_value = [new_task, old_task]
 
-        results = manager.find_previous_contexts(task_key)
+            manager = ContextInheritanceManager(self.base_dir, self.config)
+            task_key = GitHubIssueTaskKey("testowner", "testrepo", 123)
 
-        self.assertEqual(len(results), 2)
-        # 新しいコンテキストが最初
-        self.assertEqual(results[0].uuid, "new-uuid")
-        self.assertEqual(results[1].uuid, "old-uuid")
+            results = manager.find_previous_contexts(task_key)
+
+            self.assertEqual(len(results), 2)
+            # 新しいコンテキストが最初
+            self.assertEqual(results[0].uuid, "new-uuid")
+            self.assertEqual(results[1].uuid, "old-uuid")
 
 
 class TestPreviousContext(unittest.TestCase):
