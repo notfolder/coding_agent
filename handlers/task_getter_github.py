@@ -54,11 +54,16 @@ class TaskGitHubIssue(Task):
             "repo": self.issue["repo"],
             "issue_number": self.issue["number"],
         }
-        # 空のbodyを除外
+        
+        # ボット自身のユーザー名を取得（GitHub設定から）
+        bot_username = self.config.get("github", {}).get("bot_username", "github-actions[bot]")
+        
+        # 空のbody、ボット自身の投稿を除外
         all_comments = [
             comment.get("body", "")
             for comment in self.mcp_client.call_tool("get_issue_comments", args)
             if comment.get("body", "").strip()
+            and comment.get("user", {}).get("login") != bot_username
         ]
         
         # 最新コメントを主要依頼、それ以前を参考情報として分離
@@ -254,10 +259,14 @@ class TaskGitHubPullRequest(Task):
             owner=self.pr["owner"], repo=self.pr["repo"], pull_number=self.pr["number"],
         )
         
-        # 空のコメントを除外
+        # ボット自身のユーザー名を取得（GitHub設定から）
+        bot_username = self.config.get("github", {}).get("bot_username", "github-actions[bot]")
+        
+        # 空のコメント、ボット自身の投稿を除外
         all_comments = [
             comment for comment in all_comments
             if (comment.strip() if isinstance(comment, str) else comment.get("body", "").strip())
+            and (comment.get("user", {}).get("login") != bot_username if isinstance(comment, dict) else True)
         ]
         
         # 最新コメントを主要依頼、それ以前を参考情報として分離

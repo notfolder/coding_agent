@@ -51,13 +51,18 @@ class TaskGitLabIssue(Task):
         # issue本体取得（最新情報を取得してself.issueに代入）
         self._refresh_issue()
         discussions = self._fetch_issue_discussions()
-        # 全コメントをフラット化（システムイベントを除外）
+        
+        # ボット自身のユーザー名を取得（GitLab設定から）
+        bot_username = self.config.get("gitlab", {}).get("bot_username", "notfolder-bot")
+        
+        # 全コメントをフラット化（システムイベント、空のbody、ボット自身の投稿を除外）
         all_comments = [
             note.get("body", "")
             for discussion in discussions
             for note in discussion.get("notes", [])
             if note.get("body", "").strip()  # 空のbodyを除外
             and not note.get("system", False)  # システムイベントを除外
+            and note.get("author", {}).get("username") != bot_username  # ボット自身の投稿を除外
         ]
         
         # 最新コメントを主要依頼、それ以前を参考情報として分離
@@ -332,12 +337,17 @@ class TaskGitLabMergeRequest(Task):
         # 最新のMR情報を取得
         self._refresh_mr()
         all_comments = self._fetch_merge_request_notes()
-        # システムイベントと空のbodyを除外
+        
+        # ボット自身のユーザー名を取得（GitLab設定から）
+        bot_username = self.config.get("gitlab", {}).get("bot_username", "notfolder-bot")
+        
+        # システムイベント、空のbody、ボット自身の投稿を除外
         all_comments = [
             note.get("body", "")
             for note in all_comments
             if note.get("body", "").strip()
             and not note.get("system", False)
+            and note.get("author", {}).get("username") != bot_username
         ]
         
         # 最新コメントを主要依頼、それ以前を参考情報として分離
