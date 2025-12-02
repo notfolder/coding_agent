@@ -223,7 +223,7 @@ class ContextInheritanceManager:
 
         Args:
             inheritance_context: 引き継ぎコンテキスト
-            user_request: 今回のユーザー依頼（Issue/MR/PRの内容）
+            user_request: 今回のユーザー依頼（Issue/MR/PRの内容、最新コメントを含む）
 
         Returns:
             初期コンテキストのメッセージリスト
@@ -243,6 +243,7 @@ class ContextInheritanceManager:
         })
 
         # 今回のユーザー依頼をuserロールで追加
+        # user_requestには既に最新コメントが主要依頼として分離されている
         messages.append({
             "role": "user",
             "content": user_request,
