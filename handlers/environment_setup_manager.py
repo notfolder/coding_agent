@@ -4,7 +4,9 @@
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -187,7 +189,7 @@ class EnvironmentSetupManager:
         """
         current_commands = setup_commands
         
-        while self.llm_regeneration_count <= self.MAX_LLM_REGENERATION:
+        while self.llm_regeneration_count < self.MAX_LLM_REGENERATION:
             result = self._execute_setup_commands(current_commands, container_id)
             
             if result["success"]:
@@ -321,7 +323,7 @@ class EnvironmentSetupManager:
         """
         current_verification = verification_commands
         
-        while self.llm_regeneration_count <= self.MAX_LLM_REGENERATION:
+        while self.llm_regeneration_count < self.MAX_LLM_REGENERATION:
             result = self.verifier.verify_setup(current_verification, container_id)
             
             if result["success"]:
@@ -474,9 +476,6 @@ class EnvironmentSetupManager:
             response, _, _ = self.llm_client.get_response()
             
             # レスポンスをパース
-            import json
-            import re
-            
             # JSONブロックを抽出
             json_match = re.search(r"```json\s*(\{.*?\})\s*```", response, re.DOTALL)
             if not json_match:
@@ -524,7 +523,7 @@ Standard Error Output:
 ```
 
 Original setup commands:
-{chr(10).join(f"{i+1}. {cmd}" for i, cmd in enumerate(original_commands))}
+{'\n'.join(f"{i+1}. {cmd}" for i, cmd in enumerate(original_commands))}
 
 Environment: {environment_setup_info.get("name", "unknown")}
 

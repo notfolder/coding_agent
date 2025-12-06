@@ -86,7 +86,7 @@ class EnvironmentVerifier:
                 result_info = {
                     "command": command,
                     "expected_output": expected_output,
-                    "actual_output": exec_result.stdout.strip(),
+                    "actual_output": exec_result.stdout.rstrip(),
                     "exit_code": exec_result.exit_code,
                     "success": success,
                 }
@@ -109,7 +109,7 @@ class EnvironmentVerifier:
                         "検証コマンド%d: 失敗 - expected: %r, actual: %r",
                         i + 1,
                         expected_output,
-                        exec_result.stdout.strip(),
+                        exec_result.stdout.rstrip(),
                     )
                     
             except Exception as e:
@@ -145,9 +145,10 @@ class EnvironmentVerifier:
         if exec_result.exit_code != 0:
             return False
         
-        # stdoutの末尾の空白・改行を削除して比較
-        actual_output = exec_result.stdout.strip()
-        expected = expected_output.strip()
+        # stdoutとexpected_outputの末尾の空白・改行を削除して比較
+        # 先頭の空白は意味がある可能性があるため残す
+        actual_output = exec_result.stdout.rstrip()
+        expected = expected_output.rstrip()
         
         # 完全一致確認
         return actual_output == expected
