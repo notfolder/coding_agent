@@ -380,23 +380,37 @@ class TestPrePlanningManager(unittest.TestCase):
             (understanding_response, None, 100),
             (collection_response, None, 100),
         ])
+        
+        # MockProgressManagerを作成
+        mock_progress_manager = MagicMock()
+        history_entries = []
+        
+        def add_history_entry(entry_type, title, details):
+            history_entries.append({"type": entry_type, "title": title, "details": details})
+        
+        mock_progress_manager.add_history_entry = add_history_entry
+        mock_progress_manager.set_understanding_result = MagicMock()
+        
         manager = PrePlanningManager(
             config=self.config,
             llm_client=llm_client,
             mcp_clients=self.mcp_clients,
             task=self.task,
+            progress_manager=mock_progress_manager,
         )
 
         manager.execute()
 
         # 通知が投稿されていることを確認
-        # 注: 実際の通知投稿はタスク実装に依存するため、
-        # MockTaskにコメントが追加されていることを確認
+        # progress_manager経由で通知が投稿される
         # 開始通知、理解完了通知、収集完了通知の3つが期待される
-        print(f"DEBUG: Comments posted: {self.task.comments}")
+        print(f"DEBUG: History entries: {history_entries}")
         
-        # コメントが投稿されていることを確認（最低1つ）
-        assert len(self.task.comments) >= 1, f"Expected at least 1 comment, got {len(self.task.comments)}"
+        # 通知が投稿されていることを確認（最低3つ: 開始、理解完了、収集完了）
+        assert len(history_entries) >= 3, f"Expected at least 3 notifications, got {len(history_entries)}"
+        
+        # set_understanding_resultが呼ばれていることを確認
+        mock_progress_manager.set_understanding_result.assert_called_once()
 
 
 class TestPrePlanningManagerIntegration(unittest.TestCase):
