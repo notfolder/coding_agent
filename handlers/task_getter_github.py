@@ -456,9 +456,9 @@ class TaskGetterFromGitHub(TaskGetter):
         self.github_client = GithubClient(token=token, api_url=api_url)
 
     def get_task_list(self) -> list[Task]:
-        # MCPサーバーでissue検索
+        # MCPサーバーでissue検索（クローズ済みを除外）
         query = (
-            f'label:"{self.config["github"]["bot_label"]}" {self.config["github"].get("query", "")}'
+            f'label:"{self.config["github"]["bot_label"]}" state:open {self.config["github"].get("query", "")}'
         )
         assignee = self.config["github"].get("assignee")
         if assignee:
@@ -471,8 +471,9 @@ class TaskGetterFromGitHub(TaskGetter):
             for issue in issues
         ]
 
+        # PRの検索（クローズ済みを除外）
         query = (
-            f'label:"{self.config["github"]["bot_label"]}" {self.config["github"].get("query", "")}'
+            f'label:"{self.config["github"]["bot_label"]}" state:open {self.config["github"].get("query", "")}'
         )
         if assignee:
             query += f" assignee:{assignee}"

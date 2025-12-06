@@ -564,7 +564,8 @@ class TaskGetterFromGitLab(TaskGetter):
 
         query = self.config["gitlab"].get("query", "")
         assignee = self.config["gitlab"].get("bot_name")
-        issues = self.gitlab_client.search_issues(query)
+        # クローズ済みを除外（state='opened'がデフォルトだが明示的に指定）
+        issues = self.gitlab_client.search_issues(query, state="opened")
         issues = [
             issue
             for issue in issues
@@ -576,7 +577,8 @@ class TaskGetterFromGitLab(TaskGetter):
             for issue in issues
         ])
 
-        merge_requests = self.gitlab_client.search_merge_requests(query)
+        # クローズ済みのMRを除外
+        merge_requests = self.gitlab_client.search_merge_requests(query, state="opened")
         merge_requests = [
             mr
             for mr in merge_requests
