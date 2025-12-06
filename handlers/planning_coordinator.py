@@ -95,8 +95,16 @@ class PlanningCoordinator:
         if issue_id:
             self.history_store.issue_id = str(issue_id)
 
-        # Track checklist comment ID for updates
-        self.checklist_comment_id: int | str | None = None
+        # Initialize ProgressCommentManager for unified progress tracking
+        from handlers.progress_comment_manager import ProgressCommentManager
+        
+        progress_config = config.get("progress_comment", {})
+        self.progress_manager = ProgressCommentManager(
+            task=task,
+            logger=self.logger,
+            enabled=progress_config.get("enabled", True),
+            max_history_entries=progress_config.get("max_history_entries", 100),
+        )
 
         # Use provided LLM client or create new one if not provided
         if llm_client is not None:
@@ -155,25 +163,6 @@ class PlanningCoordinator:
         # 計画リビジョン番号(チェックリスト表示用)
         self.plan_revision_number = 0
 
-        # LLM呼び出し回数カウンター（LLM呼び出しコメント機能用）
-        self.llm_call_count = 0
-
-        # LLM呼び出しコメント機能の有効/無効
-        llm_call_comments_config = config.get("llm_call_comments", {})
-        self.llm_call_comments_enabled = llm_call_comments_config.get("enabled", True)
-        self.logger.info("LLM呼び出しコメント機能: %s", "有効" if self.llm_call_comments_enabled else "無効")
-
-        # フェーズ別のデフォルトメッセージ
-        self.phase_default_messages: dict[str, str] = {
-            "pre_planning": "タスク内容の分析と情報収集が完了しました",
-            "planning": "実行計画の作成が完了しました",
-            "execution": "アクションの実行が完了しました",
-            "reflection": "実行結果の分析が完了しました",
-            "revision": "計画の修正が完了しました",
-            "verification": "実装の検証が完了しました",
-            "replan_decision": "再計画の判断が完了しました",
-        }
-
         # Pause/resume support
         self.pause_manager = None  # Will be set by TaskHandler
 
@@ -218,6 +207,7 @@ class PlanningCoordinator:
             llm_client=self.llm_client,
             mcp_clients=self.mcp_clients,
             task=self.task,
+            progress_manager=self.progress_manager,
         )
         # コンテキストマネージャを設定
         self.pre_planning_manager.context_manager = self.context_manager
@@ -252,15 +242,35 @@ class PlanningCoordinator:
             True if task completed successfully, False otherwise
         """
         try:
+            # Create initial progress comment
+            task_info = f"**タスク**: {self.task.title}"
+            self.progress_manager.create_initial_comment(task_info)
+
             # Check for pause signal before starting
             if self._check_pause_signal():
                 self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                self.progress_manager.finalize(
+                    final_status="paused",
+                    summary="タスクが一時停止されました",
+                )
+                self._post_completion_comment(
+                    status="paused",
+                    reason="一時停止シグナルが検出されました。",
+                )
                 self._handle_pause()
                 return True  # Return success to avoid marking as failed
 
             # Check for stop signal before starting
             if self._check_stop_signal():
                 self.logger.info("アサイン解除を検出、タスクを停止します")
+                self.progress_manager.finalize(
+                    final_status="stopped",
+                    summary="タスクが停止されました",
+                )
+                self._post_completion_comment(
+                    status="stopped",
+                    reason="アサイン解除が検出されました。",
+                )
                 self._handle_stop()
                 return True  # Return success to avoid marking as failed
 
@@ -272,11 +282,13 @@ class PlanningCoordinator:
 
             # Step 0: Execute pre-planning phase (計画前情報収集フェーズ)
             if self.pre_planning_manager is not None:
-                self._post_phase_comment("pre_planning", "started", "タスク内容を分析し、必要な情報を収集しています...")
+                self.progress_manager.set_active_phase("pre_planning")
                 self.pre_planning_result = self._execute_pre_planning_phase()
                 self._post_phase_comment("pre_planning", "completed", "計画前情報収集が完了しました")
+                self.progress_manager.mark_phase_completed("pre_planning")
 
             # Post planning start comment
+            self.progress_manager.set_active_phase("planning")
             self._post_phase_comment("planning", "started", "Beginning task analysis and planning...")
 
             # Step 1: Check for existing plan
@@ -294,6 +306,7 @@ class PlanningCoordinator:
                         )
                     self.current_phase = "execution"
                     self._post_phase_comment("planning", "completed", "Loaded existing plan from history.")
+                    self.progress_manager.mark_phase_completed("planning")
             else:
                 # Step 2: Execute planning phase
                 self.logger.info("No existing plan, executing planning phase...")
@@ -304,20 +317,45 @@ class PlanningCoordinator:
                     self._post_plan_as_checklist(self.current_plan)
                     self.current_phase = "execution"
                     self._post_phase_comment("planning", "completed", "Created execution plan with action items.")
+                    self.progress_manager.mark_phase_completed("planning")
                 else:
                     self.logger.error("Planning phase failed")
                     self._post_phase_comment("planning", "failed", "Could not generate a valid execution plan.")
+                    self.progress_manager.finalize(
+                        final_status="failed",
+                        summary="計画フェーズが失敗しました",
+                    )
+                    self._post_completion_comment(
+                        status="failed",
+                        summary="実行計画の生成に失敗しました。",
+                    )
                     return False
 
             # Check for pause signal after planning
             if self._check_pause_signal():
                 self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                self.progress_manager.finalize(
+                    final_status="paused",
+                    summary="タスクが一時停止されました",
+                )
+                self._post_completion_comment(
+                    status="paused",
+                    reason="計画完了後、一時停止シグナルが検出されました。",
+                )
                 self._handle_pause()
                 return True
 
             # Check for stop signal after planning
             if self._check_stop_signal():
                 self.logger.info("アサイン解除を検出、タスクを停止します")
+                self.progress_manager.finalize(
+                    final_status="stopped",
+                    summary="タスクが停止されました",
+                )
+                self._post_completion_comment(
+                    status="stopped",
+                    reason="計画完了後、アサイン解除が検出されました。",
+                )
                 self._handle_stop()
                 return True
 
@@ -327,9 +365,18 @@ class PlanningCoordinator:
             # Ensure execution environment is ready before execution phase
             if not self._ensure_execution_environment_ready():
                 self.logger.error("Execution environment preparation failed. Aborting task.")
+                self.progress_manager.finalize(
+                    final_status="failed",
+                    summary="実行環境の準備に失敗しました",
+                )
+                self._post_completion_comment(
+                    status="failed",
+                    summary="実行環境の準備に失敗し、タスクを中止しました。",
+                )
                 return False
 
             # Post execution start
+            self.progress_manager.set_active_phase("execution")
             self._post_phase_comment("execution", "started", "Beginning execution of planned actions...")
 
             # Step 3: Execution loop
@@ -342,12 +389,28 @@ class PlanningCoordinator:
                 # Check for pause signal before each action
                 if self._check_pause_signal():
                     self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                    self.progress_manager.finalize(
+                        final_status="paused",
+                        summary="タスクが一時停止されました",
+                    )
+                    self._post_completion_comment(
+                        status="paused",
+                        reason="実行中に一時停止シグナルが検出されました。",
+                    )
                     self._handle_pause()
                     return True
 
                 # Check for stop signal before each action
                 if self._check_stop_signal():
                     self.logger.info("アサイン解除を検出、タスクを停止します")
+                    self.progress_manager.finalize(
+                        final_status="stopped",
+                        summary="タスクが停止されました",
+                    )
+                    self._post_completion_comment(
+                        status="stopped",
+                        reason="実行中にアサイン解除が検出されました。",
+                    )
                     self._handle_stop()
                     return True
 
@@ -383,6 +446,15 @@ class PlanningCoordinator:
 
                     # Continue or stop based on configuration
                     if not self.config.get("continue_on_error", False):
+                        error_msg = result.get("error", "Unknown error occurred")
+                        self.progress_manager.finalize(
+                            final_status="failed",
+                            summary=f"エラーが発生しました: {error_msg}",
+                        )
+                        self._post_completion_comment(
+                            status="failed",
+                            summary=f"アクション実行中にエラーが発生しました: {error_msg}",
+                        )
                         return False
                 else:
                     # 成功した場合はエラーカウンターをリセット
@@ -396,18 +468,35 @@ class PlanningCoordinator:
                     # Check for pause signal before reflection
                     if self._check_pause_signal():
                         self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                        self.progress_manager.finalize(
+                            final_status="paused",
+                            summary="タスクが一時停止されました",
+                        )
+                        self._post_completion_comment(
+                            status="paused",
+                            reason="Reflection前に一時停止シグナルが検出されました。",
+                        )
                         self._handle_pause()
                         return True
 
                     # Check for stop signal before reflection
                     if self._check_stop_signal():
                         self.logger.info("アサイン解除を検出、タスクを停止します")
+                        self.progress_manager.finalize(
+                            final_status="stopped",
+                            summary="タスクが停止されました",
+                        )
+                        self._post_completion_comment(
+                            status="stopped",
+                            reason="Reflection前にアサイン解除が検出されました。",
+                        )
                         self._handle_stop()
                         return True
 
                     # Check for new comments before reflection
                     self._check_and_add_new_comments()
 
+                    self.progress_manager.set_active_phase("reflection")
                     self._post_phase_comment("reflection", "started", f"Analyzing results after {self.action_counter} actions...")
                     self.current_phase = "reflection"
                     reflection = self._execute_reflection_phase(result)
@@ -416,12 +505,28 @@ class PlanningCoordinator:
                         # Check for pause signal before revision
                         if self._check_pause_signal():
                             self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                            self.progress_manager.finalize(
+                                final_status="paused",
+                                summary="タスクが一時停止されました",
+                            )
+                            self._post_completion_comment(
+                                status="paused",
+                                reason="Revision前に一時停止シグナルが検出されました。",
+                            )
                             self._handle_pause()
                             return True
 
                         # Check for stop signal before revision
                         if self._check_stop_signal():
                             self.logger.info("アサイン解除を検出、タスクを停止します")
+                            self.progress_manager.finalize(
+                                final_status="stopped",
+                                summary="タスクが停止されました",
+                            )
+                            self._post_completion_comment(
+                                status="stopped",
+                                reason="Revision前にアサイン解除が検出されました。",
+                            )
                             self._handle_stop()
                             return True
 
@@ -442,6 +547,7 @@ class PlanningCoordinator:
 
                     # Reset to execution phase
                     self.current_phase = "execution"
+                    self.progress_manager.set_active_phase("execution")
 
                 # Check for completion
                 if result.get("done"):
@@ -452,6 +558,7 @@ class PlanningCoordinator:
             verification_config = self.config.get("verification", {})
             if verification_config.get("enabled", True):
                 self.logger.info("All planned actions executed, starting verification phase")
+                self.progress_manager.set_active_phase("verification")
                 self._post_phase_comment("verification", "started", "Verifying task completion...")
 
                 max_verification_rounds = verification_config.get("max_rounds", 2)
@@ -463,11 +570,27 @@ class PlanningCoordinator:
                     # Check for pause/stop signals before verification
                     if self._check_pause_signal():
                         self.logger.info("Pause signal detected during verification")
+                        self.progress_manager.finalize(
+                            final_status="paused",
+                            summary="タスクが一時停止されました",
+                        )
+                        self._post_completion_comment(
+                            status="paused",
+                            reason="Verification中に一時停止シグナルが検出されました。",
+                        )
                         self._handle_pause()
                         return True
 
                     if self._check_stop_signal():
                         self.logger.info("Stop signal detected during verification")
+                        self.progress_manager.finalize(
+                            final_status="stopped",
+                            summary="タスクが停止されました",
+                        )
+                        self._post_completion_comment(
+                            status="stopped",
+                            reason="Verification中にアサイン解除が検出されました。",
+                        )
                         self._handle_stop()
                         return True
 
@@ -485,6 +608,7 @@ class PlanningCoordinator:
                     if verification_result.get("verification_passed"):
                         self.logger.info("Verification passed!")
                         self._post_phase_comment("verification", "completed", "All requirements verified ✅")
+                        self.progress_manager.mark_phase_completed("verification")
                         break
 
                     additional_actions = verification_result.get("additional_actions", [])
@@ -509,6 +633,7 @@ class PlanningCoordinator:
                     self._update_checklist_for_additional_work(verification_result, additional_actions)
 
                     # 追加アクションを実行
+                    self.progress_manager.set_active_phase("execution")
                     self._post_phase_comment(
                         "execution",
                         "started",
@@ -529,11 +654,27 @@ class PlanningCoordinator:
                         # Check for pause/stop signals
                         if self._check_pause_signal():
                             self.logger.info("Pause signal detected during additional work")
+                            self.progress_manager.finalize(
+                                final_status="paused",
+                                summary="タスクが一時停止されました",
+                            )
+                            self._post_completion_comment(
+                                status="paused",
+                                reason="追加作業中に一時停止シグナルが検出されました。",
+                            )
                             self._handle_pause()
                             return True
 
                         if self._check_stop_signal():
                             self.logger.info("Stop signal detected during additional work")
+                            self.progress_manager.finalize(
+                                final_status="stopped",
+                                summary="タスクが停止されました",
+                            )
+                            self._post_completion_comment(
+                                status="stopped",
+                                reason="追加作業中にアサイン解除が検出されました。",
+                            )
                             self._handle_stop()
                             return True
 
@@ -559,6 +700,15 @@ class PlanningCoordinator:
                                     continue
 
                             if not self.config.get("continue_on_error", False):
+                                error_msg = result.get("error", "Unknown error occurred")
+                                self.progress_manager.finalize(
+                                    final_status="failed",
+                                    summary=f"エラーが発生しました: {error_msg}",
+                                )
+                                self._post_completion_comment(
+                                    status="failed",
+                                    summary=f"追加作業中にエラーが発生しました: {error_msg}",
+                                )
                                 return False
                         else:
                             self.consecutive_errors = 0
@@ -578,12 +728,40 @@ class PlanningCoordinator:
             # Mark all tasks complete
             self._mark_checklist_complete()
             self._post_phase_comment("execution", "completed", "All planned actions have been executed successfully.")
+            self.progress_manager.mark_phase_completed("execution")
+
+            # Finalize progress comment with success
+            self.progress_manager.set_active_phase("complete")
+            self.progress_manager.mark_phase_completed("complete")
+            self.progress_manager.finalize(
+                final_status="completed",
+                summary="タスクが正常に完了しました",
+            )
+
+            # Post completion comment
+            self._post_completion_comment(
+                status="completed",
+                summary="全ての計画アクションが正常に実行され、検証も完了しました。",
+            )
 
             return True
 
         except Exception as e:
             self.logger.exception("Planning execution failed: %s", e)
             self._post_phase_comment("execution", "failed", f"Error during execution: {str(e)}")
+            
+            # Finalize progress comment with failure
+            self.progress_manager.finalize(
+                final_status="failed",
+                summary=f"エラーが発生しました: {str(e)}",
+            )
+
+            # Post completion comment
+            self._post_completion_comment(
+                status="failed",
+                summary=f"実行中に予期せぬエラーが発生しました: {str(e)}",
+            )
+            
             return False
 
     def _handle_pause(self) -> None:
@@ -597,6 +775,73 @@ class PlanningCoordinator:
 
         # Pause the task with planning state
         self.pause_manager.pause_task(self.task, self.task.uuid, planning_state=planning_state)
+
+    def _post_completion_comment(self, status: str, summary: str = "", reason: str = "") -> None:
+        """タスク完了コメントを投稿.
+        
+        Args:
+            status: 終了ステータス (completed/failed/paused/stopped)
+            summary: 完了サマリー
+            reason: 一時停止または停止の理由
+        """
+        # 絵文字とタイトルを決定
+        emoji_map = {
+            "completed": "✅",
+            "failed": "❌",
+            "paused": "⏸️",
+            "stopped": "⏹️",
+        }
+        title_map = {
+            "completed": "タスク完了",
+            "failed": "タスク失敗",
+            "paused": "タスク一時停止",
+            "stopped": "タスク停止",
+        }
+        
+        emoji = emoji_map.get(status, "✅")
+        title = title_map.get(status, "タスク終了")
+        
+        comment_lines = [
+            f"## {emoji} {title}",
+            "",
+        ]
+        
+        # サマリーまたは理由を追加
+        if summary:
+            comment_lines.append(summary)
+        elif reason:
+            comment_lines.append(reason)
+        else:
+            comment_lines.append(f"タスクが{status}しました。")
+        
+        comment_lines.append("")
+        comment_lines.append(f"*終了時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+        
+        # 統計情報を追加
+        comment_lines.extend([
+            "",
+            "### 📊 実行統計",
+            f"- LLM呼び出し回数: {self.progress_manager.llm_call_count}",
+        ])
+        
+        # 進捗情報を追加
+        if self.current_plan:
+            action_plan = self.current_plan.get("action_plan", {})
+            total_actions = len(action_plan.get("actions", []))
+            if total_actions > 0:
+                comment_lines.extend([
+                    "",
+                    f"完了アクション数: {self.action_counter}/{total_actions}",
+                ])
+        
+        comment = "\n".join(comment_lines)
+        
+        try:
+            if hasattr(self.task, "comment"):
+                self.task.comment(comment)
+                self.logger.info(f"完了コメントを投稿しました: {status}")
+        except Exception as e:
+            self.logger.error(f"完了コメントの投稿に失敗しました: {e}")
 
     def _handle_context_inheritance(self) -> None:
         """過去コンテキスト引き継ぎを処理する.
@@ -1576,49 +1821,34 @@ Maintain the same JSON format as before for action_plan.actions."""
         if not actions:
             return
 
-        # チェックリストを構築
-        checklist_lines = [
-            f"## 📋 Execution Plan (Revised #{self.plan_revision_number})",
-            "",
-            f"**Revision Reason**: {decision.reasoning[:100]}...",
-            "",
-            f"**Previous Progress**: {self.action_counter}/{len(actions)} completed",
-            "",
-            "### New Plan:",
-        ]
-
+        # Build checklist items for ProgressCommentManager
+        checklist_items = []
         for i, action in enumerate(actions):
             task_id = action.get("task_id", f"task_{i + 1}")
             purpose = action.get("purpose", "Execute action")
+            completed = i < self.action_counter
+            checklist_items.append({
+                "id": task_id,
+                "description": purpose,
+                "completed": completed,
+            })
 
-            # 完了済みかどうかを判定
-            checkbox = "[x]" if i < self.action_counter else "[ ]"
-            checklist_lines.append(f"- {checkbox} **{task_id}**: {purpose}")
-
-        checklist_lines.append("")
-        progress_pct = (
-            int(self.action_counter / len(actions) * 100) if actions else 0
+        # Update checklist in progress manager
+        self.progress_manager.update_checklist(checklist_items)
+        
+        # Add replan notification to history
+        self.progress_manager.add_history_entry(
+            entry_type="revision",
+            title=f"📝 Plan Revised (#{self.plan_revision_number})",
+            details=f"**Reason**: {decision.reasoning}\n\n**Previous Progress**: {self.action_counter}/{len(actions)} completed",
         )
-        checklist_lines.append(
-            f"*Progress: {self.action_counter}/{len(actions)} ({progress_pct}%) complete "
-            f"| Revision: #{self.plan_revision_number} "
-            f"at {datetime.now().strftime(DATETIME_FORMAT)}*",
+        
+        # Update status
+        self.progress_manager.update_status(
+            total_actions=len(actions),
         )
-
-        checklist_content = "\n".join(checklist_lines)
-
-        # 既存のコメントを更新または新規投稿
-        if self.checklist_comment_id and hasattr(self.task, "update_comment"):
-            self.task.update_comment(self.checklist_comment_id, checklist_content)
-            self.logger.info(
-                "再計画時にチェックリストを更新しました (comment_id=%s)",
-                self.checklist_comment_id,
-            )
-        elif hasattr(self.task, "comment"):
-            result = self.task.comment(checklist_content)
-            if isinstance(result, dict):
-                self.checklist_comment_id = result.get("id")
-            self.logger.info("再計画時に新しいチェックリストを投稿しました")
+        
+        self.logger.info("再計画時にチェックリストを更新しました (revision #%d)", self.plan_revision_number)
 
     def _is_complete(self) -> bool:
         """Check if task is complete.
@@ -2003,29 +2233,26 @@ Maintain the same JSON format as before for action_plan.actions."""
                 self.logger.warning("No actions found in plan, skipping checklist posting")
                 return
 
-            # Build markdown checklist
-            checklist_lines = ["## 📋 Execution Plan", ""]
-
+            # Build checklist items for ProgressCommentManager
+            checklist_items = []
             for i, action in enumerate(actions, 1):
                 task_id = action.get("task_id", f"task_{i}")
                 purpose = action.get("purpose", "Execute action")
-                checklist_lines.append(f"- [ ] **{task_id}**: {purpose}")
+                checklist_items.append({
+                    "id": task_id,
+                    "description": purpose,
+                    "completed": False,
+                })
 
-            checklist_lines.append("")
-            checklist_lines.append("*Progress will be updated as tasks complete.*")
-
-            checklist_content = "\n".join(checklist_lines)
-
-            # Post to Issue/MR using task's comment method and save comment ID
-            if hasattr(self.task, "comment"):
-                result = self.task.comment(checklist_content)
-                # Extract comment ID from result if available
-                if isinstance(result, dict):
-                    # GitLab: {"id": ...}, GitHub: {"id": ...}
-                    self.checklist_comment_id = result.get("id")
-                self.logger.info("Posted execution plan checklist to Issue/MR (comment_id=%s)", self.checklist_comment_id)
-            else:
-                self.logger.warning("Task does not support comment, cannot post checklist")
+            # Update checklist in progress manager
+            self.progress_manager.update_checklist(checklist_items)
+            
+            # Update status with total actions
+            self.progress_manager.update_status(
+                total_actions=len(actions),
+            )
+            
+            self.logger.info("Posted execution plan checklist with %d items", len(actions))
 
         except Exception as e:
             self.logger.error("Failed to post plan as checklist: %s", str(e))
@@ -2046,33 +2273,27 @@ Maintain the same JSON format as before for action_plan.actions."""
             if completed_action_index >= len(actions):
                 return
 
-            # Build updated checklist
-            checklist_lines = ["## 📋 Execution Plan", ""]
-
-            for i, action in enumerate(actions, 1):
-                task_id = action.get("task_id", f"task_{i}")
+            # Build updated checklist items
+            checklist_items = []
+            for i, action in enumerate(actions):
+                task_id = action.get("task_id", f"task_{i+1}")
                 purpose = action.get("purpose", "Execute action")
+                completed = i <= completed_action_index
+                checklist_items.append({
+                    "id": task_id,
+                    "description": purpose,
+                    "completed": completed,
+                })
 
-                # Mark completed actions with [x]
-                checkbox = "[x]" if i <= completed_action_index + 1 else "[ ]"
-                checklist_lines.append(f"- {checkbox} **{task_id}**: {purpose}")
-
-            checklist_lines.append("")
-            progress_pct = int((completed_action_index + 1) / len(actions) * 100)
-            checklist_lines.append(f"*Progress: {completed_action_index + 1}/{len(actions)} ({progress_pct}%) complete*")
-
-            checklist_content = "\n".join(checklist_lines)
-
-            # Update the existing comment instead of posting a new one
-            if self.checklist_comment_id and hasattr(self.task, "update_comment"):
-                self.task.update_comment(self.checklist_comment_id, checklist_content)
-                self.logger.info("Updated checklist progress (comment_id=%s)", self.checklist_comment_id)
-            elif hasattr(self.task, "comment"):
-                # Fallback: post new comment if update not supported
-                result = self.task.comment(checklist_content)
-                if isinstance(result, dict):
-                    self.checklist_comment_id = result.get("id")
-                self.logger.info("Posted new checklist progress comment")
+            # Update checklist in progress manager
+            self.progress_manager.update_checklist(checklist_items)
+            
+            # Update progress counter
+            self.progress_manager.update_status(
+                action_counter=completed_action_index + 1,
+            )
+            
+            self.logger.info("Updated checklist progress: %d/%d", completed_action_index + 1, len(actions))
 
         except Exception as e:
             self.logger.error("Failed to update checklist progress: %s", str(e))
@@ -2086,29 +2307,26 @@ Maintain the same JSON format as before for action_plan.actions."""
             action_plan = self.current_plan.get("action_plan", {})
             actions = action_plan.get("actions", [])
 
-            # Build completed checklist
-            checklist_lines = ["## 📋 Execution Plan", ""]
-
-            for i, action in enumerate(actions, 1):
-                task_id = action.get("task_id", f"task_{i}")
+            # Build completed checklist items
+            checklist_items = []
+            for i, action in enumerate(actions):
+                task_id = action.get("task_id", f"task_{i+1}")
                 purpose = action.get("purpose", "Execute action")
-                checklist_lines.append(f"- [x] **{task_id}**: {purpose}")
+                checklist_items.append({
+                    "id": task_id,
+                    "description": purpose,
+                    "completed": True,
+                })
 
-            checklist_lines.append("")
-            checklist_lines.append(f"*✅ All {len(actions)} tasks completed successfully!*")
-
-            checklist_content = "\n".join(checklist_lines)
-
-            # Update the existing comment instead of posting a new one
-            if self.checklist_comment_id and hasattr(self.task, "update_comment"):
-                self.task.update_comment(self.checklist_comment_id, checklist_content)
-                self.logger.info("Marked checklist complete (comment_id=%s)", self.checklist_comment_id)
-            elif hasattr(self.task, "comment"):
-                # Fallback: post new comment if update not supported
-                result = self.task.comment(checklist_content)
-                if isinstance(result, dict):
-                    self.checklist_comment_id = result.get("id")
-                self.logger.info("Posted new completion checklist comment")
+            # Update checklist in progress manager
+            self.progress_manager.update_checklist(checklist_items)
+            
+            # Update final progress
+            self.progress_manager.update_status(
+                action_counter=len(actions),
+            )
+            
+            self.logger.info("Marked all %d checklist items as complete", len(actions))
 
         except Exception as e:
             self.logger.error("Failed to mark checklist complete: %s", str(e))
@@ -2303,10 +2521,8 @@ Maintain the same JSON format as before for action_plan.actions."""
             # 絵文字を決定
             emoji = "✅" if verification_passed else "⚠️"
 
-            # コメントを構築
-            comment_lines = [
-                f"## 🔍 Verification Result - {emoji}",
-                "",
+            # 詳細を構築
+            details_lines = [
                 f"**Status**: {'Passed' if verification_passed else 'Issues Found'}",
                 f"**Confidence**: {confidence * 100:.0f}%",
                 "",
@@ -2314,47 +2530,47 @@ Maintain the same JSON format as before for action_plan.actions."""
 
             # 検出された問題
             if issues_found:
-                comment_lines.append("### Issues Found")
+                details_lines.append("### Issues Found")
                 for issue in issues_found:
-                    comment_lines.append(f"- {issue}")
-                comment_lines.append("")
+                    details_lines.append(f"- {issue}")
+                details_lines.append("")
 
             # プレースホルダ検出
             placeholder_count = placeholder_info.get("count", 0)
             if placeholder_count > 0:
-                comment_lines.append(f"### Placeholder Detection: {placeholder_count} found")
+                details_lines.append(f"### Placeholder Detection: {placeholder_count} found")
                 locations = placeholder_info.get("locations", [])
                 for loc in locations:
-                    comment_lines.append(f"- {loc}")
-                comment_lines.append("")
+                    details_lines.append(f"- {loc}")
+                details_lines.append("")
 
             # 追加作業
             if additional_actions:
-                comment_lines.append(f"### Additional Work Needed: {len(additional_actions)} actions")
+                details_lines.append(f"### Additional Work Needed: {len(additional_actions)} actions")
                 for action in additional_actions:
                     task_id = action.get("task_id", "unknown")
                     purpose = action.get("purpose", "")
-                    comment_lines.append(f"- **{task_id}**: {purpose}")
-                comment_lines.append("")
+                    details_lines.append(f"- **{task_id}**: {purpose}")
+                details_lines.append("")
 
             # サマリーコメント
             if comment:
-                comment_lines.append("### Summary")
-                comment_lines.append(comment)
-                comment_lines.append("")
+                details_lines.append("### Summary")
+                details_lines.append(comment)
 
-            # タイムスタンプ
-            timestamp = datetime.now().strftime(DATETIME_FORMAT)
-            comment_lines.append(f"*{timestamp}*")
+            details = "\n".join(details_lines)
 
-            comment_content = "\n".join(comment_lines)
+            # ProgressCommentManagerに履歴追加
+            self.progress_manager.add_history_entry(
+                entry_type="verification",
+                title=f"🔍 Verification Result - {emoji}",
+                details=details,
+            )
 
-            # Issue/MRに投稿
-            if hasattr(self.task, "comment"):
-                self.task.comment(comment_content)
-                self.logger.info("Posted verification result to Issue/MR")
-            else:
-                self.logger.warning("Task does not support comment, cannot post verification result")
+            # 最新検証結果を設定（実行状態セクションに表示）
+            self.progress_manager.set_verification_result(verification_result)
+
+            self.logger.info("Posted verification result to progress comment")
 
         except Exception as e:
             self.logger.error("Failed to post verification result: %s", str(e))
@@ -2380,56 +2596,44 @@ Maintain the same JSON format as before for action_plan.actions."""
             action_plan = self.current_plan.get("action_plan", {})
             original_actions = action_plan.get("actions", [])
 
-            # チェックリストを構築
-            checklist_lines = [
-                "## 📋 Execution Plan (Verification Round)",
-                "",
-                "### Original Plan (Completed)",
-            ]
-
+            # チェックリスト項目を構築
+            checklist_items = []
+            
             # 元の計画(すべて完了)
-            for i, action in enumerate(original_actions, 1):
-                task_id = action.get("task_id", f"task_{i}")
+            for i, action in enumerate(original_actions):
+                task_id = action.get("task_id", f"task_{i+1}")
                 purpose = action.get("purpose", "Execute action")
-                checklist_lines.append(f"- [x] **{task_id}**: {purpose}")
-
-            checklist_lines.extend([
-                "",
-                "### Additional Work (From Verification)",
-            ])
+                checklist_items.append({
+                    "id": task_id,
+                    "description": f"{purpose} (Original - Completed)",
+                    "completed": True,
+                })
 
             # 追加作業(未完了)
-            for i, action in enumerate(additional_actions, 1):
-                task_id = action.get("task_id", f"verification_fix_{i}")
+            for i, action in enumerate(additional_actions):
+                task_id = action.get("task_id", f"verification_fix_{i+1}")
                 purpose = action.get("purpose", "Fix issue")
-                checklist_lines.append(f"- [ ] **{task_id}**: {purpose}")
+                checklist_items.append({
+                    "id": task_id,
+                    "description": f"{purpose} (Verification)",
+                    "completed": False,
+                })
 
-            checklist_lines.append("")
-
-            # 進捗情報
+            # ProgressCommentManagerを更新
+            self.progress_manager.update_checklist(checklist_items)
+            
+            # 進捗情報も更新
             total_actions = len(original_actions) + len(additional_actions)
-            completed = len(original_actions)
-            # total_actionsが0の場合は100%(完了)とする
-            progress_pct = int(completed / total_actions * 100) if total_actions else 100
-            checklist_lines.append(
-                f"*Progress: {completed}/{total_actions} ({progress_pct}%) - "
-                f"Verification found {len(additional_actions)} additional items*",
+            self.progress_manager.update_status(
+                action_counter=len(original_actions),
+                total_actions=total_actions,
             )
-
-            checklist_content = "\n".join(checklist_lines)
-
-            # 既存のコメントを更新または新規投稿
-            if self.checklist_comment_id and hasattr(self.task, "update_comment"):
-                self.task.update_comment(self.checklist_comment_id, checklist_content)
-                self.logger.info(
-                    "Updated checklist for additional work (comment_id=%s)",
-                    self.checklist_comment_id,
-                )
-            elif hasattr(self.task, "comment"):
-                result = self.task.comment(checklist_content)
-                if isinstance(result, dict):
-                    self.checklist_comment_id = result.get("id")
-                self.logger.info("Posted new checklist for additional work")
+            
+            self.logger.info(
+                "Updated checklist for additional work: %d original + %d verification items",
+                len(original_actions),
+                len(additional_actions),
+            )
 
         except Exception as e:
             self.logger.error("Failed to update checklist for additional work: %s", str(e))
@@ -2491,56 +2695,43 @@ Maintain the same JSON format as before for action_plan.actions."""
             status: The status (e.g., "started", "completed", "failed")
             details: Additional details to include in the comment
         """
-        try:
-            # Build comment based on phase and status
-            emoji_map = {
-                "pre_planning": "🔍",
-                "planning": "🎯",
-                "execution": "⚙️",
-                "reflection": "🔍",
-                "revision": "📝",
-                "verification": "🔍",
-            }
+        # Build emoji-enhanced title
+        emoji_map = {
+            "pre_planning": "🔍",
+            "planning": "🎯",
+            "execution": "⚙️",
+            "reflection": "🔍",
+            "revision": "📝",
+            "verification": "🔍",
+        }
 
-            status_emoji_map = {
-                "started": "▶️",
-                "completed": "✅",
-                "failed": "❌",
-                "in_progress": "🔄",
-            }
+        status_emoji_map = {
+            "started": "▶️",
+            "completed": "✅",
+            "failed": "❌",
+            "in_progress": "🔄",
+        }
 
-            phase_emoji = emoji_map.get(phase, "📌")
-            status_emoji = status_emoji_map.get(status, "ℹ️")
-
-            # Build comment title
-            phase_title = phase.replace("_", " ").title()
-            status_title = status.replace("_", " ").title()
-
-            comment_lines = [
-                f"## {phase_emoji} {phase_title} Phase - {status_emoji} {status_title}",
-                "",
-            ]
-
-            # Add details if provided
-            if details:
-                comment_lines.append(details)
-                comment_lines.append("")
-
-            # Add timestamp
-            timestamp = datetime.now().strftime(DATETIME_FORMAT)
-            comment_lines.append(f"*{timestamp}*")
-
-            comment_content = "\n".join(comment_lines)
-
-            # Post comment to Issue/MR using Task.comment method
-            if hasattr(self.task, "comment"):
-                self.task.comment(comment_content)
-                self.logger.info(f"Posted {phase} phase {status} comment to Issue/MR")
-            else:
-                self.logger.warning("Task does not support comment, cannot post phase comment")
-
-        except Exception as e:
-            self.logger.error("Failed to post phase comment: %s", str(e))
+        phase_emoji = emoji_map.get(phase, "📌")
+        status_emoji = status_emoji_map.get(status, "ℹ️")
+        
+        phase_title = phase.replace("_", " ").title()
+        status_title = status.replace("_", " ").title()
+        
+        title = f"{phase_emoji} {phase_title} Phase - {status_emoji} {status_title}"
+        
+        # Add to progress history
+        self.progress_manager.add_history_entry(
+            entry_type="phase",
+            title=title,
+            details=details,
+        )
+        
+        # Update status
+        self.progress_manager.update_status(
+            phase=phase_title,
+            status=status_title,
+        )
 
     def _post_llm_call_comment(
         self,
@@ -2551,8 +2742,8 @@ Maintain the same JSON format as before for action_plan.actions."""
         """LLM呼び出し完了時にコメントをIssue/MRに投稿する.
 
         仕様書に従い、以下のルールでコメント内容を決定:
-        1. LLM応答にcommentフィールドがある場合: その内容を使用（常に優先）
-        2. commentフィールドがない場合: フェーズ名+LLM呼び出し回数のデフォルトメッセージ
+        1. LLM応答にcommentフィールドがある場合: その内容を設定
+        2. commentフィールドがない場合: Noneを設定
 
         Args:
             phase: 現在のフェーズ名
@@ -2560,85 +2751,49 @@ Maintain the same JSON format as before for action_plan.actions."""
             task_id: 実行中のアクションID（executionフェーズ用）
 
         """
-        # LLM呼び出しコメント機能が無効の場合は何もしない
-        if not self.llm_call_comments_enabled:
-            return
+        # LLM応答からcommentフィールドを取得
+        comment_content: str | None = None
+        if isinstance(llm_response, dict):
+            comment_content = llm_response.get("comment")
+        elif isinstance(llm_response, str):
+            # JSON文字列の場合、パースしてcommentフィールドを探す
+            try:
+                parsed = json.loads(llm_response)
+                if isinstance(parsed, dict):
+                    comment_content = parsed.get("comment")
+            except (json.JSONDecodeError, ValueError):
+                pass
 
-        try:
-            # LLM呼び出し回数をインクリメント
-            self.llm_call_count += 1
-
-            # フェーズ名の日本語表示用マッピング
-            phase_names: dict[str, str] = {
-                "pre_planning": "計画前情報収集",
-                "planning": "計画作成",
-                "execution": "アクション実行",
-                "reflection": "リフレクション",
-                "revision": "計画修正",
-                "verification": "検証",
-                "replan_decision": "再計画判断",
-            }
-
-            phase_display_name = phase_names.get(phase, phase.replace("_", " ").title())
-
-            # LLM応答からcommentフィールドを取得
-            comment_content: str | None = None
-            if isinstance(llm_response, dict):
-                comment_content = llm_response.get("comment")
-            elif isinstance(llm_response, str):
-                # JSON文字列の場合、パースしてcommentフィールドを探す
-                try:
-                    parsed = json.loads(llm_response)
-                    if isinstance(parsed, dict):
-                        comment_content = parsed.get("comment")
-                except (json.JSONDecodeError, ValueError):
-                    pass
-
-            # コメント内容の決定
-            if comment_content:
-                # commentフィールドがある場合: その内容を使用
-                comment_lines = [
-                    f"## ✅ {phase_display_name} - LLM呼び出し #{self.llm_call_count}",
-                    "",
-                    comment_content,
-                    "",
-                ]
-            else:
-                # commentフィールドがない場合: デフォルトメッセージ
-                default_message = self.phase_default_messages.get(
-                    phase, "処理が完了しました",
-                )
-                # executionフェーズの場合はtask_idを含める
-                if phase == "execution" and task_id:
-                    default_message = f"アクション「{task_id}」の実行が完了しました"
-
-                comment_lines = [
-                    f"## ✅ {phase_display_name} - LLM呼び出し #{self.llm_call_count} 完了",
-                    "",
-                    default_message,
-                    "",
-                ]
-
-            # タイムスタンプを追加
-            timestamp = datetime.now().strftime(DATETIME_FORMAT)
-            comment_lines.append(f"*{timestamp}*")
-
-            comment_text = "\n".join(comment_lines)
-
-            # Issue/MRにコメント投稿
-            if hasattr(self.task, "comment"):
-                self.task.comment(comment_text)
-                self.logger.info(
-                    "LLM呼び出しコメントを投稿: phase=%s, call_count=%d",
-                    phase,
-                    self.llm_call_count,
-                )
-            else:
-                self.logger.warning("タスクがcommentをサポートしていません")
-
-        except Exception as e:
-            # コメント投稿失敗はメイン処理に影響させない
-            self.logger.warning("LLM呼び出しコメントの投稿に失敗: %s", e)
+        # ProgressCommentManagerにLLMコメントを設定
+        self.progress_manager.set_llm_comment(comment_content)
+        
+        # フェーズ名の日本語表示用マッピング
+        phase_names: dict[str, str] = {
+            "pre_planning": "計画前情報収集",
+            "planning": "計画作成",
+            "execution": "アクション実行",
+            "reflection": "リフレクション",
+            "revision": "計画修正",
+            "verification": "検証",
+            "replan_decision": "再計画判断",
+        }
+        
+        phase_display_name = phase_names.get(phase, phase.replace("_", " ").title())
+        
+        # 履歴にLLM呼び出しエントリを追加（commentがある場合のみ詳細に記録）
+        if comment_content:
+            # commentフィールドがある場合は履歴に追加
+            llm_call_count = self.progress_manager.llm_call_count + 1
+            self.progress_manager.add_history_entry(
+                entry_type="llm_call",
+                title=f"✅ {phase_display_name} - LLM呼び出し #{llm_call_count}",
+                details=comment_content[:200] + ("..." if len(comment_content) > 200 else ""),
+            )
+        
+        # ステータス更新（llm_call_countをインクリメント）
+        self.progress_manager.update_status(
+            llm_call_count=self.progress_manager.llm_call_count + 1,
+        )
 
     def _post_tool_call_before_comment(
         self,
@@ -2657,43 +2812,22 @@ Maintain the same JSON format as before for action_plan.actions."""
             arguments: ツール引数（dictまたはJSON文字列）
 
         """
-        # LLM呼び出しコメント機能が無効の場合は何もしない
-        if not self.llm_call_comments_enabled:
-            return
+        # 引数をJSON文字列に変換
+        if isinstance(arguments, dict):
+            args_str = json.dumps(arguments, ensure_ascii=False)
+        else:
+            args_str = str(arguments)
 
-        try:
-            # 引数をJSON文字列に変換
-            if isinstance(arguments, dict):
-                args_str = json.dumps(arguments, ensure_ascii=False)
-            else:
-                args_str = str(arguments)
+        # 最大文字数を超える場合は切り捨て
+        if len(args_str) > TOOL_ARGS_MAX_LENGTH:
+            args_str = args_str[:TOOL_ARGS_MAX_LENGTH] + "..."
 
-            # 最大文字数を超える場合は切り捨て
-            if len(args_str) > TOOL_ARGS_MAX_LENGTH:
-                args_str = args_str[:TOOL_ARGS_MAX_LENGTH] + "..."
-
-            # コメント構築
-            timestamp = datetime.now().strftime(DATETIME_FORMAT)
-            comment_lines = [
-                f"## 🔧 ツール呼び出し - {tool_name}",
-                "",
-                f"**引数**: {args_str}",
-                "",
-                f"*{timestamp}*",
-            ]
-
-            comment_text = "\n".join(comment_lines)
-
-            # Issue/MRにコメント投稿
-            if hasattr(self.task, "comment"):
-                self.task.comment(comment_text)
-                self.logger.info("ツール呼び出し前コメントを投稿: %s", tool_name)
-            else:
-                self.logger.warning("タスクがcommentをサポートしていません")
-
-        except Exception as e:
-            # コメント投稿失敗はメイン処理に影響させない
-            self.logger.warning("ツール呼び出し前コメントの投稿に失敗: %s", e)
+        # 履歴に追加
+        self.progress_manager.add_history_entry(
+            entry_type="tool_call",
+            title=f"🔧 ツール呼び出し - {tool_name}",
+            details=f"**引数**: {args_str}",
+        )
 
     def _post_tool_call_after_comment(
         self,
@@ -2711,44 +2845,18 @@ Maintain the same JSON format as before for action_plan.actions."""
             success: 成功したかどうか
 
         """
-        # LLM呼び出しコメント機能が無効の場合は何もしない
-        if not self.llm_call_comments_enabled:
-            return
-
-        try:
-            timestamp = datetime.now().strftime(DATETIME_FORMAT)
-
-            if success:
-                comment_lines = [
-                    f"## ✅ ツール完了 - {tool_name}",
-                    "",
-                    "結果: 成功",
-                    "",
-                    f"*{timestamp}*",
-                ]
-            else:
-                comment_lines = [
-                    f"## ❌ ツール失敗 - {tool_name}",
-                    "",
-                    "結果: 失敗",
-                    "",
-                    f"*{timestamp}*",
-                ]
-
-            comment_text = "\n".join(comment_lines)
-
-            # Issue/MRにコメント投稿
-            if hasattr(self.task, "comment"):
-                self.task.comment(comment_text)
-                self.logger.info(
-                    "ツール呼び出し後コメントを投稿: %s, success=%s", tool_name, success,
-                )
-            else:
-                self.logger.warning("タスクがcommentをサポートしていません")
-
-        except Exception as e:
-            # コメント投稿失敗はメイン処理に影響させない
-            self.logger.warning("ツール呼び出し後コメントの投稿に失敗: %s", e)
+        if success:
+            title = f"✅ ツール完了 - {tool_name}"
+            details = "結果: 成功"
+        else:
+            title = f"❌ ツール失敗 - {tool_name}"
+            details = "結果: 失敗"
+        
+        self.progress_manager.add_history_entry(
+            entry_type="tool_call",
+            title=title,
+            details=details,
+        )
 
     def _post_llm_error_comment(
         self,
@@ -2768,47 +2876,28 @@ Maintain the same JSON format as before for action_plan.actions."""
             error_message: エラーメッセージ
 
         """
-        # LLM呼び出しコメント機能が無効の場合は何もしない
-        if not self.llm_call_comments_enabled:
-            return
+        # フェーズ名の日本語表示用マッピング
+        phase_names: dict[str, str] = {
+            "pre_planning": "計画前情報収集",
+            "planning": "計画作成",
+            "execution": "アクション実行",
+            "reflection": "リフレクション",
+            "revision": "計画修正",
+            "verification": "検証",
+            "replan_decision": "再計画判断",
+        }
 
-        try:
-            # フェーズ名の日本語表示用マッピング
-            phase_names: dict[str, str] = {
-                "pre_planning": "計画前情報収集",
-                "planning": "計画作成",
-                "execution": "アクション実行",
-                "reflection": "リフレクション",
-                "revision": "計画修正",
-                "verification": "検証",
-                "replan_decision": "再計画判断",
-            }
+        phase_display_name = phase_names.get(phase, phase.replace("_", " ").title())
+        
+        details = f"""**エラー内容**: {error_message}
 
-            phase_display_name = phase_names.get(phase, phase.replace("_", " ").title())
-            timestamp = datetime.now().strftime(DATETIME_FORMAT)
-
-            comment_lines = [
-                f"## ⚠️ LLM呼び出しエラー - {phase_display_name}",
-                "",
-                f"**エラー内容**: {error_message}",
-                "",
-                "リトライを試みます...",
-                "",
-                f"*{timestamp}*",
-            ]
-
-            comment_text = "\n".join(comment_lines)
-
-            # Issue/MRにコメント投稿
-            if hasattr(self.task, "comment"):
-                self.task.comment(comment_text)
-                self.logger.info("LLMエラーコメントを投稿: phase=%s", phase)
-            else:
-                self.logger.warning("タスクがcommentをサポートしていません")
-
-        except Exception as e:
-            # コメント投稿失敗はメイン処理に影響させない
-            self.logger.warning("LLMエラーコメントの投稿に失敗: %s", e)
+リトライを試みます..."""
+        
+        self.progress_manager.add_history_entry(
+            entry_type="error",
+            title=f"⚠️ LLM呼び出しエラー - {phase_display_name}",
+            details=details,
+        )
 
     def _post_tool_error_comment(
         self,
@@ -2830,44 +2919,18 @@ Maintain the same JSON format as before for action_plan.actions."""
             task_id: 発生したアクションのID（オプション）
 
         """
-        # LLM呼び出しコメント機能が無効の場合は何もしない
-        if not self.llm_call_comments_enabled:
-            return
-
-        try:
-            timestamp = datetime.now().strftime(DATETIME_FORMAT)
-
-            comment_lines = [
-                f"## ❌ エラー発生 - {tool_name}",
-                "",
-                f"**エラー内容**: {error_message}",
-            ]
-
-            if task_id:
-                comment_lines.append("")
-                comment_lines.append(f"**発生したアクション**: {task_id}")
-
-            comment_lines.extend([
-                "",
-                f"*{timestamp}*",
-            ])
-
-            comment_text = "\n".join(comment_lines)
-
-            # Issue/MRにコメント投稿
-            if hasattr(self.task, "comment"):
-                self.task.comment(comment_text)
-                self.logger.info(
-                    "ツールエラーコメントを投稿: tool=%s, task_id=%s",
-                    tool_name,
-                    task_id,
-                )
-            else:
-                self.logger.warning("タスクがcommentをサポートしていません")
-
-        except Exception as e:
-            # コメント投稿失敗はメイン処理に影響させない
-            self.logger.warning("ツールエラーコメントの投稿に失敗: %s", e)
+        details_parts = [f"**エラー内容**: {error_message}"]
+        
+        if task_id:
+            details_parts.append(f"**発生したアクション**: {task_id}")
+        
+        details = "\n".join(details_parts)
+        
+        self.progress_manager.add_history_entry(
+            entry_type="error",
+            title=f"❌ エラー発生 - {tool_name}",
+            details=details,
+        )
 
     def restore_planning_state(self, planning_state: dict[str, Any]) -> None:
         """Restore planning state from paused task.
@@ -2883,19 +2946,26 @@ Maintain the same JSON format as before for action_plan.actions."""
         self.action_counter = planning_state.get("action_counter", 0)
         self.revision_counter = planning_state.get("revision_counter", 0)
 
-        # LLM呼び出し回数を復元
-        self.llm_call_count = planning_state.get("llm_call_count", 0)
+        # Restore progress manager state
+        saved_llm_call_count = planning_state.get("llm_call_count", 0)
+        if saved_llm_call_count > 0:
+            self.progress_manager.llm_call_count = saved_llm_call_count
 
-        # Restore checklist comment ID if available
-        saved_checklist_id = planning_state.get("checklist_comment_id")
-        if saved_checklist_id is not None:
-            self.checklist_comment_id = saved_checklist_id
-            self.plan_comment_id = saved_checklist_id
+        saved_comment_id = planning_state.get("progress_comment_id")
+        if saved_comment_id is not None:
+            self.progress_manager.comment_id = saved_comment_id
+            self.plan_comment_id = saved_comment_id
 
         # Restore pre-planning result if available
         saved_pre_planning_result = planning_state.get("pre_planning_result")
         if saved_pre_planning_result is not None:
             self.pre_planning_result = saved_pre_planning_result
+            
+            # 依頼内容理解結果を実行状態に反映
+            pre_planning = saved_pre_planning_result.get("pre_planning_result", {})
+            understanding_result = pre_planning.get("understanding_result")
+            if understanding_result:
+                self.progress_manager.set_understanding_result(understanding_result)
 
         # Restore selected environment if available
         saved_selected_environment = planning_state.get("selected_environment")
@@ -2914,12 +2984,12 @@ Maintain the same JSON format as before for action_plan.actions."""
 
         self.logger.info(
             "Planning状態を復元しました: phase=%s, action_counter=%d, revision_counter=%d, "
-            "llm_call_count=%d, checklist_id=%s, selected_environment=%s, default_env_prepared=%s",
+            "llm_call_count=%d, progress_comment_id=%s, selected_environment=%s, default_env_prepared=%s",
             self.current_phase,
             self.action_counter,
             self.revision_counter,
-            self.llm_call_count,
-            self.checklist_comment_id,
+            self.progress_manager.llm_call_count,
+            self.progress_manager.comment_id,
             self.selected_environment,
             self.default_environment_prepared,
         )
@@ -2948,8 +3018,8 @@ Maintain the same JSON format as before for action_plan.actions."""
             "current_phase": self.current_phase,
             "action_counter": self.action_counter,
             "revision_counter": self.revision_counter,
-            "llm_call_count": self.llm_call_count,
-            "checklist_comment_id": self.plan_comment_id,
+            "llm_call_count": self.progress_manager.llm_call_count,
+            "progress_comment_id": self.progress_manager.comment_id,
             "total_actions": total_actions,
             "pre_planning_result": self.pre_planning_result,
             "selected_environment": self.selected_environment,
