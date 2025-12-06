@@ -1085,6 +1085,71 @@ class PrePlanningManager:
             details=details,
         )
 
+    def collect_environment_info(self) -> dict[str, Any]:
+        """環境情報を収集する.
+        
+        Returns:
+            環境情報の辞書
+        """
+        from handlers.environment_analyzer import EnvironmentAnalyzer
+        
+        self.logger.info("環境情報の収集を開始します")
+        
+        # EnvironmentAnalyzerを初期化
+        analyzer = EnvironmentAnalyzer(self.mcp_clients)
+        
+        # ファイルリストを取得
+        file_list = self._get_project_file_list()
+        
+        if not file_list:
+            self.logger.warning("プロジェクトのファイルリストを取得できませんでした")
+            return {
+                "detected_files": {},
+                "file_contents": {},
+            }
+        
+        # 環境ファイルを検出
+        detected_files = analyzer.detect_environment_files(file_list)
+        
+        # ファイル内容を解析
+        environment_info = analyzer.analyze_environment_files(detected_files)
+        
+        self.logger.info("環境情報の収集が完了しました")
+        return environment_info
+
+    def _get_project_file_list(self) -> list[str]:
+        """プロジェクトのファイルリストを取得する.
+        
+        Returns:
+            ファイルパスのリスト
+        """
+        # GitHub/GitLab MCPクライアントを使用してファイルリストを取得
+        for client_name, mcp_client in self.mcp_clients.items():
+            if client_name in ("github", "gitlab"):
+                try:
+                    # get_file_contents toolを使用してルートディレクトリを取得
+                    result = mcp_client.call_tool(
+                        "get_file_contents",
+                        {"path": "/"},
+                    )
+                    if result and isinstance(result, dict):
+                        # ディレクトリ一覧が返される場合
+                        content = result.get("content", "")
+                        if isinstance(content, str):
+                            # ファイル名を抽出（改行区切り）
+                            files = [line.strip() for line in content.split("\n") if line.strip()]
+                            return files
+                        elif isinstance(content, list):
+                            return content
+                except Exception as e:
+                    self.logger.debug(
+                        "MCPクライアント %s でファイルリスト取得失敗: %s",
+                        client_name,
+                        e,
+                    )
+        
+        return []
+
     def _update_progress_after_llm_call(self, response: str | dict[str, Any]) -> None:
         """LLM呼び出し後にProgressCommentManagerを更新.
         

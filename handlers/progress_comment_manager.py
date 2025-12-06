@@ -23,6 +23,7 @@ class ProgressCommentManager:
     PHASE_ORDER = [
         "pre_planning",
         "planning",
+        "environment_setup",
         "execution",
         "reflection",
         "verification",
@@ -33,6 +34,7 @@ class ProgressCommentManager:
     PHASE_DISPLAY_NAMES = {
         "pre_planning": "Pre Planning",
         "planning": "Planning",
+        "environment_setup": "Environment Setup",
         "execution": "Execution",
         "reflection": "Reflection",
         "verification": "Verification",
