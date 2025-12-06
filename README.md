@@ -458,7 +458,34 @@ grep "LLM" logs/agent.log
 
 ## ライセンス
 
-このプロジェクトは [ライセンス](LICENSE) の下で公開されています。
+このプロジェクトは Creative Commons Attribution 3.0 Unported (CC BY 3.0) の下でライセンスされています。
+
+[![License: CC BY 3.0](https://img.shields.io/badge/License-CC%20BY%203.0-lightgrey.svg)](https://creativecommons.org/licenses/by/3.0/)
+
+**SPDX識別子**: CC-BY-3.0
+
+### 概要
+
+CC-BY 3.0 ライセンスでは、以下のことが可能です：
+- **共有** — どのような媒体やフォーマットでも資料を複製・再配布できます
+- **翻案** — 商用目的を含め、どのような目的でも資料を改変、変形、加工できます
+
+以下の条件に従う必要があります：
+- **表示** — 適切なクレジットを表示し、ライセンスへのリンクを提供し、変更があった場合は変更内容を示す必要があります
+
+詳細は [LICENSE](LICENSE) ファイルを参照してください。
+
+### 注意事項
+
+**重要**: このプロジェクトは主にソフトウェアコードで構成されています。Creative Commons ライセンス（CC-BY 3.0）は、通常、文書、画像、その他のクリエイティブ作品に使用されるライセンスであり、ソフトウェアコードには一般的に使用されません。
+
+ソフトウェアプロジェクトには、以下のようなライセンスがより一般的です：
+- MIT License
+- Apache License 2.0
+- BSD License
+- GNU General Public License (GPL)
+
+プロジェクトに貢献する前に、このライセンスの選択について理解していることを確認してください。
 
 ## 関連ドキュメント
 
