@@ -358,8 +358,27 @@ class TaskGitHubPullRequest(Task):
             self.mcp_client.call_tool("update_issue", args)
 
     def get_user(self) -> str | None:
-        """Pull Requestの作成者のユーザー名を取得する."""
-        return self.pr.get("user", {}).get("login")
+        """Pull Requestの作成者のユーザー名を取得する.
+        
+        ボットが作成者の場合は、レビュアーの1人目を返す。
+        レビュアーがいない場合はNoneを返す。
+        """
+        author = self.pr.get("user", {}).get("login")
+        
+        # ボット名を取得
+        bot_name = self.config.get("github", {}).get("bot_name")
+        
+        # 作成者がボットでない場合はそのまま返す
+        if author != bot_name:
+            return author
+        
+        # ボットが作成者の場合、レビュアーの1人目を返す
+        requested_reviewers = self.pr.get("requested_reviewers", [])
+        if requested_reviewers and len(requested_reviewers) > 0:
+            return requested_reviewers[0].get("login")
+        
+        # レビュアーがいない場合はNone
+        return None
 
     @property
     def title(self) -> str:

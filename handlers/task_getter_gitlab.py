@@ -439,8 +439,27 @@ class TaskGitLabMergeRequest(Task):
             self.mr["labels"] = self.labels
 
     def get_user(self) -> str | None:
-        """Merge Requestの作成者のユーザー名を取得する."""
-        return self.mr.get("author", {}).get("username")
+        """Merge Requestの作成者のユーザー名を取得する.
+        
+        ボットが作成者の場合は、レビュアーの1人目を返す。
+        レビュアーがいない場合はNoneを返す。
+        """
+        author = self.mr.get("author", {}).get("username")
+        
+        # ボット名を取得
+        bot_name = self.config.get("gitlab", {}).get("bot_name")
+        
+        # 作成者がボットでない場合はそのまま返す
+        if author != bot_name:
+            return author
+        
+        # ボットが作成者の場合、レビュアーの1人目を返す
+        reviewers = self.mr.get("reviewers", [])
+        if reviewers and len(reviewers) > 0:
+            return reviewers[0].get("username")
+        
+        # レビュアーがいない場合はNone
+        return None
 
     @property
     def title(self) -> str:
