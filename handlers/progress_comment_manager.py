@@ -357,6 +357,7 @@ class ProgressCommentManager:
         primary_goal = request_understanding.get("primary_goal", "")
         confidence = request_understanding.get("understanding_confidence", 0.0)
         deliverables = request_understanding.get("expected_deliverables", [])
+        scope = request_understanding.get("scope", {})
         
         lines = [
             "- **依頼内容理解**:",
@@ -366,6 +367,21 @@ class ProgressCommentManager:
         
         if primary_goal:
             lines.append(f"  - 主目的: {primary_goal}")
+        
+        # スコープ情報
+        if scope:
+            in_scope = scope.get("in_scope", [])
+            out_of_scope = scope.get("out_of_scope", [])
+            
+            if in_scope:
+                in_scope_str = ", ".join(in_scope)
+                lines.append(f"  - スコープ: {in_scope_str}")
+            else:
+                lines.append("  - スコープ: 全体")
+            
+            if out_of_scope:
+                out_scope_str = ", ".join(out_of_scope)
+                lines.append(f"  - スコープ外: {out_scope_str}")
         
         if deliverables:
             lines.append("  - 成果物:")
