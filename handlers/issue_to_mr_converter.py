@@ -577,8 +577,9 @@ class IssueToMRConverter:
             # 8. 元Issueに作成報告
             self._notify_source_issue(mr_number, branch_name, mr_url, base_branch)
 
-            # Note: 元Issueのラベル更新はタスク完了時にPlanningCoordinatorの
-            # 完了フックで実行されるため、ここでは実行しない
+            # 9. 元Issueのラベルを更新（processing → done）
+            # Issue→MR変換後、Issueタスクは完了するため、ここでラベル更新を行う
+            self._update_source_issue_labels()
 
             self.logger.info("Issue #%s をマージリクエスト/プルリクエスト #%s に変換しました", self._get_issue_number(), mr_number)
 
@@ -789,6 +790,9 @@ class IssueToMRConverter:
     def _setup_auto_task(self, mr_result: dict[str, Any]) -> None:
         """マージリクエスト/プルリクエストに自動タスク化の設定を行う."""
         try:
+            # 元Issueの作成者を取得
+            original_user = self.task.get_user()
+            
             if self.platform == "github":
                 # GitHubの場合はGithubClientを使用
                 task_key = self.task.get_task_key()
@@ -815,6 +819,25 @@ class IssueToMRConverter:
                         issue_number=pr_number,
                         assignees=[bot_name],
                     )
+                
+                # 元Issueの作成者をレビュアーとして登録
+                if original_user and original_user != bot_name:
+                    try:
+                        self.github_client.request_pull_request_reviewers(
+                            owner=task_key.owner,
+                            repo=task_key.repo,
+                            pull_number=pr_number,
+                            reviewers=[original_user],
+                        )
+                        self.logger.info(
+                            "元Issueの作成者 '%s' をPRレビュアーとして登録しました",
+                            original_user,
+                        )
+                    except Exception as e:
+                        self.logger.warning(
+                            "PRレビュアーの登録に失敗しました（user=%s）: %s",
+                            original_user, e,
+                        )
             else:
                 task_key = self.task.get_task_key()
                 mr_iid = mr_result.get("iid")
@@ -845,6 +868,32 @@ class IssueToMRConverter:
                         self.logger.warning(
                             "GitLabユーザー '%s' が見つかりませんでした",
                             bot_name,
+                        )
+                
+                # 元Issueの作成者をレビュアーとして登録
+                if original_user and original_user != bot_name:
+                    try:
+                        # レビュアーのuser_idを取得
+                        reviewer_info = self.gitlab_client.get_user_by_username(original_user)
+                        if reviewer_info and "id" in reviewer_info:
+                            self.gitlab_client.update_merge_request(
+                                project_id=task_key.project_id,
+                                merge_request_iid=mr_iid,
+                                reviewer_ids=[reviewer_info["id"]],
+                            )
+                            self.logger.info(
+                                "元Issueの作成者 '%s' をMRレビュアーとして登録しました",
+                                original_user,
+                            )
+                        else:
+                            self.logger.warning(
+                                "レビュアー登録用のGitLabユーザー '%s' が見つかりませんでした",
+                                original_user,
+                            )
+                    except Exception as e:
+                        self.logger.warning(
+                            "MRレビュアーの登録に失敗しました（user=%s）: %s",
+                            original_user, e,
                         )
         except Exception as e:
             self.logger.warning("自動タスク設定に失敗: %s", e)

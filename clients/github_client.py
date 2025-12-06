@@ -279,6 +279,32 @@ class GithubClient:
         response.raise_for_status()
         return response.json()
 
+    def request_pull_request_reviewers(
+        self,
+        owner: str,
+        repo: str,
+        pull_number: int,
+        reviewers: list[str],
+    ) -> dict[str, Any]:
+        """Pull Requestにレビュアーをリクエストする.
+
+        Args:
+            owner: リポジトリのオーナー名
+            repo: リポジトリ名
+            pull_number: Pull Request番号
+            reviewers: レビュアーのユーザー名リスト
+
+        Returns:
+            更新されたPull Request情報
+
+        """
+        url = f"{self.api_url}/repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers"
+        data = {"reviewers": reviewers}
+
+        response = requests.post(url, headers=self.headers, json=data, timeout=30)
+        response.raise_for_status()
+        return response.json()
+
     def add_issue_labels(
         self, owner: str, repo: str, issue_number: int, labels: list[str],
     ) -> list[dict[str, Any]]:

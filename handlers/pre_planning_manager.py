@@ -146,9 +146,6 @@ class PrePlanningManager:
         # ProgressCommentManagerを更新
         self._update_progress_after_llm_call(response)
 
-        # トークン数を記録
-        if self.context_manager:
-
         # レスポンスをパース
         result = self._parse_understanding_response(response)
 
@@ -182,9 +179,6 @@ class PrePlanningManager:
         
         # ProgressCommentManagerを更新
         self._update_progress_after_llm_call(response)
-
-        # トークン数を記録
-        if self.context_manager:
 
         # レスポンスをパース
         result = self._parse_collection_planning_response(response)
@@ -778,9 +772,6 @@ class PrePlanningManager:
         
         # ProgressCommentManagerを更新
         self._update_progress_after_llm_call(response)
-
-        # トークン数を記録
-        if self.context_manager:
 
         # レスポンスをパース
         result = self._parse_json_response(response)

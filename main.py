@@ -565,7 +565,18 @@ def produce_tasks(
         task.prepare()  # ラベル付与などの準備処理
         task_dict = task.get_task_key().to_dict()
         task_dict["uuid"] = str(uuid.uuid4())  # UUID v4を生成して追加
-        task_dict["user"] = task.get_user()    # ユーザー情報も追加
+        
+        # ユーザー情報を取得
+        user = task.get_user()
+        if user is None:
+            # ボットが作成者でレビュアーも不在の場合はエラーログを出して除外
+            logger.error(
+                "タスクのユーザー情報が取得できません（ボット作成でレビュアー不在）: %s",
+                task_dict
+            )
+            continue
+        
+        task_dict["user"] = user  # ユーザー情報を追加
         task_queue.put(task_dict)
 
     logger.info("%d件のタスクをキューに追加しました", len(tasks))

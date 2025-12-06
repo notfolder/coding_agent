@@ -106,6 +106,24 @@ class TaskHandler:
                     self._get_issue_number(task),
                     conversion_result.mr_number,
                 )
+                # Issue→MR変換が成功した場合、タスクをcompletedに更新
+                if task.uuid:
+                    try:
+                        from db.task_db import TaskDBManager
+                        
+                        db_manager = TaskDBManager(self.config)
+                        db_task = db_manager.get_task(task.uuid)
+                        if db_task:
+                            db_task.status = "completed"
+                            db_manager.save_task(db_task)
+                            self.logger.debug(
+                                "Issue→MR変換完了: タスクステータスをcompletedに更新: uuid=%s",
+                                task.uuid,
+                            )
+                    except Exception as e:
+                        self.logger.warning(
+                            "Issue→MR変換後のステータス更新に失敗: %s", e, exc_info=True
+                        )
                 return
             # 変換に失敗した場合は通常処理に進む（エラーはログに記録済み）
             self.logger.warning("Issue→MR/PR変換に失敗しました。通常処理を継続します。")
@@ -1684,6 +1702,63 @@ class TaskHandler:
                     message_store=temp_message_store,
                     context_dir=temp_context_dir,
                 )
+
+                # Issue→MR変換でもトークン統計を記録するためにフックを設定
+                # 元のIssueタスクのUUIDでDB統計を更新する
+                if task.uuid:
+                    try:
+                        from context_storage import TaskContextManager
+                        from db.task_db import TaskDBManager
+
+                        # タスクがDBに存在しない場合は、TaskContextManagerを使って登録
+                        db_manager = TaskDBManager(task_config)
+                        db_task = db_manager.get_task(task.uuid)
+                        
+                        if not db_task:
+                            # TaskContextManagerを使ってタスクを登録
+                            # （TaskContextManagerの__init__で_register_or_update_taskが呼ばれる）
+                            task_key = task.get_task_key()
+                            temp_context_manager = TaskContextManager(
+                                task_key=task_key,
+                                task_uuid=task.uuid,
+                                config=task_config,
+                                user=task.user,
+                                is_resumed=False,
+                            )
+                            # DBTaskを取得
+                            db_task = temp_context_manager._db_task
+                            self.logger.debug(
+                                "Issue→MR変換用にTaskContextManagerでタスクをDBに登録: uuid=%s",
+                                task.uuid,
+                            )
+                        
+                        # 統計記録用のフック関数を設定
+                        def conversion_statistics_hook(llm_calls: int, tokens: int) -> None:
+                            """Issue→MR変換時の統計記録フック."""
+                            try:
+                                db_task = db_manager.get_task(task.uuid)
+                                if db_task:
+                                    db_task.llm_call_count = (db_task.llm_call_count or 0) + llm_calls
+                                    db_task.total_tokens = (db_task.total_tokens or 0) + tokens
+                                    db_manager.save_task(db_task)
+                                    self.logger.debug(
+                                        "Issue→MR変換の統計を記録: uuid=%s, llm=%d, tokens=%d",
+                                        task.uuid, llm_calls, tokens,
+                                    )
+                            except Exception as e:
+                                self.logger.warning(
+                                    "Issue→MR変換の統計記録に失敗: %s", e, exc_info=True
+                                )
+                        
+                        conversion_llm_client.set_statistics_hook(conversion_statistics_hook)
+                        self.logger.debug("Issue→MR変換用の統計フックを設定しました: uuid=%s", task.uuid)
+                        
+                    except Exception as e:
+                        self.logger.warning(
+                            "Issue→MR変換用の統計フック設定に失敗（統計は記録されません）: %s",
+                            e,
+                            exc_info=True,
+                        )
 
                 # IssueToMRConverter のインスタンス化
                 if platform == "gitlab":

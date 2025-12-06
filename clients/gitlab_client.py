@@ -324,6 +324,7 @@ class GitlabClient:
         title: str | None = None,
         description: str | None = None,
         assignee_ids: list[int] | None = None,
+        reviewer_ids: list[int] | None = None,
         labels: list[str] | None = None,
     ) -> dict[str, Any]:
         """Update an existing merge request.
@@ -334,6 +335,7 @@ class GitlabClient:
             title: New title (optional)
             description: New description (optional)
             assignee_ids: List of user IDs to assign (optional)
+            reviewer_ids: List of user IDs to request review (optional)
             labels: List of labels (optional)
             
         Returns:
@@ -347,6 +349,8 @@ class GitlabClient:
             data["description"] = description
         if assignee_ids:
             data["assignee_ids"] = assignee_ids
+        if reviewer_ids:
+            data["reviewer_ids"] = reviewer_ids
         if labels:
             data["labels"] = ",".join(labels)
         resp = requests.put(url, headers=self.headers, json=data, timeout=30)
