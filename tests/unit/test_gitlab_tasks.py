@@ -229,6 +229,8 @@ class TestTaskGetterFromGitLab(BaseTestCase):
                 "project_id": 123,
                 "bot_label": "coding agent",
                 "processing_label": "coding agent processing",
+                "personal_access_token": "test_token_gitlab_12345",
+                "api_url": "https://gitlab.com/api/v4",
             },
         }
 

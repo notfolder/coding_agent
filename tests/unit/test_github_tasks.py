@@ -216,6 +216,8 @@ class TestTaskGetterFromGitHub(BaseTestCase):
                 "query": 'label:"coding agent"',
                 "bot_label": "coding agent",
                 "processing_label": "coding agent processing",
+                "personal_access_token": "test_token_github_12345",
+                "api_url": "https://api.github.com",
             },
         }
 
