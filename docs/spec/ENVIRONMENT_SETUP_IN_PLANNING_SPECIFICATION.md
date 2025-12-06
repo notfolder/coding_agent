@@ -59,17 +59,32 @@ flowchart TD
     end
     
     subgraph EnvSetup[環境構築サブフェーズ]
-        F --> G[環境構築実行]
-        G --> H[環境検証]
-        H --> I{検証成功?}
-        I -->|No| J[LLMにコマンド修正依頼]
-        J --> G
-        I -->|Yes| K[環境構築完了]
+        F --> G[Docker環境起動]
+        G --> H[プロジェクトクローン]
+        H --> I[環境構築実行ループ]
+        I --> J{実行成功?}
+        J -->|No| K{エラー分類}
+        K -->|リトライ可能| L[適切なリトライ実行]
+        L --> I
+        K -->|修正可能| M[LLMに修正依頼]
+        M --> N{修正回数 < 3?}
+        N -->|Yes| I
+        N -->|No| O[致命的エラー]
+        K -->|致命的| O
+        J -->|Yes| P[環境検証]
+        P --> Q{検証成功?}
+        Q -->|No| R{修正回数 < 3?}
+        R -->|Yes| M
+        R -->|No| O
+        Q -->|Yes| S[環境構築完了]
+        O --> T[エラーコメント投稿]
+        T --> U[警告付きで実行フェーズへ]
     end
     
     subgraph Execution[実行フェーズ]
-        K --> L[コード変更の実行]
-        L --> M[テスト実行]
+        S --> V[コード変更の実行]
+        U --> V
+        V --> W[テスト実行]
     end
 ```
 
@@ -96,8 +111,9 @@ flowchart TD
 
 | サブフェーズ | 説明 |
 |------------|------|
+| Docker環境起動とクローン | コンテナ起動とプロジェクトクローン（実行ループ外で1回のみ） |
 | 環境構築実行 | 計画フェーズで生成されたコマンドを実行して環境を構築 |
-| 環境検証 | 実行したコマンドが正しく実行されたことを確認 |
+| 環境検証 | expected_outputと完全一致で検証 |
 
 ### 2.3 主要コンポーネント
 
@@ -113,13 +129,13 @@ flowchart TD
 
 **EnvironmentVerifier**
 - 環境構築の成功を検証
-- 実行したコマンドの実行確認
+- expected_outputとの完全一致確認
 
 #### 2.3.2 既存コンポーネントの拡張
 
 **PrePlanningManager**
 - 環境情報収集機能を追加
-- requirements.txt、package.json、Dockerfile等のファイルを検出・読み込み
+- 環境構築ファイルを検出・読み込み
 
 **PlanningCoordinator**
 - 環境構築コード生成機能を追加
@@ -131,8 +147,9 @@ flowchart TD
 - 環境構築結果の記録
 
 **ProgressCommentManager**
-- 環境構築フェーズの進捗コメントサポートを追加
-- 環境構築の開始、進行中、完了、エラーの各状態をIssue/MRにコメント
+- 環境構築フェーズのサポートを追加
+- PHASE_ORDERとPHASE_DISPLAY_NAMESに環境構築フェーズを追加
+- 既存のset_active_phaseとmark_phase_completedメソッドを使用
 
 ---
 
@@ -142,62 +159,14 @@ flowchart TD
 
 計画前情報収集フェーズにおいて、環境構築に関する情報を収集します。
 
-### 3.2 収集対象ファイル
+### 3.2 PrePlanningManagerの拡張
 
-以下のファイルを検出し、内容を収集します：
-
-#### 3.2.1 Python関連
-
-| ファイル | 用途 | 優先度 |
-|---------|------|-------|
-| requirements.txt | pip依存関係定義 | 高 |
-| pyproject.toml | プロジェクト設定とビルドシステム | 高 |
-| setup.py | パッケージインストール設定 | 中 |
-| Pipfile | Pipenv依存関係定義 | 中 |
-| poetry.lock | Poetry依存関係ロック | 中 |
-| environment.yml / condaenv.yaml | Conda環境定義 | 高（Miniforge選択時） |
-
-#### 3.2.2 Node.js関連
-
-| ファイル | 用途 | 優先度 |
-|---------|------|-------|
-| package.json | npm依存関係定義とスクリプト | 高 |
-| package-lock.json | npm依存関係ロック | 中 |
-| yarn.lock | Yarn依存関係ロック | 中 |
-| pnpm-lock.yaml | pnpm依存関係ロック | 中 |
-
-#### 3.2.3 Java関連
-
-| ファイル | 用途 | 優先度 |
-|---------|------|-------|
-| pom.xml | Maven依存関係定義 | 高 |
-| build.gradle | Gradle依存関係定義 | 高 |
-| build.gradle.kts | Gradle（Kotlin DSL）依存関係定義 | 高 |
-
-#### 3.2.4 Go関連
-
-| ファイル | 用途 | 優先度 |
-|---------|------|-------|
-| go.mod | Goモジュール定義 | 高 |
-| go.sum | Go依存関係チェックサム | 中 |
-
-#### 3.2.5 共通ファイル
-
-| ファイル | 用途 | 優先度 |
-|---------|------|-------|
-| Dockerfile | Docker環境定義 | 中 |
-| docker-compose.yml | Docker Compose設定 | 中 |
-| Makefile | ビルドとタスク自動化 | 中 |
-| README.md | セットアップ手順の記載 | 低 |
-
-### 3.3 PrePlanningManagerの拡張
-
-#### 3.3.1 環境情報収集処理
+#### 3.2.1 環境情報収集処理
 
 依頼内容の理解フェーズで、環境構築ファイルの情報も収集します。
 
 **処理内容**:
-1. プロジェクトのファイル一覧からrequirements.txt、package.json等を検出
+1. プロジェクトのファイル一覧からrequirements.txt、package.json、pom.xml、go.mod、condaenv.yaml等を検出
 2. 検出したファイルの内容を読み込み
 3. 環境タイプを推測（Python、Node.js、Java、Go、Miniforge）
 4. 依存関係リストを抽出
@@ -217,7 +186,7 @@ flowchart TD
 }
 ```
 
-#### 3.3.2 環境情報のLLMへの引き継ぎ
+#### 3.2.2 環境情報のLLMへの引き継ぎ
 
 依頼内容の理解プロンプトに環境情報を含めます。
 
@@ -280,8 +249,8 @@ flowchart TD
         "expected_output": "Python 3.11"
       },
       {
-        "command": "pip list",
-        "expected_output": "successfully installed packages"
+        "command": "python -c 'import sys; print(sys.version_info.major)'",
+        "expected_output": "3"
       },
       {
         "command": "python -c \"import requests; print('OK')\"",
@@ -332,7 +301,7 @@ Project environment information:
 Tasks to perform:
 1. Select the most appropriate execution environment based on the project environment information
 2. Generate environment setup commands for the selected environment
-3. Generate verification commands to confirm the environment setup
+3. Generate verification commands with exact expected outputs
 
 Include the following in your planning JSON response:
 {
@@ -347,15 +316,26 @@ Include the following in your planning JSON response:
     "verification": [
       {
         "command": "verification command 1",
-        "expected_output": "expected output pattern"
+        "expected_output": "exact expected output for complete match"
       },
       {
         "command": "verification command 2",
-        "expected_output": "expected output pattern"
+        "expected_output": "exact expected output for complete match"
       }
     ]
   }
 }
+
+Important notes for verification commands:
+- Generate verification commands that produce deterministic, exact outputs
+- The expected_output must match the actual command output exactly (complete string match)
+- Use simple commands that return predictable outputs
+- Examples of good verification commands:
+  - `python -c 'print("OK")'` with expected_output: "OK"
+  - `node -e 'console.log("OK")'` with expected_output: "OK"
+  - `python -c 'import sys; print(sys.version_info.major)'` with expected_output: "3"
+- Avoid commands with variable outputs (version numbers, timestamps, etc.) unless you can control the output format
+- If you need to check versions, use commands that extract only the major version or a specific component
 
 The environment setup commands will be executed in the environment setup sub-phase after the planning phase.
 ```
@@ -416,37 +396,38 @@ def _extract_environment_setup_info(
 ```mermaid
 flowchart TD
     A[環境構築サブフェーズ開始] --> B[計画から環境構築コードを取得]
-    B --> C[ProgressCommentManagerに開始通知]
+    B --> C[ProgressCommentManager.set_active_phase environment_setup]
+    C --> D[Docker環境起動]
+    D --> E[プロジェクトクローン]
     
-    subgraph Execution[実行ループ 最大3回]
-        C --> D[Docker環境起動]
-        D --> E[プロジェクトクローン]
-        E --> F[環境構築コード実行]
-        F --> G{実行成功?}
-        G -->|No| H[エラー解析]
-        H --> I{リトライ回数 < 3?}
-        I -->|Yes| J[LLMに修正依頼]
-        J --> K[修正されたコマンド取得]
-        K --> F
-        I -->|No| L[環境構築失敗]
-    end
+    E --> F[セットアップコマンド実行]
+    F --> G{実行成功?}
+    G -->|No| H[エラー分類]
     
-    subgraph Verification[検証]
-        G -->|Yes| M[環境検証コマンド実行]
-        M --> N{検証成功?}
-        N -->|No| O{リトライ回数 < 3?}
-        O -->|Yes| J
-        O -->|No| P[検証失敗]
-    end
+    H --> I{エラー種類}
+    I -->|リトライ可能| J[適切なリトライ実行]
+    J --> F
     
-    N -->|Yes| Q[環境構築完了]
-    Q --> R[ProgressCommentManagerに完了通知]
-    R --> S[実行フェーズへ移行]
+    I -->|修正可能| K{LLM修正回数 < 3?}
+    K -->|Yes| L[LLMに修正依頼]
+    L --> M[修正されたコマンド取得]
+    M --> F
+    K -->|No| N[致命的エラー]
     
-    L --> T[ProgressCommentManagerにエラー通知]
-    T --> U[警告付きで実行フェーズへ移行]
+    I -->|致命的| N
     
-    P --> T
+    G -->|Yes| O[環境検証コマンド実行]
+    O --> P{expected_outputと完全一致?}
+    P -->|No| Q{LLM修正回数 < 3?}
+    Q -->|Yes| L
+    Q -->|No| N
+    
+    P -->|Yes| R[環境構築完了]
+    R --> S[ProgressCommentManager.mark_phase_completed environment_setup]
+    S --> T[実行フェーズへ移行]
+    
+    N --> U[エラー詳細をIssue/MRにコメント]
+    U --> V[警告付きで実行フェーズへ移行]
 ```
 
 ### 5.3 EnvironmentSetupManagerの実装
@@ -458,8 +439,9 @@ flowchart TD
 **責務**:
 - 環境構築サブフェーズ全体を管理
 - 環境構築コマンドの実行
-- 検証コマンドの実行
-- エラー時のLLMによるコマンド再生成
+- 検証コマンドの実行（expected_outputと完全一致確認）
+- エラー時のLLMによるコマンド再生成（最大3回）
+- エラー分類に応じた適切なリトライ処理
 - ProgressCommentManagerへの通知
 
 **依存関係**:
@@ -478,7 +460,7 @@ flowchart TD
 3. ExecutionEnvironmentManagerを保存
 4. ProgressCommentManagerを保存
 5. ロガーを初期化
-6. リトライカウンターを初期化（最大3回固定）
+6. LLM修正カウンターを初期化（最大3回固定）
 
 #### 5.3.3 環境構築サブフェーズ実行処理
 
@@ -488,22 +470,26 @@ flowchart TD
 - `environment_setup_info`: 計画フェーズで生成された環境構築情報
 
 **処理内容**:
-1. ProgressCommentManagerに環境構築開始を通知
+1. ProgressCommentManager.set_active_phase("environment_setup")を呼び出し
 2. 環境構築情報から環境名、セットアップコマンド、検証情報を取得
 3. Docker環境を起動（ExecutionEnvironmentManagerを使用）
 4. プロジェクトをクローン
 5. セットアップコマンドを順次実行
 6. 実行失敗時：
-   - リトライ回数をチェック（最大3回）
+   - エラーを分類（リトライ可能、修正可能、致命的）
+   - リトライ可能エラー：適切なリトライ処理を実行（ネットワークエラーは指数バックオフ、ロック競合は短時間待機など）
+   - 修正可能エラー：LLM修正回数をチェック（最大3回固定）
    - 3回未満の場合、LLMに修正を依頼してコマンドを再生成
+   - 致命的エラー：エラー詳細をIssue/MRにコメントし、警告付きで実行フェーズに移行
    - ステップ5に戻る
 7. 検証コマンドを実行
-8. 検証失敗時：
-   - リトライ回数をチェック（最大3回）
+8. 各検証コマンドの出力とexpected_outputを完全一致で比較
+9. 検証失敗時：
+   - LLM修正回数をチェック（最大3回固定）
    - 3回未満の場合、LLMに修正を依頼してコマンドを再生成
    - ステップ5に戻る
-9. 成功時：ProgressCommentManagerに完了を通知
-10. 失敗時：ProgressCommentManagerにエラーを通知し、警告付きで継続
+   - 3回に達した場合、エラー詳細をIssue/MRにコメントし、警告付きで実行フェーズに移行
+10. 成功時：ProgressCommentManager.mark_phase_completed("environment_setup")を呼び出し
 
 **戻り値**:
 ```
@@ -533,22 +519,50 @@ flowchart TD
 1. 検証情報から検証コマンドを取得
 2. 各検証コマンドを実行
 3. コマンドが正常に実行されたことを確認（exit code 0）
-4. すべての検証コマンドが成功した場合、成功を返す
+4. コマンドの出力（stdout）とexpected_outputを完全一致で比較
+5. すべての検証コマンドが成功し、expected_outputと完全一致した場合、成功を返す
+6. 1つでも失敗または不一致の場合、検証失敗を返す
 
-**注**: expected_outputとの照合は行わず、コマンドが正常に実行されたことのみを確認します。
+**注**: 完全一致確認を行います。空白や改行も含めて厳密に一致する必要があります。
 
-#### 5.3.6 LLMによるコマンド再生成処理
+#### 5.3.6 エラー分類処理
+
+**メソッド名**: `_classify_error`
+
+**処理内容**:
+1. エラーメッセージと終了コードを解析
+2. エラーを以下のカテゴリに分類：
+   - リトライ可能エラー（ネットワークエラー、一時的なサーバーエラー、ロック競合）
+   - 修正可能エラー（パッケージバージョン競合、パッケージ名の誤り、設定ファイル構文エラー）
+   - 致命的エラー（Docker環境の問題、システムリソース不足）
+3. エラー分類を返す
+
+#### 5.3.7 リトライ可能エラーの処理
+
+**メソッド名**: `_handle_retryable_error`
+
+**処理内容**:
+1. エラー種類に応じた適切なリトライ処理を実行：
+   - ネットワークエラー：指数バックオフでリトライ（5秒、10秒、20秒）
+   - 一時的なサーバーエラー：待機後リトライ（10秒待機）
+   - パッケージマネージャのロック競合：短時間待機後リトライ（3秒待機）
+2. リトライを実行
+
+#### 5.3.8 LLMによるコマンド再生成処理
 
 **メソッド名**: `_regenerate_setup_commands`
 
 **引数**:
 - `original_commands`: 元のセットアップコマンド
 - `error_info`: エラー情報
+- `regeneration_count`: 現在の再生成回数（最大3回まで）
 
 **処理内容**:
-1. エラー情報と元のコマンドを含むプロンプトを構築
-2. LLMに修正を依頼
-3. 修正されたコマンドをパースして返す
+1. 再生成回数が3回に達していないことを確認
+2. エラー情報と元のコマンドを含むプロンプトを構築
+3. LLMに修正を依頼
+4. 修正されたコマンドをパースして返す
+5. 再生成回数をインクリメント
 
 **プロンプト内容**:
 ```
@@ -559,80 +573,36 @@ Original setup commands:
 {commands that were executed}
 
 Please generate corrected setup commands to fix this error.
+
+Important: For verification commands, ensure that:
+- Commands produce deterministic, exact outputs
+- expected_output matches the actual command output exactly (complete string match)
+- Use simple commands with predictable outputs
+
 Return the response in JSON format:
 {
   "setup_commands": ["corrected command 1", "corrected command 2"],
   "verification": [
     {
       "command": "verification command 1",
-      "expected_output": "expected output"
+      "expected_output": "exact expected output"
     }
   ]
 }
 ```
 
-### 5.4 ProgressCommentManagerの拡張
+#### 5.3.9 エラーコメント投稿処理
 
-#### 5.4.1 環境構築フェーズの追加
-
-ProgressCommentManagerに環境構築フェーズのサポートを追加します。
-
-**追加する進捗フェーズ**:
-- `environment_setup_started`: 環境構築開始
-- `environment_setup_in_progress`: 環境構築実行中
-- `environment_setup_completed`: 環境構築完了
-- `environment_setup_failed`: 環境構築失敗
-
-#### 5.4.2 環境構築開始通知メソッド
-
-**メソッド名**: `notify_environment_setup_started`
+**メソッド名**: `_post_error_comment`
 
 **処理内容**:
-1. 環境構築開始のメッセージを作成
-2. Issue/MRにコメントを投稿または更新
-3. 進捗状態を`environment_setup_started`に更新
+1. エラー詳細を整形
+2. 試行した対応（リトライ回数、LLM再生成回数）を含める
+3. Issue/MRにコメントを投稿
 
-**コメント内容**:
+**コメント形式**:
 ```markdown
-## Environment Setup Phase
-
-**Status**: Started
-**Environment**: {environment_name}
-
-Setting up the development environment...
-```
-
-#### 5.4.3 環境構築完了通知メソッド
-
-**メソッド名**: `notify_environment_setup_completed`
-
-**処理内容**:
-1. 環境構築完了のメッセージを作成
-2. Issue/MRのコメントを更新
-3. 進捗状態を`environment_setup_completed`に更新
-
-**コメント内容**:
-```markdown
-## Environment Setup Phase
-
-**Status**: Completed ✓
-**Environment**: {environment_name}
-
-Environment setup successfully completed.
-```
-
-#### 5.4.4 環境構築エラー通知メソッド
-
-**メソッド名**: `notify_environment_setup_failed`
-
-**処理内容**:
-1. エラー詳細を含むメッセージを作成
-2. Issue/MRのコメントを更新
-3. 進捗状態を`environment_setup_failed`に更新
-
-**コメント内容**:
-```markdown
-## Environment Setup Phase
+## Environment Setup Failed
 
 **Status**: Failed with warnings ⚠
 **Environment**: {environment_name}
@@ -645,11 +615,78 @@ Environment setup encountered errors. Proceeding to execution phase with limitat
 ```
 
 **Attempted Fixes**:
-- Retry count: {retry_count}/3
-- LLM regeneration attempts: {regeneration_count}
+- Network retry attempts: {network_retry_count}
+- LLM regeneration attempts: {llm_regeneration_count}/3
+- Error classification: {error_classification}
 
-The execution phase will proceed, but some features may not be available.
+The execution phase will proceed, but some features may not be available due to incomplete environment setup.
 ```
+
+### 5.4 ProgressCommentManagerの拡張
+
+#### 5.4.1 フェーズ定義の追加
+
+ProgressCommentManagerのフェーズ定義に環境構築フェーズを追加します。
+
+**修正箇所**: `PHASE_ORDER`定数
+
+**変更前**:
+```python
+PHASE_ORDER = [
+    "pre_planning",
+    "planning",
+    "execution",
+    "reflection",
+    "verification",
+    "complete"
+]
+```
+
+**変更後**:
+```python
+PHASE_ORDER = [
+    "pre_planning",
+    "planning",
+    "environment_setup",
+    "execution",
+    "reflection",
+    "verification",
+    "complete"
+]
+```
+
+**修正箇所**: `PHASE_DISPLAY_NAMES`定数
+
+**変更前**:
+```python
+PHASE_DISPLAY_NAMES = {
+    "pre_planning": "Pre Planning",
+    "planning": "Planning",
+    "execution": "Execution",
+    "reflection": "Reflection",
+    "verification": "Verification",
+    "complete": "Complete"
+}
+```
+
+**変更後**:
+```python
+PHASE_DISPLAY_NAMES = {
+    "pre_planning": "Pre Planning",
+    "planning": "Planning",
+    "environment_setup": "Environment Setup",
+    "execution": "Execution",
+    "reflection": "Reflection",
+    "verification": "Verification",
+    "complete": "Complete"
+}
+```
+
+**使用方法**:
+- 環境構築サブフェーズ開始時：`progress_manager.set_active_phase("environment_setup")`
+- 環境構築サブフェーズ完了時：`progress_manager.mark_phase_completed("environment_setup")`
+
+**注**: 新規メソッドの追加は不要です。既存のset_active_phaseとmark_phase_completedメソッドを使用します。
 
 ---
 
@@ -673,7 +710,7 @@ The execution phase will proceed, but some features may not be available.
 
 環境構築が失敗した場合：
 
-1. ProgressCommentManagerを使用してIssue/MRにエラー詳細をコメント
+1. エラー詳細を含むコメントをIssue/MRに投稿
 2. 警告付きで実行フェーズに移行
 3. 実行フェーズで代替手段を検討
 
@@ -734,16 +771,69 @@ Generate the following in your planning JSON response:
     "verification": [
       {
         "command": "command to verify installation",
-        "expected_output": "expected output pattern or success indicator"
+        "expected_output": "exact expected output for complete match"
       },
       {
         "command": "command to verify key packages",
-        "expected_output": "expected output pattern"
+        "expected_output": "exact expected output for complete match"
       }
     ]
   }
 }
 ```
+
+### Verification Command Requirements
+
+**IMPORTANT**: Verification commands must produce deterministic, exact outputs that can be verified with complete string matching.
+
+Guidelines for generating verification commands:
+1. **Use simple, predictable commands**: Commands should return the same output every time they run
+2. **Exact match requirement**: The `expected_output` must match the actual command output exactly (character-by-character match)
+3. **Avoid variable outputs**: Do not use commands with timestamps, random values, or variable version numbers
+4. **Control output format**: Use commands that allow you to control the exact output format
+
+**Good verification command examples**:
+
+For Python:
+```json
+{
+  "command": "python -c 'print(\"OK\")'",
+  "expected_output": "OK"
+}
+{
+  "command": "python -c 'import sys; print(sys.version_info.major)'",
+  "expected_output": "3"
+}
+{
+  "command": "python -c 'import requests; print(\"SUCCESS\")'",
+  "expected_output": "SUCCESS"
+}
+```
+
+For Node.js:
+```json
+{
+  "command": "node -e 'console.log(\"OK\")'",
+  "expected_output": "OK"
+}
+{
+  "command": "node -e 'require(\"express\"); console.log(\"SUCCESS\")'",
+  "expected_output": "SUCCESS"
+}
+```
+
+For Go:
+```json
+{
+  "command": "go version | grep -q 'go version' && echo 'OK'",
+  "expected_output": "OK"
+}
+```
+
+**Bad verification command examples** (DO NOT USE):
+- `python --version` (output varies: "Python 3.11.5" vs "Python 3.11.6")
+- `npm list` (output includes variable package tree)
+- `date` (always different output)
 
 ### Command Generation Guidelines
 
@@ -754,9 +844,10 @@ Generate the following in your planning JSON response:
    - Perform initialization steps
 
 2. **Verification commands**: Generate commands that:
-   - Verify the language runtime version
+   - Verify the language runtime is available
    - Verify key packages are installed
-   - Perform simple import/require tests for critical dependencies
+   - Use deterministic output for exact matching
+   - Print simple success indicators like "OK" or "SUCCESS"
 
 3. **Error handling**: Commands should be designed to:
    - Fail fast if a critical dependency cannot be installed
@@ -774,12 +865,12 @@ Generate the following in your planning JSON response:
   ],
   "verification": [
     {
-      "command": "python --version",
-      "expected_output": "Python 3.11"
+      "command": "python -c 'print(\"OK\")'",
+      "expected_output": "OK"
     },
     {
-      "command": "python -c \"import requests; print('OK')\"",
-      "expected_output": "OK"
+      "command": "python -c 'import requests; print(\"SUCCESS\")'",
+      "expected_output": "SUCCESS"
     }
   ]
 }
@@ -793,12 +884,12 @@ Generate the following in your planning JSON response:
   ],
   "verification": [
     {
-      "command": "node --version",
-      "expected_output": "v18"
+      "command": "node -e 'console.log(\"OK\")'",
+      "expected_output": "OK"
     },
     {
-      "command": "npm list --depth=0",
-      "expected_output": "installed packages"
+      "command": "node -e 'require(\"express\"); console.log(\"SUCCESS\")'",
+      "expected_output": "SUCCESS"
     }
   ]
 }
@@ -813,12 +904,12 @@ Generate the following in your planning JSON response:
   ],
   "verification": [
     {
-      "command": "conda list",
-      "expected_output": "package list"
+      "command": "python -c 'print(\"OK\")'",
+      "expected_output": "OK"
     },
     {
-      "command": "python -c \"import numpy; print('OK')\"",
-      "expected_output": "OK"
+      "command": "python -c 'import numpy; print(\"SUCCESS\")'",
+      "expected_output": "SUCCESS"
     }
   ]
 }
@@ -832,12 +923,8 @@ Generate the following in your planning JSON response:
   ],
   "verification": [
     {
-      "command": "mvn --version",
-      "expected_output": "Apache Maven"
-    },
-    {
-      "command": "mvn dependency:tree",
-      "expected_output": "dependency tree"
+      "command": "mvn --version | grep -q 'Apache Maven' && echo 'OK'",
+      "expected_output": "OK"
     }
   ]
 }
@@ -851,12 +938,8 @@ Generate the following in your planning JSON response:
   ],
   "verification": [
     {
-      "command": "go version",
-      "expected_output": "go version"
-    },
-    {
-      "command": "go list -m all",
-      "expected_output": "module list"
+      "command": "go version | grep -q 'go version' && echo 'OK'",
+      "expected_output": "OK"
     }
   ]
 }
@@ -866,7 +949,7 @@ Generate the following in your planning JSON response:
 
 - The environment setup commands will be executed in the environment setup sub-phase immediately after planning
 - If setup fails, the LLM will be asked to regenerate corrected commands (up to 3 attempts)
-- Verification commands should only check that commands executed successfully, not validate specific output patterns
+- Verification commands will check for exact output matches - ensure your expected_output values are precise
 - All prompts and responses must be in English for consistency with the system
 ```
 
@@ -900,34 +983,57 @@ Please consider alternative approaches if dependencies are missing.
 
 #### 8.1.1 リトライ可能エラー
 
+各エラーに対して適切なリトライ処理を実行します。
+
 | エラー種類 | 例 | 対応 |
 |-----------|---|------|
-| ネットワークエラー | タイムアウト、DNS解決失敗 | リトライ（最大3回） |
-| 一時的なサーバーエラー | HTTP 503 | 待機後リトライ |
-| パッケージマネージャのロック競合 | ロックファイル取得失敗 | 短時間待機後リトライ |
+| ネットワークエラー | タイムアウト、DNS解決失敗 | 指数バックオフでリトライ（5秒、10秒、20秒） |
+| 一時的なサーバーエラー | HTTP 503 | 10秒待機後リトライ |
+| パッケージマネージャのロック競合 | ロックファイル取得失敗 | 3秒待機後リトライ |
 
 #### 8.1.2 修正可能エラー
 
+LLMに修正依頼して再生成します（最大3回固定）。
+
 | エラー種類 | 例 | 対応 |
 |-----------|---|------|
-| パッケージバージョン競合 | 依存関係の不整合 | LLMに修正依頼し、修正されたコマンドを再実行 |
-| パッケージ名の誤り | パッケージが見つからない | LLMに修正依頼し、修正されたコマンドを再実行 |
-| 設定ファイルの構文エラー | YAMLパースエラー | LLMに修正依頼し、修正されたコマンドを再実行 |
+| パッケージバージョン競合 | 依存関係の不整合 | LLMに修正依頼し、修正されたコマンドを再実行（最大3回） |
+| パッケージ名の誤り | パッケージが見つからない | LLMに修正依頼し、修正されたコマンドを再実行（最大3回） |
+| 設定ファイルの構文エラー | YAMLパースエラー | LLMに修正依頼し、修正されたコマンドを再実行（最大3回） |
 
 #### 8.1.3 致命的エラー
 
+エラー詳細をIssue/MRにコメントし、警告付きで実行フェーズに移行します。
+
 | エラー種類 | 例 | 対応 |
 |-----------|---|------|
-| Docker環境の問題 | コンテナ起動失敗 | エラー通知、警告付きで継続 |
-| システムリソース不足 | メモリ不足、ディスク容量不足 | エラー通知、警告付きで継続 |
+| Docker環境の問題 | コンテナ起動失敗 | エラーコメント投稿、警告付きで実行フェーズへ |
+| システムリソース不足 | メモリ不足、ディスク容量不足 | エラーコメント投稿、警告付きで実行フェーズへ |
 
 ### 8.2 リトライ戦略
 
-#### 8.2.1 固定リトライ回数
+#### 8.2.1 リトライ可能エラーの処理
 
-すべてのエラーに対して、リトライ回数は**3回固定**とします。設定による変更は不要です。
+エラー種類に応じた適切なリトライ処理を実行します：
 
-**処理フロー**:
+**ネットワークエラー**:
+- 指数バックオフでリトライ
+- 1回目: 5秒待機
+- 2回目: 10秒待機
+- 3回目: 20秒待機
+
+**一時的なサーバーエラー**:
+- 10秒待機後リトライ
+- 最大3回まで
+
+**パッケージマネージャのロック競合**:
+- 3秒待機後リトライ
+- 最大5回まで
+
+#### 8.2.2 修正可能エラーのLLM再生成
+
+修正可能エラーの場合、LLMに修正を依頼します（最大3回固定）：
+
 1. 初回実行
 2. 失敗時、LLMに修正依頼（1回目）
 3. 修正されたコマンドで再実行
@@ -935,7 +1041,14 @@ Please consider alternative approaches if dependencies are missing.
 5. 修正されたコマンドで再実行
 6. 失敗時、LLMに修正依頼（3回目）
 7. 修正されたコマンドで再実行
-8. 失敗時、エラーとして処理終了
+8. 失敗時、致命的エラーとして処理
+
+#### 8.2.3 致命的エラーの処理
+
+致命的エラーの場合：
+1. エラー詳細を整形
+2. 試行した対応を含めてIssue/MRにコメント投稿
+3. 警告付きで実行フェーズに移行
 
 ---
 
@@ -958,7 +1071,7 @@ Please consider alternative approaches if dependencies are missing.
 
 処理内容:
 1. プロジェクトのルートディレクトリからファイル一覧を取得
-2. 環境構築関連ファイルパターンとマッチング
+2. 環境構築関連ファイルパターンとマッチング（requirements.txt、package.json、pom.xml、go.mod、condaenv.yaml等）
 3. 検出されたファイルのリストを返す
 
 **analyze_environment_files**
@@ -982,6 +1095,7 @@ Please consider alternative approaches if dependencies are missing.
 
 **責務**:
 - 環境構築コマンドが正常に実行されたことを検証
+- expected_outputとの完全一致確認
 
 **依存関係**:
 - ExecutionEnvironmentManager（コマンド実行用）
@@ -994,10 +1108,11 @@ Please consider alternative approaches if dependencies are missing.
 1. 検証情報から検証コマンドを取得
 2. 各コマンドを順次実行
 3. exit codeが0であることを確認
-4. すべてのコマンドが成功した場合、検証成功を返す
-5. 1つでも失敗した場合、検証失敗を返す
+4. コマンドの出力（stdout）とexpected_outputを完全一致で比較（文字列の完全一致）
+5. すべてのコマンドが成功し、expected_outputと完全一致した場合、検証成功を返す
+6. 1つでも失敗または不一致の場合、検証失敗を返す
 
-**注**: expected_outputとの照合は行いません。コマンドが正常終了したかのみを確認します。
+**注**: 完全一致確認を行います。空白や改行も含めて厳密に一致する必要があります。
 
 ### 9.3 既存クラスの修正詳細
 
@@ -1043,18 +1158,13 @@ Please consider alternative approaches if dependencies are missing.
 
 #### 9.3.3 ProgressCommentManager
 
-**追加メソッド**: 
-- `notify_environment_setup_started`（前述のセクション5.4.2を参照）
-- `notify_environment_setup_completed`（前述のセクション5.4.3を参照）
-- `notify_environment_setup_failed`（前述のセクション5.4.4を参照）
+**修正箇所**: `PHASE_ORDER`定数と`PHASE_DISPLAY_NAMES`定数
 
-**追加定数**:
-```python
-PHASE_ENVIRONMENT_SETUP_STARTED = "environment_setup_started"
-PHASE_ENVIRONMENT_SETUP_IN_PROGRESS = "environment_setup_in_progress"
-PHASE_ENVIRONMENT_SETUP_COMPLETED = "environment_setup_completed"
-PHASE_ENVIRONMENT_SETUP_FAILED = "environment_setup_failed"
-```
+前述のセクション5.4.1を参照
+
+**注**: 新規メソッドの追加は不要です。既存の以下のメソッドを使用します：
+- `set_active_phase("environment_setup")`: 環境構築フェーズ開始時
+- `mark_phase_completed("environment_setup")`: 環境構築フェーズ完了時
 
 ---
 
@@ -1068,10 +1178,10 @@ PHASE_ENVIRONMENT_SETUP_FAILED = "environment_setup_failed"
 | 高 | PrePlanningManager拡張 | 環境情報収集機能の追加 |
 | 高 | PlanningCoordinator拡張 | 環境選択とコマンド生成の核心 |
 | 高 | システムプロンプト拡張 | LLMへの指示を明確化 |
+| 高 | ProgressCommentManager拡張 | フェーズ定義の追加 |
 | 高 | EnvironmentSetupManager実装 | 環境構築サブフェーズの実装 |
-| 高 | ProgressCommentManager拡張 | 進捗通知機能の追加 |
-| 中 | EnvironmentVerifier実装 | 検証機能 |
-| 中 | エラーハンドリングとリトライ | 安定性向上 |
+| 中 | EnvironmentVerifier実装 | 検証機能（expected_output完全一致） |
+| 中 | エラー分類とリトライ処理 | 安定性向上 |
 | 中 | LLMによるコマンド再生成 | エラー修正の自動化 |
 
 ---
@@ -1107,8 +1217,9 @@ PHASE_ENVIRONMENT_SETUP_FAILED = "environment_setup_failed"
 | 環境構築 | プロジェクトの実行に必要な依存関係やツールをインストールするプロセス |
 | 環境構築ファイル | requirements.txt、package.json等、依存関係を定義するファイル |
 | 環境構築コード | 環境構築を実行するためのシェルコマンドやスクリプト |
-| 環境検証 | 環境構築コマンドが正常に実行されたことを確認するプロセス |
-| リトライ | エラー発生時にコマンドを再実行すること（最大3回固定） |
+| 環境検証 | 環境構築コマンドが正常に実行され、expected_outputと完全一致することを確認するプロセス |
+| リトライ | エラー発生時にコマンドを再実行すること（エラー種類に応じて適切な処理） |
+| LLM修正 | 修正可能エラー時にLLMに修正を依頼してコマンドを再生成すること（最大3回固定） |
 
 ---
 
@@ -1118,3 +1229,4 @@ PHASE_ENVIRONMENT_SETUP_FAILED = "environment_setup_failed"
 |-----|-----------|---------|
 | 2025-12-06 | 1.0 | 初版作成 |
 | 2025-12-06 | 2.0 | レビューフィードバックに基づく全面改訂：システムプロンプト英語化、検証方法簡素化、設定削除、クラス設計詳細化、ProgressCommentManager拡張明示 |
+| 2025-12-06 | 3.0 | 第2次レビューフィードバック対応：収集対象ファイル章削除、Docker起動とクローンを実行ループ外に移動、expected_output完全一致検証、ProgressCommentManager修正方法明確化、エラー分類と処理詳細化、検証コマンド要件明確化 |
