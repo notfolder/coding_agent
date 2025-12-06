@@ -577,8 +577,8 @@ class IssueToMRConverter:
             # 8. 元Issueに作成報告
             self._notify_source_issue(mr_number, branch_name, mr_url, base_branch)
 
-            # 9. 元Issueのラベルを更新
-            self._update_source_issue_labels()
+            # Note: 元Issueのラベル更新はタスク完了時にPlanningCoordinatorの
+            # 完了フックで実行されるため、ここでは実行しない
 
             self.logger.info("Issue #%s をマージリクエスト/プルリクエスト #%s に変換しました", self._get_issue_number(), mr_number)
 

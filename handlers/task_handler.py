@@ -334,6 +334,66 @@ class TaskHandler:
             user=task.user,
         )
         
+        # 停止時のフックを登録（停止通知を自動化）
+        def register_stop_hook_for_context_storage() -> None:
+            """Context Storageモード用の停止フックを登録."""
+            if stop_manager is None:
+                return
+            
+            def post_stop_notification_hook() -> None:
+                """停止通知を投稿するフック関数."""
+                try:
+                    # Context Storageモードではllm_call_countを渡す
+                    # countはクロージャで参照可能だが、停止時点の値を使う
+                    # 注: この設計では正確なカウントが取れないため、将来的に改善が必要
+                    stop_manager.post_stop_notification(task, llm_call_count=None)
+                    self.logger.info("停止通知を投稿しました（Context Storageモード）")
+                except Exception as e:
+                    self.logger.error("停止通知の投稿に失敗しました: %s", e, exc_info=True)
+            
+            context_manager.register_stop_hook("post_stop_notification", post_stop_notification_hook)
+        
+        register_stop_hook_for_context_storage()
+        
+        # 完了時のフックを登録（ラベル更新を自動化）
+        def register_completion_hook_for_context_storage() -> None:
+            """Context Storageモード用の完了フックを登録."""
+            def update_labels_on_completion() -> None:
+                """完了時にラベルを更新するフック関数."""
+                try:
+                    # プラットフォーム判定
+                    task_type = task.get_task_key().to_dict().get("type", "")
+                    if task_type.startswith("github"):
+                        label_config = task_config.get("github", {})
+                    elif task_type.startswith("gitlab"):
+                        label_config = task_config.get("gitlab", {})
+                    else:
+                        self.logger.warning("不明なタスクタイプ、ラベル更新をスキップ: %s", task_type)
+                        return
+                    
+                    processing_label = label_config.get("processing_label", "coding agent processing")
+                    done_label = label_config.get("done_label", "coding agent done")
+                    
+                    # ラベル更新
+                    try:
+                        task.remove_label(processing_label)
+                        self.logger.info("処理中ラベルを削除しました: %s", processing_label)
+                    except Exception as e:
+                        self.logger.warning("処理中ラベルの削除に失敗: %s", e)
+                    
+                    try:
+                        task.add_label(done_label)
+                        self.logger.info("完了ラベルを追加しました: %s", done_label)
+                    except Exception as e:
+                        self.logger.warning("完了ラベルの追加に失敗: %s", e)
+                        
+                except Exception as e:
+                    self.logger.error("ラベル更新中にエラー発生: %s", e, exc_info=True)
+            
+            context_manager.register_completion_hook("update_labels", update_labels_on_completion)
+        
+        register_completion_hook_for_context_storage()
+        
         try:
             # Get stores
             message_store = context_manager.get_message_store()
@@ -410,9 +470,8 @@ class TaskHandler:
                 if stop_manager.should_check_now() and not stop_manager.check_assignee_status(task):
                     self.logger.info("アサイン解除を検出、タスクを停止します")
                     # 最終要約を作成してコンテキストをcompletedに移動
+                    # 停止通知はフック経由で自動実行される
                     context_manager.stop()
-                    # コメントとラベル更新
-                    stop_manager.post_stop_notification(task, llm_call_count=count)
                     return  # Exit without calling finish()
                 
                 # Check for new comments and add to context
