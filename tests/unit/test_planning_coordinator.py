@@ -60,12 +60,33 @@ class MockContextManager:
         
         self.planning_store = PlanningHistoryStore(task_uuid, self.planning_dir)
         self.message_store = MessageStore(temp_path, config)
+        self.llm_client = None
         
     def get_planning_store(self):
         return self.planning_store
         
     def get_message_store(self):
         return self.message_store
+    
+    def set_llm_client(self, llm_client):
+        """Set LLM client for token estimation."""
+        self.llm_client = llm_client
+    
+    def register_completion_hook(self, name, hook):
+        """Register completion hook (mock implementation)."""
+        pass
+    
+    def register_stop_hook(self, name, hook):
+        """Register stop hook (mock implementation)."""
+        pass
+    
+    def run_completion_hooks(self):
+        """Run completion hooks (mock implementation)."""
+        pass
+    
+    def run_stop_hooks(self):
+        """Run stop hooks (mock implementation)."""
+        pass
 
 
 class MockLLMClient:
@@ -574,17 +595,22 @@ class TestVerificationPhase(unittest.TestCase):
             "comment": "All implementations are complete."
         }
 
-        # task.commentがMockになっていることを確認
-        coordinator.task.comment = MagicMock(return_value={"id": 456})
+        # progress_managerをMock
+        coordinator.progress_manager.add_history_entry = MagicMock()
+        coordinator.progress_manager.set_verification_result = MagicMock()
         
         coordinator._post_verification_result(verification_result)
         
-        # commentが呼ばれたことを確認
-        coordinator.task.comment.assert_called_once()
-        call_args = coordinator.task.comment.call_args[0][0]
-        assert "✅" in call_args
-        assert "Passed" in call_args
-        assert "95%" in call_args
+        # progress_managerが呼ばれたことを確認
+        coordinator.progress_manager.add_history_entry.assert_called_once()
+        coordinator.progress_manager.set_verification_result.assert_called_once_with(verification_result)
+        
+        # add_history_entryの引数を検証
+        call_kwargs = coordinator.progress_manager.add_history_entry.call_args[1]
+        assert call_kwargs["entry_type"] == "verification"
+        assert "✅" in call_kwargs["title"]
+        assert "Passed" in call_kwargs["details"]
+        assert "95%" in call_kwargs["details"]
 
     def test_post_verification_result_failed(self) -> None:
         """検証失敗時の結果投稿テスト."""
@@ -609,17 +635,25 @@ class TestVerificationPhase(unittest.TestCase):
             "comment": "Issues found in implementation."
         }
 
-        coordinator.task.comment = MagicMock(return_value={"id": 456})
+        # progress_managerをMock
+        coordinator.progress_manager.add_history_entry = MagicMock()
+        coordinator.progress_manager.set_verification_result = MagicMock()
         
         coordinator._post_verification_result(verification_result)
         
-        coordinator.task.comment.assert_called_once()
-        call_args = coordinator.task.comment.call_args[0][0]
-        assert "⚠️" in call_args
-        assert "Issues Found" in call_args
-        assert "Missing implementation" in call_args
-        assert "file.py:10" in call_args
-        assert "1 actions" in call_args
+        # progress_managerが呼ばれたことを確認
+        coordinator.progress_manager.add_history_entry.assert_called_once()
+        coordinator.progress_manager.set_verification_result.assert_called_once_with(verification_result)
+        
+        # add_history_entryの引数を検証
+        call_kwargs = coordinator.progress_manager.add_history_entry.call_args[1]
+        assert call_kwargs["entry_type"] == "verification"
+        assert "⚠️" in call_kwargs["title"]
+        details = call_kwargs["details"]
+        assert "Issues Found" in details
+        assert "Missing implementation" in details
+        assert "file.py:10" in details
+        assert "1 actions" in details
 
     def test_update_checklist_for_additional_work(self) -> None:
         """追加作業用チェックリスト更新のテスト."""
@@ -646,27 +680,30 @@ class TestVerificationPhase(unittest.TestCase):
             {"task_id": "verification_fix_1", "purpose": "Fix issue 1"},
         ]
 
-        coordinator.checklist_comment_id = 123
-        coordinator.task.update_comment = MagicMock()
-
-        coordinator._update_checklist_for_additional_work(verification_result, additional_actions)
-
-        coordinator.task.update_comment.assert_called_once()
-        call_args = coordinator.task.update_comment.call_args[0]
-        assert call_args[0] == 123  # comment_id
-        checklist_content = call_args[1]
+        # progress_managerをMock
+        coordinator.progress_manager.update_checklist = MagicMock()
         
-        # 元の計画が完了済みとして表示されていることを確認
-        assert "Original Plan (Completed)" in checklist_content
-        assert "[x]" in checklist_content
-        assert "task_1" in checklist_content
+        coordinator._update_checklist_for_additional_work(
+            verification_result,
+            additional_actions,
+        )
+
+        # progress_manager.update_checklistが呼ばれたことを確認
+        coordinator.progress_manager.update_checklist.assert_called_once()
+        call_args = coordinator.progress_manager.update_checklist.call_args[0][0]
         
-        # 追加作業が未完了として表示されていることを確認
-        assert "Additional Work (From Verification)" in checklist_content
-        assert "[ ]" in checklist_content
-        assert "verification_fix_1" in checklist_content
+        # チェックリスト項目を確認
+        assert len(call_args) == 3  # 2 original + 1 verification
+        assert call_args[0]["id"] == "task_1"
+        assert call_args[0]["completed"] is True
+        assert call_args[1]["id"] == "task_2"
+        assert call_args[1]["completed"] is True
+        assert call_args[2]["id"] == "verification_fix_1"
+        assert call_args[2]["completed"] is False
+        assert "Verification" in call_args[2]["description"]
 
 
+@unittest.skip("LLM call comments feature is no longer implemented in PlanningCoordinator")
 class TestLLMCallComments(unittest.TestCase):
     """LLM呼び出しコメント機能のテスト."""
 

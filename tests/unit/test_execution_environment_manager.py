@@ -136,13 +136,34 @@ class TestExecutionEnvironmentManager(unittest.TestCase):
     @patch.dict("os.environ", {"COMMAND_EXECUTOR_ENABLED": "true"})
     def test_is_enabled_from_env_true(self) -> None:
         """環境変数からの有効判定テスト."""
-        manager = ExecutionEnvironmentManager({})
+        config = {"command_executor": {"enabled": False}}
+        
+        # 環境変数をconfigに反映（main.pyの_override_feature_flags相当）
+        import os
+        env_enabled = os.environ.get("COMMAND_EXECUTOR_ENABLED", "").lower()
+        if env_enabled in ("true", "false"):
+            if "command_executor" not in config:
+                config["command_executor"] = {}
+            config["command_executor"]["enabled"] = env_enabled == "true"
+        
+        manager = ExecutionEnvironmentManager(config)
         assert manager.is_enabled() is True
 
     @patch.dict("os.environ", {"COMMAND_EXECUTOR_ENABLED": "false"})
     def test_is_enabled_from_env_false(self) -> None:
         """環境変数からの無効判定テスト."""
-        assert self.manager.is_enabled() is False
+        config = {"command_executor": {"enabled": True}}
+        
+        # 環境変数をconfigに反映（main.pyの_override_feature_flags相当）
+        import os
+        env_enabled = os.environ.get("COMMAND_EXECUTOR_ENABLED", "").lower()
+        if env_enabled in ("true", "false"):
+            if "command_executor" not in config:
+                config["command_executor"] = {}
+            config["command_executor"]["enabled"] = env_enabled == "true"
+        
+        manager = ExecutionEnvironmentManager(config)
+        assert manager.is_enabled() is False
 
     def test_get_container_name(self) -> None:
         """コンテナ名生成テスト."""
@@ -403,7 +424,18 @@ class TestGetCloneUrl(unittest.TestCase):
         mock_task.source_branch = "feature-branch"
         
         with patch.dict("os.environ", {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_token123"}):
-            url, branch = self.manager._get_clone_url(mock_task)
+            # 環境変数をconfigに反映（main.pyの_override_github_config相当）
+            import os
+            config = {"command_executor": {"enabled": True}}
+            token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
+            if token:
+                if "github" not in config:
+                    config["github"] = {}
+                config["github"]["personal_access_token"] = token
+            
+            # 新しいconfigでマネージャーを作成
+            manager = ExecutionEnvironmentManager(config)
+            url, branch = manager._get_clone_url(mock_task)
         
         assert "x-access-token:ghp_token123@" in url
         assert "github.com/testuser/testrepo.git" in url
@@ -425,7 +457,23 @@ class TestGetCloneUrl(unittest.TestCase):
             "GITLAB_PERSONAL_ACCESS_TOKEN": "",
             "GITLAB_API_URL": "https://gitlab.example.com/api/v4",
         }):
-            url, branch = self.manager._get_clone_url(mock_task)
+            # 環境変数をconfigに反映（main.pyの_override_gitlab_config相当）
+            import os
+            config = {"command_executor": {"enabled": True}}
+            
+            token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN")
+            api_url = os.environ.get("GITLAB_API_URL")
+            
+            if "gitlab" not in config:
+                config["gitlab"] = {}
+            if token:
+                config["gitlab"]["personal_access_token"] = token
+            if api_url:
+                config["gitlab"]["api_url"] = api_url
+            
+            # 新しいconfigでマネージャーを作成
+            manager = ExecutionEnvironmentManager(config)
+            url, branch = manager._get_clone_url(mock_task)
         
         assert "gitlab.example.com" in url
         assert "group/project.git" in url

@@ -87,6 +87,8 @@ class TestGitHubWorkflowIntegration(unittest.TestCase):
                 "bot_label": "coding agent",
                 "processing_label": "coding agent processing",
                 "done_label": "coding agent done",
+                "personal_access_token": "test-github-token",
+                "api_url": "https://api.github.com",
             },
             "max_llm_process_num": 20,
         }
@@ -304,7 +306,9 @@ class TestGitLabWorkflowIntegration(unittest.TestCase):
                 "bot_label": "coding agent",
                 "processing_label": "coding agent processing",
                 "done_label": "coding agent done",
-                "assignee": "testuser",
+                "bot_name": "testuser",  # Mockデータのassigneeと一致させる
+                "personal_access_token": "test-gitlab-token",
+                "api_url": "https://gitlab.com/api/v4",
             },
             "max_llm_process_num": 20,
         }

@@ -261,6 +261,10 @@ class TestTaskDBManagerWithMock:
         mock_create_engine.return_value = mock_engine
         
         with patch.dict("os.environ", {"DATABASE_URL": "postgresql://user:pass@host/db"}):
+            # 環境変数をconfigに反映
+            import os
+            if "DATABASE_URL" in os.environ:
+                mock_config["database"] = {"url": os.environ["DATABASE_URL"]}
             manager = TaskDBManager(mock_config)
             
         # DATABASE_URLが使用されていることを確認
@@ -286,7 +290,18 @@ class TestTaskDBManagerWithMock:
         env_vars_with_no_url = {**env_vars, "DATABASE_URL": ""}
         
         with patch.dict("os.environ", env_vars_with_no_url, clear=False):
-            manager = TaskDBManager({})  # 空のconfigでも環境変数が使われる
+            # 環境変数をconfigに反映
+            import os
+            config_for_test = {
+                "database": {
+                    "host": os.environ.get("DATABASE_HOST", "localhost"),
+                    "port": int(os.environ.get("DATABASE_PORT", "5432")),
+                    "name": os.environ.get("DATABASE_NAME", "tasks"),
+                    "user": os.environ.get("DATABASE_USER", "postgres"),
+                    "password": os.environ.get("DATABASE_PASSWORD", "postgres"),
+                }
+            }
+            manager = TaskDBManager(config_for_test)
             
         # 環境変数から構築されたURLが使用されていることを確認
         call_args = mock_create_engine.call_args
