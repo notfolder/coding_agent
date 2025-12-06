@@ -285,8 +285,17 @@ class TaskContextManager:
                     "タスク統計を更新しました: uuid=%s, llm=%d, tool=%d, tokens=%d, compressions=%d",
                     self.uuid, llm_calls, tool_calls, tokens, compressions,
                 )
+            else:
+                logger.warning(
+                    "DBTaskが見つからないため統計を更新できませんでした: uuid=%s, llm=%d, tool=%d, tokens=%d, compressions=%d",
+                    self.uuid, llm_calls, tool_calls, tokens, compressions,
+                )
         except Exception as e:
-            logger.error("タスク統計の更新に失敗しました: %s", e, exc_info=True)
+            logger.error(
+                "タスク統計の更新に失敗しました: uuid=%s, llm=%d, tool=%d, tokens=%d, compressions=%d, error=%s",
+                self.uuid, llm_calls, tool_calls, tokens, compressions, e,
+                exc_info=True,
+            )
 
     def register_completion_hook(self, hook_name: str, hook_func: Any) -> None:
         """完了時に実行するフック関数を登録.
@@ -572,4 +581,19 @@ class TaskContextManager:
                 number,
             )
         except Exception as e:
-            logger.error("タスクのデータベース登録に失敗しました: %s", e, exc_info=True)
+            logger.error(
+                "タスクのデータベース登録に失敗しました: uuid=%s, error=%s", 
+                self.uuid, 
+                e, 
+                exc_info=True,
+            )
+            logger.error(
+                "データベース設定を確認してください: host=%s, port=%s, name=%s, user=%s",
+                self.config.get("database", {}).get("host"),
+                self.config.get("database", {}).get("port"),
+                self.config.get("database", {}).get("name"),
+                self.config.get("database", {}).get("user"),
+            )
+            # DB登録失敗時もタスク処理は継続（統計記録はできないが処理は可能）
+            # 警告: この場合、統計情報はDBに記録されません
+            logger.warning("統計情報はデータベースに記録されません")

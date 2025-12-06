@@ -31,6 +31,9 @@ class OllamaClient(LLMClient):
             context_dir: コンテキストディレクトリパス(必須)
 
         """
+        # 基底クラスの初期化（統計フック初期化）
+        super().__init__()
+        
         self.endpoint = config.get("endpoint", "http://localhost:11434")
         self.model = config["model"]
         self.message_store = message_store
@@ -171,6 +174,11 @@ class OllamaClient(LLMClient):
             request_tokens = estimate_messages_tokens(request_data.get("messages", []))
             response_tokens = len(reply) if reply else 0
             total_tokens = request_tokens + response_tokens
+            
+            # 統計記録フックを呼び出し
+            self._invoke_statistics_hook(total_tokens)
+            
+            return reply, [], total_tokens
 
         except Exception as e:
             # Log error
@@ -180,9 +188,6 @@ class OllamaClient(LLMClient):
                 context={"model": self.model, "endpoint": self.endpoint},
             )
             raise
-
-        else:
-            return reply, [], total_tokens
 
         finally:
             # Clean up request.json
