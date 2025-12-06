@@ -1685,6 +1685,44 @@ class TaskHandler:
                     context_dir=temp_context_dir,
                 )
 
+                # Issue→MR変換でもトークン統計を記録するためにフックを設定
+                # 元のIssueタスクのUUIDでDB統計を更新する
+                if task.uuid:
+                    try:
+                        from context_storage import TaskContextManager
+                        from db.task_db import TaskDBManager
+
+                        # TaskContextManagerを一時的に作成（統計記録用）
+                        db_manager = TaskDBManager(task_config)
+                        
+                        # 統計記録用のフック関数を設定
+                        def conversion_statistics_hook(llm_calls: int, tokens: int) -> None:
+                            """Issue→MR変換時の統計記録フック."""
+                            try:
+                                db_task = db_manager.get_task(task.uuid)
+                                if db_task:
+                                    db_task.llm_call_count = (db_task.llm_call_count or 0) + llm_calls
+                                    db_task.total_tokens = (db_task.total_tokens or 0) + tokens
+                                    db_manager.save_task(db_task)
+                                    self.logger.debug(
+                                        "Issue→MR変換の統計を記録: uuid=%s, llm=%d, tokens=%d",
+                                        task.uuid, llm_calls, tokens,
+                                    )
+                            except Exception as e:
+                                self.logger.warning(
+                                    "Issue→MR変換の統計記録に失敗: %s", e, exc_info=True
+                                )
+                        
+                        conversion_llm_client.set_statistics_hook(conversion_statistics_hook)
+                        self.logger.debug("Issue→MR変換用の統計フックを設定しました: uuid=%s", task.uuid)
+                        
+                    except Exception as e:
+                        self.logger.warning(
+                            "Issue→MR変換用の統計フック設定に失敗（統計は記録されません）: %s",
+                            e,
+                            exc_info=True,
+                        )
+
                 # IssueToMRConverter のインスタンス化
                 if platform == "gitlab":
                     # GitLabの場合はGitLabClientを渡す
