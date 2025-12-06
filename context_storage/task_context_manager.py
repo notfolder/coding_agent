@@ -80,6 +80,9 @@ class TaskContextManager:
         # DBTaskインスタンスをキャッシュ
         self._db_task: DBTask | None = None
         
+        # LLMクライアントをキャッシュ（要約生成で再利用）
+        self._llm_client: Any = None
+        
         # Create metadata.json
         self._create_metadata()
         
@@ -161,6 +164,15 @@ class TaskContextManager:
 
         """
         return self.planning_store
+
+    def set_llm_client(self, llm_client: Any) -> None:
+        """Set LLM client for context operations.
+        
+        Args:
+            llm_client: LLMクライアントインスタンス（ユーザー設定を反映したもの）
+        
+        """
+        self._llm_client = llm_client
 
     def get_inheritance_context(self) -> Any | None:
         """Get inheritance context if available.
@@ -350,13 +362,17 @@ class TaskContextManager:
             return
         
         try:
-            # LLMクライアントを取得（要約生成に必要）
-            from clients.lm_client import get_llm_client
-            llm_client = get_llm_client(
-                self.config,
-                message_store=self.message_store,
-                context_dir=self.context_dir,
-            )
+            # LLMクライアントを取得または再利用（ユーザー設定を保持）
+            if self._llm_client is None:
+                from clients.lm_client import get_llm_client
+                llm_client = get_llm_client(
+                    self.config,
+                    message_store=self.message_store,
+                    context_dir=self.context_dir,
+                )
+            else:
+                # 既存のLLMクライアントを再利用（ユーザー設定が反映されている）
+                llm_client = self._llm_client
             
             # ContextCompressorを初期化
             from .context_compressor import ContextCompressor
