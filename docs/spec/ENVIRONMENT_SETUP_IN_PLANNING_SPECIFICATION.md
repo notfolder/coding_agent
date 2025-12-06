@@ -62,7 +62,7 @@ flowchart TD
         F --> G[環境構築実行]
         G --> H[環境検証]
         H --> I{検証成功?}
-        I -->|No| J[環境構築修正]
+        I -->|No| J[LLMにコマンド修正依頼]
         J --> G
         I -->|Yes| K[環境構築完了]
     end
@@ -73,9 +73,7 @@ flowchart TD
     end
 ```
 
-### 2.2 フェーズ構成の変更
-
-既存のプランニングプロセスに「環境構築サブフェーズ」を追加します。
+### 2.2 フェーズ構成
 
 #### 2.2.1 既存フェーズ
 
@@ -93,23 +91,21 @@ flowchart TD
 - 環境選択と同時に環境構築コマンドを生成
 - 計画JSONに環境構築コマンドを含める
 
-**環境構築サブフェーズ**
+**環境構築サブフェーズの追加**
 計画フェーズの後、実行フェーズの前に「環境構築サブフェーズ」を挿入します。
 
-| サブフェーズ | 説明 | 必須/任意 |
-|------------|------|----------|
-| 環境構築実行 | 計画フェーズで生成されたコードを実行して環境を構築 | 必須 |
-| 環境検証 | 環境構築が正常に完了したことを確認 | 必須 |
+| サブフェーズ | 説明 |
+|------------|------|
+| 環境構築実行 | 計画フェーズで生成されたコマンドを実行して環境を構築 |
+| 環境検証 | 実行したコマンドが正しく実行されたことを確認 |
 
 ### 2.3 主要コンポーネント
 
 #### 2.3.1 新規コンポーネント
 
-以下のコンポーネントを新規作成します：
-
 **EnvironmentSetupManager**
 - 環境構築サブフェーズ全体を管理
-- 環境構築実行、検証を制御（コード生成は計画フェーズで実施）
+- 環境構築実行、検証、エラー時の再試行を制御
 
 **EnvironmentAnalyzer**
 - プロジェクトの環境情報を分析
@@ -117,7 +113,7 @@ flowchart TD
 
 **EnvironmentVerifier**
 - 環境構築の成功を検証
-- 必要なツールやライブラリの存在確認
+- 実行したコマンドの実行確認
 
 #### 2.3.2 既存コンポーネントの拡張
 
@@ -133,6 +129,10 @@ flowchart TD
 **ExecutionEnvironmentManager**
 - 環境構築コマンドの実行機能を追加（既存）
 - 環境構築結果の記録
+
+**ProgressCommentManager**
+- 環境構築フェーズの進捗コメントサポートを追加
+- 環境構築の開始、進行中、完了、エラーの各状態をIssue/MRにコメント
 
 ---
 
@@ -190,65 +190,20 @@ flowchart TD
 | Makefile | ビルドとタスク自動化 | 中 |
 | README.md | セットアップ手順の記載 | 低 |
 
-### 3.3 環境情報の解析
+### 3.3 PrePlanningManagerの拡張
 
-収集したファイルから以下の情報を抽出します：
-
-#### 3.3.1 依存関係情報
-
-- パッケージ名とバージョン
-- 必須依存とオプション依存の区別
-- 開発用依存とプロダクション用依存の区別
-
-#### 3.3.2 ビルド・インストール手順
-
-- パッケージマネージャのインストールコマンド
-- ビルドツールの実行コマンド
-- 環境変数の設定
-
-#### 3.3.3 システム要件
-
-- 必要なシステムライブラリ
-- 最小バージョン要件
-- OS固有の依存関係
-
-### 3.4 情報収集プロセス
-
-```mermaid
-sequenceDiagram
-    participant PM as PrePlanningManager
-    participant EA as EnvironmentAnalyzer
-    participant MCP as MCP Client
-    participant LLM as LLM Client
-
-    PM->>EA: 環境情報収集開始
-    EA->>MCP: プロジェクトファイル一覧取得
-    MCP-->>EA: ファイルリスト
-    EA->>EA: 環境構築ファイル検出
-    loop 各環境構築ファイル
-        EA->>MCP: ファイル内容取得
-        MCP-->>EA: ファイル内容
-    end
-    EA->>EA: 収集データの整理
-    EA-->>PM: 環境情報
-    PM->>LLM: 環境情報を含む理解プロンプト送信
-    LLM-->>PM: 理解結果（必要な環境の推測含む）
-```
-
-### 3.5 PrePlanningManagerの拡張
-
-#### 3.5.1 環境情報収集メソッド追加
+#### 3.3.1 環境情報収集処理
 
 依頼内容の理解フェーズで、環境構築ファイルの情報も収集します。
 
-処理内容:
-- プロジェクトのファイル一覧からrequirements.txt、package.json等を検出
-- 検出したファイルの内容を読み込み
-- 環境タイプを推測（Python、Node.js、Java、Go、Miniforge）
-- 依存関係リストを抽出
-- セットアップコマンドの候補を生成
+**処理内容**:
+1. プロジェクトのファイル一覧からrequirements.txt、package.json等を検出
+2. 検出したファイルの内容を読み込み
+3. 環境タイプを推測（Python、Node.js、Java、Go、Miniforge）
+4. 依存関係リストを抽出
+5. セットアップコマンドの候補を生成
 
-戻り値の形式:
+**戻り値の形式**:
 ```
 {
     "detected_files": {
@@ -262,27 +217,21 @@ sequenceDiagram
 }
 ```
 
-#### 3.5.2 環境情報のLLMへの引き継ぎ
+#### 3.3.2 環境情報のLLMへの引き継ぎ
 
-依頼内容の理解プロンプトに環境情報を含めます：
+依頼内容の理解プロンプトに環境情報を含めます。
 
-```
-以下のプロジェクト環境情報を確認してください：
-
-検出されたファイル:
-- requirements.txt: [内容の要約]
-- package.json: [内容の要約]
-
-この情報から、プロジェクトに必要な実行環境を推測してください。
-```
+**処理内容**:
+- 検出されたファイルとその内容の要約をプロンプトに追加
+- LLMが環境を推測できるようにコンテキストを提供
 
 ---
 
-## 4. 計画フェーズでの環境選択
+## 4. 計画フェーズでの環境選択と環境構築コード生成
 
 ### 4.1 概要
 
-計画フェーズにおいて、LLMがプロジェクトに最適な実行環境を選択します。
+計画フェーズにおいて、LLMがプロジェクトに最適な実行環境を選択し、同時に環境構築コマンドを生成します。
 
 ### 4.2 環境選択基準
 
@@ -319,22 +268,26 @@ sequenceDiagram
   "phase": "planning",
   "selected_environment": {
     "name": "python",
-    "reason": "requirements.txtが存在し、Pythonプロジェクトと判定",
+    "reason": "requirements.txt exists and identified as Python project",
     "detected_files": ["requirements.txt", "setup.py"],
     "setup_commands": [
       "pip install --upgrade pip",
       "pip install -r requirements.txt"
     ],
-    "verification_commands": [
-      "python --version",
-      "pip list",
-      "python -c \"import requests; print('OK')\""
-    ],
-    "expected_results": {
-      "python --version": "Python 3.11",
-      "pip list": "パッケージ一覧表示",
-      "python -c \"import requests; print('OK')\"": "OK"
-    }
+    "verification": [
+      {
+        "command": "python --version",
+        "expected_output": "Python 3.11"
+      },
+      {
+        "command": "pip list",
+        "expected_output": "successfully installed packages"
+      },
+      {
+        "command": "python -c \"import requests; print('OK')\"",
+        "expected_output": "OK"
+      }
+    ]
   },
   "goal_understanding": { ... },
   "task_decomposition": { ... },
@@ -344,69 +297,111 @@ sequenceDiagram
 
 ### 4.4 PlanningCoordinatorの拡張
 
-#### 4.4.1 環境選択と環境構築コード生成プロンプトの追加
+#### 4.4.1 _build_environment_selection_promptメソッドの追加
 
-`_build_environment_selection_prompt`メソッドで、環境選択と同時に環境構築コマンドを生成させるプロンプトを構築します：
+新規メソッド`_build_environment_selection_prompt`を追加し、環境選択と環境構築コード生成のためのプロンプトを構築します。
 
+**メソッド定義**:
+```python
+def _build_environment_selection_prompt(
+    self, 
+    environment_info: dict[str, Any]
+) -> str
 ```
-利用可能な実行環境:
-- python: Python 3.11環境、pip利用可能
-- miniforge: Miniforge環境、conda利用可能、科学計算向け
-- node: Node.js環境、npm利用可能
-- java: Java環境、Maven/Gradle利用可能
-- go: Go環境、goコマンド利用可能
 
-プロジェクト環境情報:
-{収集された環境情報}
+**処理内容**:
+1. 利用可能な環境リストを取得（config.yamlから）
+2. 計画前情報収集フェーズで収集された環境情報を整形
+3. 環境選択と環境構築コマンド生成を依頼するプロンプトを構築
+4. プロンプトを返す
 
-以下のタスクを実施してください:
-1. プロジェクト環境情報に基づいて、最適な実行環境を選択
-2. 選択した環境に応じた環境構築コマンドを生成
-3. 環境構築の検証コマンドを生成
+**プロンプト内容**:
+```
+## Environment Setup
 
-計画JSONに以下を含めてください:
+Available execution environments:
+- python: Python 3.11 environment with pip
+- miniforge: Miniforge environment with conda, suitable for scientific computing
+- node: Node.js environment with npm
+- java: Java environment with Maven/Gradle
+- go: Go environment with go command
+
+Project environment information:
+{environment information collected}
+
+Tasks to perform:
+1. Select the most appropriate execution environment based on the project environment information
+2. Generate environment setup commands for the selected environment
+3. Generate verification commands to confirm the environment setup
+
+Include the following in your planning JSON response:
 {
   "selected_environment": {
-    "name": "環境名",
-    "reason": "選択理由",
-    "detected_files": ["検出されたファイルリスト"],
+    "name": "environment_name",
+    "reason": "reason for selection",
+    "detected_files": ["detected file list"],
     "setup_commands": [
-      "セットアップコマンド1",
-      "セットアップコマンド2"
+      "setup command 1",
+      "setup command 2"
     ],
-    "verification_commands": [
-      "検証コマンド1",
-      "検証コマンド2"
-    ],
-    "expected_results": {
-      "検証コマンド1": "期待される出力パターン"
-    }
+    "verification": [
+      {
+        "command": "verification command 1",
+        "expected_output": "expected output pattern"
+      },
+      {
+        "command": "verification command 2",
+        "expected_output": "expected output pattern"
+      }
+    ]
   }
 }
+
+The environment setup commands will be executed in the environment setup sub-phase after the planning phase.
 ```
 
-処理内容:
-- 利用可能な環境リストを提示
-- 収集された環境情報（requirements.txt等の内容）をプロンプトに含める
-- 環境選択だけでなく、セットアップコマンドと検証コマンドの生成も同時に依頼
-- LLMに対して、選択した環境に応じた具体的なコマンドを生成するよう指示
+#### 4.4.2 環境選択と環境構築コードの取得処理
 
-#### 4.4.2 環境選択と環境構築コードの取得
+計画応答から環境選択情報と環境構築コードを抽出する処理を追加します。
 
-計画応答から環境選択情報と環境構築コードを抽出します。
+**メソッド定義**:
+```python
+def _extract_environment_setup_info(
+    self, 
+    plan: dict[str, Any]
+) -> dict[str, Any]
+```
 
-処理内容:
-- 計画JSONの`selected_environment`フィールドから以下を取得：
-  - 環境名（`name`）
-  - 選択理由（`reason`）
-  - セットアップコマンド（`setup_commands`）
-  - 検証コマンド（`verification_commands`）
-  - 期待される結果（`expected_results`）
-- 環境名が未指定の場合、デフォルトの"python"を使用
-- 環境名のバリデーション（利用可能な環境リストに含まれるかチェック）
-- セットアップコマンドが未指定の場合、環境に応じたデフォルトコマンドを使用
+**処理内容**:
+1. 計画JSONの`selected_environment`フィールドから以下を取得：
+   - 環境名（`name`）
+   - 選択理由（`reason`）
+   - セットアップコマンド（`setup_commands`）
+   - 検証情報（`verification`）
+2. 環境名が未指定の場合、デフォルトの"python"を使用
+3. 環境名のバリデーション（利用可能な環境リストに含まれるかチェック）
+4. セットアップコマンドが未指定の場合、環境に応じたデフォルトコマンドを使用
 
-戻り値: 環境選択情報と環境構築コードを含む辞書
+**戻り値**: 環境選択情報と環境構築コードを含む辞書
+
+#### 4.4.3 executeメソッドの修正
+
+既存の`execute`メソッドに環境構築関連の処理を追加します。
+
+**追加処理**:
+1. 計画生成プロンプトに環境選択プロンプトを追加
+2. LLMからの計画応答から環境構築情報を抽出
+3. 環境構築情報をEnvironmentSetupManagerに渡す
+
+**処理フロー**:
+```
+1. 計画前情報収集フェーズ実行（既存）
+2. 環境情報を含む計画プロンプト構築
+3. LLMに計画生成依頼
+4. 計画応答から環境構築情報を抽出
+5. 環境構築サブフェーズを実行
+6. 実行フェーズに移行
+```
 
 ---
 
@@ -421,240 +416,239 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     A[環境構築サブフェーズ開始] --> B[計画から環境構築コードを取得]
+    B --> C[ProgressCommentManagerに開始通知]
     
-    subgraph Execution[実行]
-        B --> C[Docker環境起動]
-        C --> D[プロジェクトクローン]
-        D --> E[環境構築コード実行]
-        E --> F{実行成功?}
-        F -->|No| G[エラー解析]
-        G --> H{リトライ可能?}
-        H -->|Yes| I[LLMに修正依頼]
-        I --> E
-        H -->|No| J[環境構築失敗]
+    subgraph Execution[実行ループ 最大3回]
+        C --> D[Docker環境起動]
+        D --> E[プロジェクトクローン]
+        E --> F[環境構築コード実行]
+        F --> G{実行成功?}
+        G -->|No| H[エラー解析]
+        H --> I{リトライ回数 < 3?}
+        I -->|Yes| J[LLMに修正依頼]
+        J --> K[修正されたコマンド取得]
+        K --> F
+        I -->|No| L[環境構築失敗]
     end
     
     subgraph Verification[検証]
-        F -->|Yes| K[環境検証コマンド実行]
-        K --> L{検証成功?}
-        L -->|No| M[検証失敗の解析]
-        M --> N{修正可能?}
-        N -->|Yes| I
-        N -->|No| O[環境構築不完全]
+        G -->|Yes| M[環境検証コマンド実行]
+        M --> N{検証成功?}
+        N -->|No| O{リトライ回数 < 3?}
+        O -->|Yes| J
+        O -->|No| P[検証失敗]
     end
     
-    L -->|Yes| P[環境構築完了]
-    P --> Q[実行フェーズへ移行]
+    N -->|Yes| Q[環境構築完了]
+    Q --> R[ProgressCommentManagerに完了通知]
+    R --> S[実行フェーズへ移行]
     
-    J --> R[タスク失敗]
-    O --> S[警告付き実行フェーズへ移行]
+    L --> T[ProgressCommentManagerにエラー通知]
+    T --> U[警告付きで実行フェーズへ移行]
+    
+    P --> T
 ```
 
-### 5.3 環境構築コードの利用
+### 5.3 EnvironmentSetupManagerの実装
 
-#### 5.3.1 計画フェーズで生成されるコード
+#### 5.3.1 クラス定義
 
-計画フェーズで生成される環境構築コードには以下が含まれます：
+**クラス名**: `EnvironmentSetupManager`
 
-**セットアップコマンド**
-- 依存関係インストールコマンド
-- 環境変数設定
-- 初期化処理
+**責務**:
+- 環境構築サブフェーズ全体を管理
+- 環境構築コマンドの実行
+- 検証コマンドの実行
+- エラー時のLLMによるコマンド再生成
+- ProgressCommentManagerへの通知
 
-**検証コマンド**
-- 必要なツールの存在確認
-- バージョン確認
-- 簡易的な動作確認
+**依存関係**:
+- `ExecutionEnvironmentManager`: コマンド実行
+- `LLMClient`: エラー時のコマンド再生成
+- `ProgressCommentManager`: 進捗通知
+- `Task`: タスク情報の取得
 
-#### 5.3.2 言語別の生成コード例
+#### 5.3.2 初期化処理
 
-計画フェーズでLLMが生成するコマンドの例を以下に示します。
+**メソッド名**: `__init__`
 
-**Python環境**
-```bash
-# 依存関係インストール
-pip install --upgrade pip
-pip install -r requirements.txt
+**処理内容**:
+1. 設定情報を保存
+2. LLMクライアントを保存
+3. ExecutionEnvironmentManagerを保存
+4. ProgressCommentManagerを保存
+5. ロガーを初期化
+6. リトライカウンターを初期化（最大3回固定）
 
-# 検証
-python --version
-pip list
-python -c "import 主要パッケージ; print('OK')"
-```
+#### 5.3.3 環境構築サブフェーズ実行処理
 
-**Miniforge環境**
-```bash
-# Conda環境作成
-conda env create -f condaenv.yaml -n project-env
-conda activate project-env
+**メソッド名**: `execute`
 
-# 検証
-conda list
-python -c "import 主要パッケージ; print('OK')"
-```
+**引数**:
+- `environment_setup_info`: 計画フェーズで生成された環境構築情報
 
-**Node.js環境**
-```bash
-# 依存関係インストール
-npm install
+**処理内容**:
+1. ProgressCommentManagerに環境構築開始を通知
+2. 環境構築情報から環境名、セットアップコマンド、検証情報を取得
+3. Docker環境を起動（ExecutionEnvironmentManagerを使用）
+4. プロジェクトをクローン
+5. セットアップコマンドを順次実行
+6. 実行失敗時：
+   - リトライ回数をチェック（最大3回）
+   - 3回未満の場合、LLMに修正を依頼してコマンドを再生成
+   - ステップ5に戻る
+7. 検証コマンドを実行
+8. 検証失敗時：
+   - リトライ回数をチェック（最大3回）
+   - 3回未満の場合、LLMに修正を依頼してコマンドを再生成
+   - ステップ5に戻る
+9. 成功時：ProgressCommentManagerに完了を通知
+10. 失敗時：ProgressCommentManagerにエラーを通知し、警告付きで継続
 
-# 検証
-node --version
-npm list
-npm test -- --dry-run  # テストの存在確認
-```
-
-**Java環境**
-```bash
-# Maven依存関係解決
-mvn clean install -DskipTests
-
-# 検証
-mvn --version
-mvn dependency:tree
-```
-
-**Go環境**
-```bash
-# Goモジュールダウンロード
-go mod download
-
-# 検証
-go version
-go list -m all
-go build -n  # ビルド確認（実行なし）
-```
-
-**注記**: これらのコマンドは計画フェーズで`_build_environment_selection_prompt`メソッド内でLLMによって生成されます。環境構築サブフェーズでは、生成済みのコマンドを実行するのみです。
-
-### 5.4 環境構築の実行
-
-#### 5.4.1 実行プロセス
-
-処理の流れ:
-1. 計画フェーズで生成された環境構築コードを取得
-2. Docker環境の起動（既にExecutionEnvironmentManagerで管理）
-3. プロジェクトのクローン（既存機能）
-4. 計画で生成されたセットアップコマンドの順次実行
-5. 各コマンドの実行結果記録
-6. エラー発生時のハンドリング
-
-#### 5.4.2 エラーハンドリング
-
-環境構築中にエラーが発生した場合の対応：
-
-| エラー種類 | 対応 |
-|-----------|------|
-| ネットワークエラー | リトライ（最大3回） |
-| パッケージ不存在 | LLMに修正依頼し、修正されたコマンドを再実行 |
-| バージョン競合 | LLMに依頼して依存関係を調整したコマンドを再生成 |
-| 権限エラー | sudoやchownの追加をLLMに依頼 |
-| システムエラー | 環境の再構築 |
-
-**注記**: エラー発生時は、計画フェーズで生成されたコマンドをLLMに送り、エラー内容を伝えて修正版を生成させます。
-
-#### 5.4.3 実行結果の記録
-
-以下の情報を記録します：
-
-```python
-{
-    "setup_phase": "environment_setup",
-    "environment": "python",
-    "commands_executed": [
-        {
-            "command": "pip install -r requirements.txt",
-            "exit_code": 0,
-            "stdout": "...",
-            "stderr": "",
-            "duration_ms": 15000
-        },
-        ...
-    ],
-    "verification_results": [
-        {
-            "command": "python --version",
-            "expected": "Python 3.11",
-            "actual": "Python 3.11.5",
-            "status": "success"
-        },
-        ...
-    ],
-    "overall_status": "success" | "partial_success" | "failed",
-    "warnings": [...],
-    "errors": [...]
-}
-```
-
-### 5.5 環境検証
-
-#### 5.5.1 検証項目
-
-以下の項目を検証します：
-
-**基本検証**
-- 言語ランタイムのバージョン確認
-- パッケージマネージャの動作確認
-- 主要な依存パッケージのインポート/ロード確認
-
-**プロジェクト固有検証**
-- プロジェクトのビルドコマンド実行（dry-run）
-- テストフレームワークの存在確認
-- 設定ファイルの妥当性確認
-
-#### 5.5.2 検証成功基準
-
-以下のすべてを満たす場合、検証成功とします：
-
-1. すべての検証コマンドが正常終了（exit code 0）
-2. 期待される出力パターンとマッチ
-3. 重要な警告メッセージがない
-
-#### 5.5.3 部分成功の判定
-
-一部の検証が失敗しても、以下の場合は部分成功として実行フェーズに移行します：
-
-- オプション依存パッケージのみ失敗
-- 警告のみでエラーなし
-- タスク実行に必須でない機能の失敗
-
-### 5.6 EnvironmentSetupManagerの実装
-
-#### 5.6.1 クラス構造
-
-以下のクラスを新規作成します：
-
-**EnvironmentSetupManager**
-- 環境構築サブフェーズを管理するクラス
-
-主要メソッド:
-- `__init__`: 初期化（設定、LLMクライアント、環境マネージャーを受け取る）
-- `execute`: 環境構築サブフェーズを実行する（計画から取得した環境選択情報と環境構築コードを受け取り、環境構築結果を返す）
-- `execute_setup`: 環境構築を実行する（セットアップコードを実行し、実行結果を返す）
-- `verify_environment`: 環境を検証する（検証コードを実行し、検証結果を返す）
-- `regenerate_setup_code`: エラー時にLLMに修正を依頼してコマンドを再生成する
-
-#### 5.6.2 処理フロー
-
-環境構築サブフェーズ全体の実行処理:
-
-処理内容:
-1. 計画から環境構築コードを取得（引数として受け取る）
-2. 環境構築実行をリトライ付きで呼び出す（最大3回）
-   - 成功した場合はループを抜ける
-   - 失敗した場合、最終試行でなければLLMにエラーを伝えてコードを再生成
-3. 環境検証を呼び出す
-4. セットアップ結果と検証結果を集約して返す
-
-戻り値の形式:
+**戻り値**:
 ```
 {
-    "overall_status": "success" | "partial_success" | "failed",
+    "overall_status": "success" | "failed",
     "setup_result": {セットアップ実行結果},
     "verification_result": {検証実行結果},
-    "warnings": [警告リスト],
     "errors": [エラーリスト]
 }
+```
+
+#### 5.3.4 セットアップコマンド実行処理
+
+**メソッド名**: `_execute_setup_commands`
+
+**処理内容**:
+1. セットアップコマンドを1つずつ実行
+2. 各コマンドの実行結果を記録
+3. exit codeが0以外の場合、エラーとして処理
+4. すべてのコマンド実行結果を返す
+
+#### 5.3.5 検証処理
+
+**メソッド名**: `_verify_environment`
+
+**処理内容**:
+1. 検証情報から検証コマンドを取得
+2. 各検証コマンドを実行
+3. コマンドが正常に実行されたことを確認（exit code 0）
+4. すべての検証コマンドが成功した場合、成功を返す
+
+**注**: expected_outputとの照合は行わず、コマンドが正常に実行されたことのみを確認します。
+
+#### 5.3.6 LLMによるコマンド再生成処理
+
+**メソッド名**: `_regenerate_setup_commands`
+
+**引数**:
+- `original_commands`: 元のセットアップコマンド
+- `error_info`: エラー情報
+
+**処理内容**:
+1. エラー情報と元のコマンドを含むプロンプトを構築
+2. LLMに修正を依頼
+3. 修正されたコマンドをパースして返す
+
+**プロンプト内容**:
+```
+An error occurred during environment setup:
+{error information}
+
+Original setup commands:
+{commands that were executed}
+
+Please generate corrected setup commands to fix this error.
+Return the response in JSON format:
+{
+  "setup_commands": ["corrected command 1", "corrected command 2"],
+  "verification": [
+    {
+      "command": "verification command 1",
+      "expected_output": "expected output"
+    }
+  ]
+}
+```
+
+### 5.4 ProgressCommentManagerの拡張
+
+#### 5.4.1 環境構築フェーズの追加
+
+ProgressCommentManagerに環境構築フェーズのサポートを追加します。
+
+**追加する進捗フェーズ**:
+- `environment_setup_started`: 環境構築開始
+- `environment_setup_in_progress`: 環境構築実行中
+- `environment_setup_completed`: 環境構築完了
+- `environment_setup_failed`: 環境構築失敗
+
+#### 5.4.2 環境構築開始通知メソッド
+
+**メソッド名**: `notify_environment_setup_started`
+
+**処理内容**:
+1. 環境構築開始のメッセージを作成
+2. Issue/MRにコメントを投稿または更新
+3. 進捗状態を`environment_setup_started`に更新
+
+**コメント内容**:
+```markdown
+## Environment Setup Phase
+
+**Status**: Started
+**Environment**: {environment_name}
+
+Setting up the development environment...
+```
+
+#### 5.4.3 環境構築完了通知メソッド
+
+**メソッド名**: `notify_environment_setup_completed`
+
+**処理内容**:
+1. 環境構築完了のメッセージを作成
+2. Issue/MRのコメントを更新
+3. 進捗状態を`environment_setup_completed`に更新
+
+**コメント内容**:
+```markdown
+## Environment Setup Phase
+
+**Status**: Completed ✓
+**Environment**: {environment_name}
+
+Environment setup successfully completed.
+```
+
+#### 5.4.4 環境構築エラー通知メソッド
+
+**メソッド名**: `notify_environment_setup_failed`
+
+**処理内容**:
+1. エラー詳細を含むメッセージを作成
+2. Issue/MRのコメントを更新
+3. 進捗状態を`environment_setup_failed`に更新
+
+**コメント内容**:
+```markdown
+## Environment Setup Phase
+
+**Status**: Failed with warnings ⚠
+**Environment**: {environment_name}
+
+Environment setup encountered errors. Proceeding to execution phase with limitations.
+
+**Error Details**:
+```
+{error_message}
+```
+
+**Attempted Fixes**:
+- Retry count: {retry_count}/3
+- LLM regeneration attempts: {regeneration_count}
+
+The execution phase will proceed, but some features may not be available.
 ```
 
 ---
@@ -665,632 +659,456 @@ go build -n  # ビルド確認（実行なし）
 
 環境構築サブフェーズ完了後、以下の情報を実行フェーズに引き継ぎます：
 
-#### 6.1.1 引き継ぎ情報
-
+**引き継ぎ情報**:
 ```python
 {
-    "environment_ready": True,
+    "environment_ready": True | False,
     "environment_name": "python",
-    "setup_status": "success" | "partial_success" | "failed",
-    "installed_packages": [...],
-    "available_commands": [...],
-    "warnings": [...],
-    "setup_notes": "環境構築時の注意事項"
+    "setup_status": "success" | "failed",
+    "errors": [エラーリスト]
 }
 ```
 
-#### 6.1.2 実行フェーズでの活用
-
-実行フェーズでは、環境構築情報を利用して以下を実施します：
-
-- テストコマンドの実行
-- ビルドコマンドの実行
-- リントツールの実行
-- コード変更の検証
-
 ### 6.2 環境構築失敗時の対応
 
-#### 6.2.1 完全失敗の場合
+環境構築が失敗した場合：
 
-環境構築が完全に失敗した場合：
-
-1. タスクを失敗状態にマーク
-2. Issue/MRにエラー詳細をコメント
-3. ユーザーに手動での環境確認を依頼
-
-#### 6.2.2 部分成功の場合
-
-環境構築が部分的に成功した場合：
-
-1. 警告付きで実行フェーズに移行
-2. 利用可能な機能と制限をシステムプロンプトに追加
+1. ProgressCommentManagerを使用してIssue/MRにエラー詳細をコメント
+2. 警告付きで実行フェーズに移行
 3. 実行フェーズで代替手段を検討
-
-### 6.3 環境情報のコンテキスト保存
-
-環境構築結果をタスクコンテキストに保存します：
-
-```
-contexts/running/{task_uuid}/
-├── current.jsonl           # 会話履歴
-├── planning/
-│   └── {task_uuid}.jsonl  # Planning履歴
-├── environment/            # 新規追加
-│   ├── setup.json         # 環境構築情報
-│   └── verification.json  # 検証結果
-└── metadata.json
-```
 
 ---
 
 ## 7. システムプロンプトの拡張
 
-### 7.1 環境構築関連の指示追加
+### 7.1 計画フェーズのシステムプロンプト拡張
 
-計画フェーズのシステムプロンプトに以下を追加します：
+計画フェーズのシステムプロンプト（`system_prompt_planning.txt`）に以下のセクションを追加します：
 
 ```
-## 環境構築について
+## Environment Setup Instructions
 
-計画作成時には、プロジェクトに必要な実行環境を選択し、環境構築コマンドを生成してください。
-利用可能な環境: {利用可能な環境リスト}
+When creating a plan, you must select the appropriate execution environment and generate environment setup commands.
 
-環境選択基準:
-- requirements.txt存在 → python
-- condaenv.yaml存在 → miniforge
-- package.json存在 → node
-- pom.xml/build.gradle存在 → java
-- go.mod存在 → go
+### Available Execution Environments
 
-計画応答のJSONに以下を含めてください:
+The following execution environments are available:
+- **python**: Python 3.11 environment with pip package manager
+- **miniforge**: Miniforge environment with conda package manager, suitable for scientific computing and data science projects
+- **node**: Node.js environment with npm package manager
+- **java**: Java environment with Maven/Gradle build tools
+- **go**: Go environment with go module system
+
+### Environment Selection Criteria
+
+Select the environment based on the following criteria:
+
+1. **Python environment**: When `requirements.txt` exists and conda is not required
+2. **Miniforge environment**: When `condaenv.yaml` or `environment.yml` exists
+3. **Node.js environment**: When `package.json` exists
+4. **Java environment**: When `pom.xml` or `build.gradle` exists
+5. **Go environment**: When `go.mod` exists
+
+For projects with multiple languages, prioritize based on:
+- The primary language targeted by the task
+- The language with the most dependencies
+- The presence of build configuration files
+
+If the environment cannot be determined, default to **python**.
+
+### Environment Setup Command Generation
+
+Generate the following in your planning JSON response:
+
+```json
 {
   "selected_environment": {
-    "name": "環境名",
-    "reason": "選択理由",
+    "name": "environment_name",
+    "reason": "clear explanation for why this environment was selected",
+    "detected_files": ["list", "of", "detected", "configuration", "files"],
     "setup_commands": [
-      "pip install --upgrade pip",
-      "pip install -r requirements.txt"
+      "command to install/upgrade package manager",
+      "command to install dependencies",
+      "additional setup commands as needed"
     ],
-    "verification_commands": [
-      "python --version",
-      "pip list"
-    ],
-    "expected_results": {
-      "python --version": "Python 3.11"
-    }
-  },
-  ...
+    "verification": [
+      {
+        "command": "command to verify installation",
+        "expected_output": "expected output pattern or success indicator"
+      },
+      {
+        "command": "command to verify key packages",
+        "expected_output": "expected output pattern"
+      }
+    ]
+  }
 }
-
-環境構築コマンドは計画フェーズ後の環境構築サブフェーズで実行されます。
 ```
 
-### 7.2 実行フェーズでの環境情報活用
+### Command Generation Guidelines
+
+1. **Setup commands**: Generate commands that:
+   - Upgrade the package manager if necessary
+   - Install all dependencies from configuration files
+   - Set up any required environment variables
+   - Perform initialization steps
+
+2. **Verification commands**: Generate commands that:
+   - Verify the language runtime version
+   - Verify key packages are installed
+   - Perform simple import/require tests for critical dependencies
+
+3. **Error handling**: Commands should be designed to:
+   - Fail fast if a critical dependency cannot be installed
+   - Provide clear error messages
+   - Be idempotent (safe to run multiple times)
+
+### Language-Specific Examples
+
+**Python environment**:
+```json
+{
+  "setup_commands": [
+    "pip install --upgrade pip",
+    "pip install -r requirements.txt"
+  ],
+  "verification": [
+    {
+      "command": "python --version",
+      "expected_output": "Python 3.11"
+    },
+    {
+      "command": "python -c \"import requests; print('OK')\"",
+      "expected_output": "OK"
+    }
+  ]
+}
+```
+
+**Node.js environment**:
+```json
+{
+  "setup_commands": [
+    "npm install"
+  ],
+  "verification": [
+    {
+      "command": "node --version",
+      "expected_output": "v18"
+    },
+    {
+      "command": "npm list --depth=0",
+      "expected_output": "installed packages"
+    }
+  ]
+}
+```
+
+**Miniforge environment**:
+```json
+{
+  "setup_commands": [
+    "conda env create -f condaenv.yaml -n project-env",
+    "conda activate project-env"
+  ],
+  "verification": [
+    {
+      "command": "conda list",
+      "expected_output": "package list"
+    },
+    {
+      "command": "python -c \"import numpy; print('OK')\"",
+      "expected_output": "OK"
+    }
+  ]
+}
+```
+
+**Java environment**:
+```json
+{
+  "setup_commands": [
+    "mvn clean install -DskipTests"
+  ],
+  "verification": [
+    {
+      "command": "mvn --version",
+      "expected_output": "Apache Maven"
+    },
+    {
+      "command": "mvn dependency:tree",
+      "expected_output": "dependency tree"
+    }
+  ]
+}
+```
+
+**Go environment**:
+```json
+{
+  "setup_commands": [
+    "go mod download"
+  ],
+  "verification": [
+    {
+      "command": "go version",
+      "expected_output": "go version"
+    },
+    {
+      "command": "go list -m all",
+      "expected_output": "module list"
+    }
+  ]
+}
+```
+
+### Important Notes
+
+- The environment setup commands will be executed in the environment setup sub-phase immediately after planning
+- If setup fails, the LLM will be asked to regenerate corrected commands (up to 3 attempts)
+- Verification commands should only check that commands executed successfully, not validate specific output patterns
+- All prompts and responses must be in English for consistency with the system
+```
+
+### 7.2 実行フェーズのシステムプロンプト拡張
 
 実行フェーズのシステムプロンプトに環境情報を追加します：
 
 ```
-## 実行環境情報
+## Execution Environment Information
 
-現在の環境: {環境名}
-環境構築状態: {setup_status}
+**Current environment**: {environment_name}
+**Setup status**: {setup_status}
 
-利用可能なコマンド:
-{利用可能なコマンドリスト}
+{if setup_status is "failed"}
+**Warning**: Environment setup encountered errors. Some features may not be available.
 
-インストール済みパッケージ:
-{インストール済みパッケージリスト}
+**Errors encountered**:
+{error_list}
 
-注意事項:
-{環境構築時の注意事項・警告}
+Please consider alternative approaches if dependencies are missing.
+{endif}
 ```
 
 ---
 
-## 8. 設定
+## 8. エラーハンドリング
 
-### 8.1 config.yamlへの追加
-
-計画フェーズ設定に環境構築関連設定を追加します：
-
-```yaml
-planning:
-  enabled: true
-  
-  # 環境構築サブフェーズ設定
-  environment_setup:
-    # 環境構築の有効/無効（デフォルト: true）
-    enabled: true
-    
-    # 実行設定
-    execution:
-      # セットアップコマンドのタイムアウト（秒）
-      command_timeout_seconds: 1800
-      # 実行リトライ回数
-      max_retries: 2
-    
-    # 検証設定
-    verification:
-      # 検証の有効/無効
-      enabled: true
-      # 検証失敗時の動作
-      # "fail": タスク失敗, "warn": 警告して継続, "ignore": 無視
-      on_failure: "warn"
-    
-    # エラー時のコマンド再生成設定
-    regeneration:
-      # LLMによる再生成の有効/無効
-      enabled: true
-      # 再生成の最大回数
-      max_retries: 2
-    
-    # 環境分析設定
-    analysis:
-      # 検索対象ファイルパターン
-      file_patterns:
-        python:
-          - "requirements.txt"
-          - "pyproject.toml"
-          - "setup.py"
-          - "Pipfile"
-          - "poetry.lock"
-          - "environment.yml"
-          - "condaenv.yaml"
-        node:
-          - "package.json"
-          - "package-lock.json"
-          - "yarn.lock"
-          - "pnpm-lock.yaml"
-        java:
-          - "pom.xml"
-          - "build.gradle"
-          - "build.gradle.kts"
-        go:
-          - "go.mod"
-          - "go.sum"
-        common:
-          - "Dockerfile"
-          - "docker-compose.yml"
-          - "Makefile"
-      
-      # ファイルサイズ制限（バイト）
-      max_file_size: 102400  # 100KB
-      
-      # 検索深度制限
-      max_search_depth: 5
-```
-
-### 8.2 環境変数による上書き
-
-以下の環境変数で設定を上書き可能にします：
-
-```bash
-# 環境構築の有効/無効
-ENVIRONMENT_SETUP_ENABLED=true
-
-# セットアップコマンドタイムアウト
-ENVIRONMENT_SETUP_COMMAND_TIMEOUT=1800
-
-# 検証失敗時の動作
-ENVIRONMENT_SETUP_VERIFICATION_ON_FAILURE=warn
-
-# LLMによる再生成の有効/無効
-ENVIRONMENT_SETUP_REGENERATION_ENABLED=true
-```
-
----
-
-## 9. エラーハンドリングとリトライ戦略
-
-### 9.1 エラー分類
+### 8.1 エラー分類
 
 環境構築で発生するエラーを以下のように分類します：
 
-#### 9.1.1 リトライ可能エラー
+#### 8.1.1 リトライ可能エラー
 
 | エラー種類 | 例 | 対応 |
 |-----------|---|------|
-| ネットワークエラー | タイムアウト、DNS解決失敗 | 指数バックオフでリトライ |
+| ネットワークエラー | タイムアウト、DNS解決失敗 | リトライ（最大3回） |
 | 一時的なサーバーエラー | HTTP 503 | 待機後リトライ |
 | パッケージマネージャのロック競合 | ロックファイル取得失敗 | 短時間待機後リトライ |
 
-#### 9.1.2 修正可能エラー
+#### 8.1.2 修正可能エラー
 
 | エラー種類 | 例 | 対応 |
 |-----------|---|------|
-| パッケージバージョン競合 | 依存関係の不整合 | LLMに修正依頼、バージョン調整 |
-| パッケージ名の誤り | パッケージが見つからない | LLMに正しい名称確認 |
-| 設定ファイルの構文エラー | YAMLパースエラー | ファイル内容の修正 |
+| パッケージバージョン競合 | 依存関係の不整合 | LLMに修正依頼し、修正されたコマンドを再実行 |
+| パッケージ名の誤り | パッケージが見つからない | LLMに修正依頼し、修正されたコマンドを再実行 |
+| 設定ファイルの構文エラー | YAMLパースエラー | LLMに修正依頼し、修正されたコマンドを再実行 |
 
-#### 9.1.3 致命的エラー
+#### 8.1.3 致命的エラー
 
 | エラー種類 | 例 | 対応 |
 |-----------|---|------|
-| Docker環境の問題 | コンテナ起動失敗 | タスク失敗 |
-| システムリソース不足 | メモリ不足、ディスク容量不足 | タスク失敗 |
-| 権限エラー（解決不可） | root権限必須の操作 | タスク失敗 |
+| Docker環境の問題 | コンテナ起動失敗 | エラー通知、警告付きで継続 |
+| システムリソース不足 | メモリ不足、ディスク容量不足 | エラー通知、警告付きで継続 |
 
-### 9.2 リトライ戦略
+### 8.2 リトライ戦略
 
-#### 9.2.1 指数バックオフ
+#### 8.2.1 固定リトライ回数
 
-ネットワークエラーなどの一時的なエラーに対して、指数バックオフを使用します。
+すべてのエラーに対して、リトライ回数は**3回固定**とします。設定による変更は不要です。
 
-処理内容:
-- 最大リトライ回数まで繰り返す（デフォルト: 3回）
-- 基本待機時間を設定（デフォルト: 5秒）
-- コマンドを実行して結果を確認
-- 成功した場合は結果を返す
-- リトライ可能エラーでない場合は結果を返す
-- 最終試行でない場合、待機時間を指数的に増加させて待機（基本待機時間 × 2^試行回数）
-
-#### 9.2.2 LLMによる修正（環境構築サブフェーズ内）
-
-修正可能なエラーの場合、環境構築サブフェーズ内でLLMにエラー内容を伝えて修正コマンドを生成します。
-
-処理内容:
-- 計画フェーズで生成されたコマンドとエラー情報を含むプロンプトを構築
-- LLMに修正を依頼
-- 修正されたセットアップコマンドをパースして返す
-
-プロンプト例:
-```
-環境構築中に以下のエラーが発生しました:
-{エラー内容}
-
-元のセットアップコマンド:
-{計画フェーズで生成されたコマンド}
-
-エラーを修正したセットアップコマンドを生成してください。
-JSON形式で以下を返してください:
-{
-  "setup_commands": ["修正されたコマンド1", "修正されたコマンド2"],
-  "verification_commands": ["検証コマンド1", "検証コマンド2"],
-  "expected_results": {...}
-}
-```
-
-### 9.3 エラーレポート
-
-環境構築失敗時には、詳細なエラーレポートをIssue/MRにコメントします：
-
-```markdown
-## 環境構築エラーレポート
-
-**環境**: python
-**ステータス**: 失敗
-
-### エラー詳細
-
-コマンド: `pip install -r requirements.txt`
-終了コード: 1
-
-**標準出力**:
-```
-...
-```
-
-**標準エラー**:
-```
-ERROR: Could not find a version that satisfies the requirement ...
-```
-
-### 試行した対応
-
-1. パッケージ名の確認
-2. バージョン制約の緩和
-3. 代替パッケージの検討
-
-### 推奨される手動対応
-
-requirements.txtの以下の行を確認してください:
-- `問題のパッケージ==バージョン`
-
-詳細はログを確認してください: [ログへのリンク]
-```
+**処理フロー**:
+1. 初回実行
+2. 失敗時、LLMに修正依頼（1回目）
+3. 修正されたコマンドで再実行
+4. 失敗時、LLMに修正依頼（2回目）
+5. 修正されたコマンドで再実行
+6. 失敗時、LLMに修正依頼（3回目）
+7. 修正されたコマンドで再実行
+8. 失敗時、エラーとして処理終了
 
 ---
 
-## 10. テストとモニタリング
+## 9. クラス設計詳細
 
-### 10.1 ユニットテスト
+### 9.1 EnvironmentAnalyzer
 
-以下のコンポーネントに対してユニットテストを作成します：
+#### 9.1.1 クラス概要
 
-#### 10.1.1 EnvironmentAnalyzer
+**責務**:
+- プロジェクト内の環境構築関連ファイルを検出
+- ファイル内容を解析して環境情報を抽出
 
-テスト項目:
-- 環境構築ファイルの検出
-- ファイル内容の解析
-- 環境タイプの判定
+**依存関係**:
+- MCPクライアント（ファイル読み込み用）
 
-#### 10.1.2 EnvironmentSetupCodeGenerator
+#### 9.1.2 メソッド詳細
 
-テスト項目:
-- セットアップコードの生成
-- 検証コードの生成
-- エラー時の再生成
+**detect_environment_files**
 
-#### 10.1.3 EnvironmentVerifier
+処理内容:
+1. プロジェクトのルートディレクトリからファイル一覧を取得
+2. 環境構築関連ファイルパターンとマッチング
+3. 検出されたファイルのリストを返す
 
-テスト項目:
-- 検証結果の判定
-- 期待値とのマッチング
-- ステータスの決定
+**analyze_environment_files**
 
-### 10.2 統合テスト
+処理内容:
+1. 検出されたファイルの内容を読み込み
+2. ファイル種類に応じて依存関係を抽出
+3. 推奨される環境タイプを判定
+4. 環境情報の辞書を返す
 
-実際のプロジェクトを使用した統合テストを実施します：
+**infer_environment_type**
 
-#### 10.2.1 テストシナリオ
+処理内容:
+1. 検出されたファイル種類から環境タイプを推測
+2. 複数の環境タイプが候補の場合、優先順位に基づいて選択
+3. 環境タイプ名を返す
 
-| シナリオ | 説明 |
-|---------|------|
-| Python標準プロジェクト | requirements.txtのみのシンプルなプロジェクト |
-| Conda環境プロジェクト | condaenv.yamlを使用するプロジェクト |
-| Node.jsプロジェクト | package.jsonを使用するプロジェクト |
-| 複合プロジェクト | PythonとNode.jsが混在 |
-| エラーケース | 存在しないパッケージを含む |
+### 9.2 EnvironmentVerifier
 
-#### 10.2.2 検証項目
+#### 9.2.1 クラス概要
 
-検証する内容:
-- 環境構築の成功率
-- 実行時間
-- エラーハンドリングの適切性
-- リトライの動作
+**責務**:
+- 環境構築コマンドが正常に実行されたことを検証
 
-### 10.3 モニタリング
+**依存関係**:
+- ExecutionEnvironmentManager（コマンド実行用）
 
-環境構築の統計情報を記録します：
+#### 9.2.2 メソッド詳細
 
+**verify_setup**
+
+処理内容:
+1. 検証情報から検証コマンドを取得
+2. 各コマンドを順次実行
+3. exit codeが0であることを確認
+4. すべてのコマンドが成功した場合、検証成功を返す
+5. 1つでも失敗した場合、検証失敗を返す
+
+**注**: expected_outputとの照合は行いません。コマンドが正常終了したかのみを確認します。
+
+### 9.3 既存クラスの修正詳細
+
+#### 9.3.1 PrePlanningManager
+
+**追加メソッド**: `collect_environment_info`
+
+処理内容:
+1. EnvironmentAnalyzerのインスタンスを作成
+2. `detect_environment_files`を呼び出してファイルを検出
+3. `analyze_environment_files`を呼び出して環境情報を抽出
+4. 環境情報を返す
+
+**既存メソッドの修正**: `execute_understanding`
+
+追加処理:
+1. 依頼内容の理解プロンプト構築時に`collect_environment_info`を呼び出し
+2. 取得した環境情報をプロンプトに追加
+3. LLMに環境情報を含めて理解を依頼
+
+#### 9.3.2 PlanningCoordinator
+
+**追加メソッド**: `_build_environment_selection_prompt`
+
+前述のセクション4.4.1を参照
+
+**追加メソッド**: `_extract_environment_setup_info`
+
+前述のセクション4.4.2を参照
+
+**既存メソッドの修正**: `execute`
+
+追加処理:
+1. 計画前情報収集フェーズから環境情報を取得
+2. `_build_environment_selection_prompt`を呼び出してプロンプトを構築
+3. 計画プロンプトに環境選択プロンプトを追加
+4. LLMから計画応答を取得
+5. `_extract_environment_setup_info`で環境構築情報を抽出
+6. EnvironmentSetupManagerのインスタンスを作成
+7. `execute`メソッドで環境構築サブフェーズを実行
+8. 環境構築結果を確認
+9. 実行フェーズに移行
+
+#### 9.3.3 ProgressCommentManager
+
+**追加メソッド**: 
+- `notify_environment_setup_started`（前述のセクション5.4.2を参照）
+- `notify_environment_setup_completed`（前述のセクション5.4.3を参照）
+- `notify_environment_setup_failed`（前述のセクション5.4.4を参照）
+
+**追加定数**:
 ```python
-{
-    "environment_setup_stats": {
-        "total_attempts": 100,
-        "successful": 85,
-        "partial_success": 10,
-        "failed": 5,
-        "average_duration_seconds": 45.2,
-        "by_environment": {
-            "python": {"success": 40, "failed": 2},
-            "node": {"success": 30, "failed": 1},
-            "miniforge": {"success": 10, "failed": 1},
-            "java": {"success": 3, "failed": 1},
-            "go": {"success": 2, "failed": 0}
-        },
-        "common_errors": [
-            {"error": "NetworkTimeout", "count": 3},
-            {"error": "PackageNotFound", "count": 2}
-        ]
-    }
-}
+PHASE_ENVIRONMENT_SETUP_STARTED = "environment_setup_started"
+PHASE_ENVIRONMENT_SETUP_IN_PROGRESS = "environment_setup_in_progress"
+PHASE_ENVIRONMENT_SETUP_COMPLETED = "environment_setup_completed"
+PHASE_ENVIRONMENT_SETUP_FAILED = "environment_setup_failed"
 ```
 
 ---
 
-## 11. セキュリティ考慮事項
-
-### 11.1 コマンド実行の制限
-
-環境構築コマンドは以下の制限下で実行します：
-
-#### 11.1.1 許可コマンドリスト
-
-以下のコマンドのみを許可します：
-
-```yaml
-allowed_commands:
-  - pip
-  - conda
-  - npm
-  - yarn
-  - pnpm
-  - mvn
-  - gradle
-  - go
-  - make
-```
-
-#### 11.1.2 禁止パターン
-
-以下のパターンを含むコマンドは拒否します：
-
-- シェルメタキャラクタの不正使用（`;`, `&&`, `||`の連続など）
-- システムファイルへのアクセス（`/etc`, `/sys`等）
-- 権限昇格コマンド（`sudo`, `su`等）
-- ネットワーク設定変更（`iptables`, `route`等）
-
-### 11.2 リソース制限
-
-環境構築時のリソース消費を制限します：
-
-```yaml
-resources:
-  # CPU制限
-  cpu_limit: 2
-  # メモリ制限
-  memory_limit: "4g"
-  # 実行時間制限
-  timeout_seconds: 1800
-  # ディスク使用量制限
-  disk_limit: "10g"
-```
-
-### 11.3 ネットワークアクセス制御
-
-必要最小限のネットワークアクセスのみを許可します：
-
-```yaml
-network:
-  # パッケージリポジトリのみ許可
-  allowed_domains:
-    - "pypi.org"
-    - "files.pythonhosted.org"
-    - "registry.npmjs.org"
-    - "repo.maven.apache.org"
-    - "pkg.go.dev"
-```
-
----
-
-## 12. パフォーマンス最適化
-
-### 12.1 キャッシング戦略
-
-環境構築の高速化のため、以下のキャッシングを実施します：
-
-#### 12.1.1 パッケージキャッシュ
-
-実装方法:
-- Docker volumeを使用してパッケージキャッシュを永続化
-- プロジェクト間でキャッシュを共有して再ダウンロードを削減
-
-#### 12.1.2 環境構築コードキャッシュ
-
-実装方法:
-- 同一の環境構築ファイルに対する生成済みコードをキャッシュ
-- ファイル内容のハッシュ値で一致判定
-- キャッシュヒット時はLLM呼び出しをスキップ
-
-### 12.2 並列化
-
-複数のセットアップコマンドを可能な限り並列実行します：
-
-例:
-- 依存関係のないコマンドを並列実行
-- `npm install --production`と`pip install -r requirements-dev.txt`を同時実行
-
-### 12.3 早期失敗
-
-明らかな問題を早期に検出して失敗させます：
-
-実施内容:
-- ファイル存在確認（requirements.txtなどの必須ファイル）
-- 基本的な構文チェック（JSONやYAMLのパース）
-- 事前条件の検証（必要なツールの存在確認）
-
----
-
-## 13. 今後の拡張性
-
-### 13.1 追加予定の機能
-
-#### 13.1.1 言語環境の追加
-
-将来的に以下の言語環境を追加予定：
-
-- Rust（Cargo）
-- Ruby（Bundler）
-- PHP（Composer）
-- .NET（NuGet）
-
-#### 13.1.2 高度な依存関係解析
-
-追加予定の機能:
-- 依存関係グラフの可視化
-- セキュリティ脆弱性のスキャン
-- ライセンス互換性チェック
-
-#### 13.1.3 環境のスナップショット
-
-追加予定の機能:
-- 構築済み環境のスナップショット保存
-- 同一環境の再利用
-- 環境のバージョン管理
-
-### 13.2 プラグインシステム
-
-カスタム環境構築ロジックを追加可能なプラグインシステムの検討：
-
-プラグインインターフェース:
-- `detect_environment`: この環境に該当するか判定する
-- `generate_setup_code`: セットアップコードを生成する
-- `verify_environment`: 環境を検証する
-
----
-
-## 14. まとめ
-
-### 14.1 実装の優先順位
+## 10. 実装の優先順位
 
 以下の順序で実装を進めます：
 
 | 優先度 | 機能 | 理由 |
 |-------|------|------|
-| 高 | 環境情報収集（PrePlanningManager拡張） | 既存機能の拡張で実装容易 |
-| 高 | 環境選択と環境構築コード生成（PlanningCoordinator拡張） | 計画フェーズでの統合生成が核心 |
-| 高 | EnvironmentSetupManager基本実装 | 環境構築サブフェーズの実行を管理 |
-| 高 | Python環境のセットアップ実行 | 最も一般的な環境 |
-| 中 | Node.js環境のセットアップ実行 | 次に一般的な環境 |
-| 中 | 環境検証機能 | 品質保証に重要 |
+| 高 | EnvironmentAnalyzer実装 | 環境情報収集の基盤 |
+| 高 | PrePlanningManager拡張 | 環境情報収集機能の追加 |
+| 高 | PlanningCoordinator拡張 | 環境選択とコマンド生成の核心 |
+| 高 | システムプロンプト拡張 | LLMへの指示を明確化 |
+| 高 | EnvironmentSetupManager実装 | 環境構築サブフェーズの実装 |
+| 高 | ProgressCommentManager拡張 | 進捗通知機能の追加 |
+| 中 | EnvironmentVerifier実装 | 検証機能 |
 | 中 | エラーハンドリングとリトライ | 安定性向上 |
 | 中 | LLMによるコマンド再生成 | エラー修正の自動化 |
-| 低 | Miniforge/Java/Go環境 | 使用頻度が低い |
-| 低 | 高度なキャッシング | パフォーマンス最適化 |
 
-### 14.2 期待される効果
+---
+
+## 11. 期待される効果
 
 本機能の実装により、以下の効果が期待されます：
 
-#### 14.2.1 品質向上
+### 11.1 品質向上
 
 - テスト実行成功率の向上
 - 実行フェーズでのエラー減少
 - より正確なコード変更の検証
 
-#### 14.2.2 効率化
+### 11.2 効率化
 
 - 環境問題による手戻りの削減
 - タスク完了までの時間短縮
 - ユーザーの手動介入減少
 
-#### 14.2.3 ユーザビリティ向上
+### 11.3 ユーザビリティ向上
 
-- 環境構築プロセスの透明性
+- 環境構築プロセスの透明性（ProgressCommentManagerによる通知）
 - エラー発生時の詳細な情報提供
 - 自動化による利便性向上
 
-### 14.3 成功指標（KPI）
-
-以下の指標で機能の効果を測定します：
-
-| 指標 | 目標値 | 測定方法 |
-|-----|-------|---------|
-| 環境構築成功率 | 90%以上 | 成功/総試行回数 |
-| テスト実行成功率 | 現状比20%向上 | テスト実行の成功率 |
-| タスク完了時間 | 現状比15%短縮 | 平均タスク処理時間 |
-| 環境起因エラー率 | 現状比50%削減 | 環境エラー/総エラー数 |
-
 ---
 
-## 付録
-
-### A. 用語集
+## 12. 用語集
 
 | 用語 | 定義 |
 |-----|------|
 | 環境構築 | プロジェクトの実行に必要な依存関係やツールをインストールするプロセス |
 | 環境構築ファイル | requirements.txt、package.json等、依存関係を定義するファイル |
 | 環境構築コード | 環境構築を実行するためのシェルコマンドやスクリプト |
-| 環境検証 | 環境構築が正常に完了したことを確認するプロセス |
-| 部分成功 | 一部の環境構築が失敗したが、主要機能は動作する状態 |
-
-### B. 参考資料
-
-#### B.1 パッケージマネージャドキュメント
-
-- [pip](https://pip.pypa.io/)
-- [conda](https://docs.conda.io/)
-- [npm](https://docs.npmjs.com/)
-- [Maven](https://maven.apache.org/)
-- [Go Modules](https://go.dev/ref/mod)
-
-#### B.2 関連仕様書
-
-- システムプロンプト（`system_prompt_planning.txt`）
-- 計画前情報収集フェーズ仕様書
-- 複数言語対応実行環境仕様書
+| 環境検証 | 環境構築コマンドが正常に実行されたことを確認するプロセス |
+| リトライ | エラー発生時にコマンドを再実行すること（最大3回固定） |
 
 ---
 
@@ -1299,3 +1117,4 @@ network:
 | 日付 | バージョン | 変更内容 |
 |-----|-----------|---------|
 | 2025-12-06 | 1.0 | 初版作成 |
+| 2025-12-06 | 2.0 | レビューフィードバックに基づく全面改訂：システムプロンプト英語化、検証方法簡素化、設定削除、クラス設計詳細化、ProgressCommentManager拡張明示 |
