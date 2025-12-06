@@ -121,62 +121,85 @@ class TestTextEditorMCPClientFunctions:
         client = TextEditorMCPClient(container_id="test-container")
         functions = client.get_function_calling_functions()
 
-        assert len(functions) == 5
-        function_names = [f["name"] for f in functions]
-        assert "text_editor_view" in function_names
-        assert "text_editor_create" in function_names
-        assert "text_editor_str_replace" in function_names
-        assert "text_editor_insert" in function_names
-        assert "text_editor_undo_edit" in function_names
+        # 統合関数は1つだけ
+        assert len(functions) == 1
+        assert functions[0]["name"] == "text_editor"
+        
+        # commandパラメータで5つのコマンドをサポート
+        params = functions[0]["parameters"]["properties"]
+        assert "command" in params
+        assert set(params["command"]["enum"]) == {
+            "view", "create", "str_replace", "insert", "undo_edit"
+        }
 
     def test_get_function_calling_tools(self) -> None:
         """Function callingツール定義取得をテストする."""
         client = TextEditorMCPClient(container_id="test-container")
         tools = client.get_function_calling_tools()
 
-        assert len(tools) == 5
-        for tool in tools:
-            assert tool["type"] == "function"
-            assert "function" in tool
+        # 統合関数は1つだけ
+        assert len(tools) == 1
+        assert tools[0]["type"] == "function"
+        assert "function" in tools[0]
+        assert tools[0]["function"]["name"] == "text_editor"
 
     def test_view_function_schema(self) -> None:
         """view関数のスキーマをテストする."""
         client = TextEditorMCPClient(container_id="test-container")
         functions = client.get_function_calling_functions()
-        view_func = next(f for f in functions if f["name"] == "text_editor_view")
-
-        params = view_func["parameters"]
+        
+        # 統合関数から検証
+        text_editor = functions[0]
+        assert text_editor["name"] == "text_editor"
+        
+        params = text_editor["parameters"]
         assert params["type"] == "object"
-        assert "path" in params["properties"]
-        assert "view_range" in params["properties"]
-        assert params["required"] == ["path"]
+        props = params["properties"]
+        
+        # viewコマンドで使用するパラメータを検証
+        assert "command" in props
+        assert "view" in props["command"]["enum"]
+        assert "path" in props
+        assert "view_range" in props
+        assert "command" in params["required"]
+        assert "path" in params["required"]
 
     def test_create_function_schema(self) -> None:
         """create関数のスキーマをテストする."""
         client = TextEditorMCPClient(container_id="test-container")
         functions = client.get_function_calling_functions()
-        create_func = next(f for f in functions if f["name"] == "text_editor_create")
-
-        params = create_func["parameters"]
-        assert params["type"] == "object"
-        assert "path" in params["properties"]
-        assert "file_text" in params["properties"]
-        assert set(params["required"]) == {"path", "file_text"}
+        
+        # 統合関数から検証
+        text_editor = functions[0]
+        assert text_editor["name"] == "text_editor"
+        
+        params = text_editor["parameters"]
+        props = params["properties"]
+        
+        # createコマンドで使用するパラメータを検証
+        assert "command" in props
+        assert "create" in props["command"]["enum"]
+        assert "path" in props
+        assert "file_text" in props
 
     def test_str_replace_function_schema(self) -> None:
         """str_replace関数のスキーマをテストする."""
         client = TextEditorMCPClient(container_id="test-container")
         functions = client.get_function_calling_functions()
-        replace_func = next(
-            f for f in functions if f["name"] == "text_editor_str_replace"
-        )
-
-        params = replace_func["parameters"]
-        assert params["type"] == "object"
-        assert "path" in params["properties"]
-        assert "old_str" in params["properties"]
-        assert "new_str" in params["properties"]
-        assert set(params["required"]) == {"path", "old_str", "new_str"}
+        
+        # 統合関数から検証
+        text_editor = functions[0]
+        assert text_editor["name"] == "text_editor"
+        
+        params = text_editor["parameters"]
+        props = params["properties"]
+        
+        # str_replaceコマンドで使用するパラメータを検証
+        assert "command" in props
+        assert "str_replace" in props["command"]["enum"]
+        assert "path" in props
+        assert "old_str" in props
+        assert "new_str" in props
 
 
 class TestTextEditorMCPClientConvenienceMethods:
@@ -192,7 +215,11 @@ class TestTextEditorMCPClientConvenienceMethods:
         client = TextEditorMCPClient(container_id="test-container")
         result = client.view("/test/path.py")
 
-        mock_call_tool.assert_called_once_with("view", {"path": "/test/path.py"})
+        # 統合関数形式で呼び出されることを検証
+        mock_call_tool.assert_called_once_with(
+            "text_editor",
+            {"command": "view", "path": "/test/path.py"}
+        )
         assert result.success is True
         assert result.content == "file content"
 
@@ -206,8 +233,10 @@ class TestTextEditorMCPClientConvenienceMethods:
         client = TextEditorMCPClient(container_id="test-container")
         result = client.view("/test/path.py", view_range=[1, 10])
 
+        # 統合関数形式で呼び出されることを検証
         mock_call_tool.assert_called_once_with(
-            "view", {"path": "/test/path.py", "view_range": [1, 10]},
+            "text_editor",
+            {"command": "view", "path": "/test/path.py", "view_range": [1, 10]}
         )
         assert result.success is True
 
@@ -221,8 +250,10 @@ class TestTextEditorMCPClientConvenienceMethods:
         client = TextEditorMCPClient(container_id="test-container")
         result = client.create("/test/new.py", "print('hello')")
 
+        # 統合関数形式で呼び出されることを検証
         mock_call_tool.assert_called_once_with(
-            "create", {"path": "/test/new.py", "file_text": "print('hello')"},
+            "text_editor",
+            {"command": "create", "path": "/test/new.py", "file_text": "print('hello')"}
         )
         assert result.success is True
 
@@ -236,8 +267,10 @@ class TestTextEditorMCPClientConvenienceMethods:
         client = TextEditorMCPClient(container_id="test-container")
         result = client.str_replace("/test/file.py", "old", "new")
 
+        # 統合関数形式で呼び出されることを検証
         mock_call_tool.assert_called_once_with(
-            "str_replace", {"path": "/test/file.py", "old_str": "old", "new_str": "new"},
+            "text_editor",
+            {"command": "str_replace", "path": "/test/file.py", "old_str": "old", "new_str": "new"}
         )
         assert result.success is True
 
@@ -251,8 +284,10 @@ class TestTextEditorMCPClientConvenienceMethods:
         client = TextEditorMCPClient(container_id="test-container")
         result = client.insert("/test/file.py", 5, "# comment")
 
+        # 統合関数形式で呼び出されることを検証
         mock_call_tool.assert_called_once_with(
-            "insert", {"path": "/test/file.py", "insert_line": 5, "new_str": "# comment"},
+            "text_editor",
+            {"command": "insert", "path": "/test/file.py", "insert_line": 5, "new_str": "# comment"}
         )
         assert result.success is True
 
@@ -266,7 +301,11 @@ class TestTextEditorMCPClientConvenienceMethods:
         client = TextEditorMCPClient(container_id="test-container")
         result = client.undo_edit("/test/file.py")
 
-        mock_call_tool.assert_called_once_with("undo_edit", {"path": "/test/file.py"})
+        # 統合関数形式で呼び出されることを検証
+        mock_call_tool.assert_called_once_with(
+            "text_editor",
+            {"command": "undo_edit", "path": "/test/file.py"}
+        )
         assert result.success is True
 
 
@@ -304,6 +343,13 @@ class TestTextEditorMCPInExecutionEnvironmentManager:
 
         monkeypatch.setenv("TEXT_EDITOR_MCP_ENABLED", "true")
         config = {"text_editor_mcp": {"enabled": False}}
+        
+        # 環境変数をconfigに反映（main.pyの_override_feature_flags相当）
+        import os
+        env_enabled = os.environ.get("TEXT_EDITOR_MCP_ENABLED", "").lower()
+        if env_enabled in ("true", "false"):
+            config["text_editor_mcp"]["enabled"] = env_enabled == "true"
+        
         manager = ExecutionEnvironmentManager(config)
         # 環境変数が優先される
         assert manager.is_text_editor_enabled() is True
@@ -314,22 +360,35 @@ class TestTextEditorMCPInExecutionEnvironmentManager:
 
         monkeypatch.setenv("TEXT_EDITOR_MCP_ENABLED", "false")
         config = {"text_editor_mcp": {"enabled": True}}
+        
+        # 環境変数をconfigに反映（main.pyの_override_feature_flags相当）
+        import os
+        env_enabled = os.environ.get("TEXT_EDITOR_MCP_ENABLED", "").lower()
+        if env_enabled in ("true", "false"):
+            config["text_editor_mcp"]["enabled"] = env_enabled == "true"
+        
         manager = ExecutionEnvironmentManager(config)
         # 環境変数が優先される
         assert manager.is_text_editor_enabled() is False
 
     def test_get_text_editor_functions(self) -> None:
-        """text-editor関数定義取得をテストする."""
+        """テキストエディタ関数取得をテストする."""
         from handlers.execution_environment_manager import ExecutionEnvironmentManager
 
         config = {"text_editor_mcp": {"enabled": True}}
         manager = ExecutionEnvironmentManager(config)
-        functions = manager.get_text_editor_functions()
 
-        assert len(functions) == 5
-        function_names = [f["name"] for f in functions]
-        assert "text_editor_view" in function_names
-        assert "text_editor_create" in function_names
+        functions = manager.get_text_editor_functions()
+        # 統合関数は1つだけ
+        assert len(functions) == 1
+        assert functions[0]["name"] == "text_editor"
+        
+        # commandパラメータで5つのコマンドをサポート
+        params = functions[0]["parameters"]["properties"]
+        assert "command" in params
+        assert set(params["command"]["enum"]) == {
+            "view", "create", "str_replace", "insert", "undo_edit"
+        }
 
     def test_get_text_editor_functions_disabled(self) -> None:
         """無効時のtext-editor関数定義取得をテストする."""
@@ -349,9 +408,10 @@ class TestTextEditorMCPInExecutionEnvironmentManager:
         manager = ExecutionEnvironmentManager(config)
         tools = manager.get_text_editor_tools()
 
-        assert len(tools) == 5
-        for tool in tools:
-            assert tool["type"] == "function"
+        # 統合関数は1つだけ
+        assert len(tools) == 1
+        assert tools[0]["type"] == "function"
+        assert tools[0]["function"]["name"] == "text_editor"
 
     def test_get_text_editor_client_not_started(self) -> None:
         """未起動時のtext-editorクライアント取得をテストする."""

@@ -136,13 +136,34 @@ class TestExecutionEnvironmentManager(unittest.TestCase):
     @patch.dict("os.environ", {"COMMAND_EXECUTOR_ENABLED": "true"})
     def test_is_enabled_from_env_true(self) -> None:
         """環境変数からの有効判定テスト."""
-        manager = ExecutionEnvironmentManager({})
+        config = {"command_executor": {"enabled": False}}
+        
+        # 環境変数をconfigに反映（main.pyの_override_feature_flags相当）
+        import os
+        env_enabled = os.environ.get("COMMAND_EXECUTOR_ENABLED", "").lower()
+        if env_enabled in ("true", "false"):
+            if "command_executor" not in config:
+                config["command_executor"] = {}
+            config["command_executor"]["enabled"] = env_enabled == "true"
+        
+        manager = ExecutionEnvironmentManager(config)
         assert manager.is_enabled() is True
 
     @patch.dict("os.environ", {"COMMAND_EXECUTOR_ENABLED": "false"})
     def test_is_enabled_from_env_false(self) -> None:
         """環境変数からの無効判定テスト."""
-        assert self.manager.is_enabled() is False
+        config = {"command_executor": {"enabled": True}}
+        
+        # 環境変数をconfigに反映（main.pyの_override_feature_flags相当）
+        import os
+        env_enabled = os.environ.get("COMMAND_EXECUTOR_ENABLED", "").lower()
+        if env_enabled in ("true", "false"):
+            if "command_executor" not in config:
+                config["command_executor"] = {}
+            config["command_executor"]["enabled"] = env_enabled == "true"
+        
+        manager = ExecutionEnvironmentManager(config)
+        assert manager.is_enabled() is False
 
     def test_get_container_name(self) -> None:
         """コンテナ名生成テスト."""

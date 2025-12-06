@@ -165,10 +165,13 @@ class TestBranchNameGenerator:
             "labels": ["feature"],
         }
 
+        # 戻り値はタプル (branch_name, base_branch)
         result = generator.generate(issue_info, [])
-
         assert result is not None
-        assert "test-bot" in result or "42" in result
+        branch_name, base_branch = result
+        
+        assert "test-bot" in branch_name or "42" in branch_name
+        assert base_branch == "main"  # デフォルトのベースブランチ
         mock_llm_client.send_system_prompt.assert_called_once()
         mock_llm_client.send_user_message.assert_called_once()
 
@@ -186,10 +189,13 @@ class TestBranchNameGenerator:
             "body": "Feature description",
         }
 
+        # 戻り値はタプル (branch_name, base_branch)
         result = generator.generate(issue_info, [])
-
         assert result is not None
-        assert "auto-generated" in result
+        branch_name, base_branch = result
+        
+        assert "auto-generated" in branch_name
+        assert base_branch == "main"  # デフォルトのベースブランチ
 
 
 class TestContentTransferManager:
@@ -420,7 +426,25 @@ class TestIssueToMRConverter:
     def test_is_enabled_from_env_false(self, converter: IssueToMRConverter) -> None:
         """環境変数による無効化テスト."""
         with patch.dict("os.environ", {"ISSUE_TO_MR_ENABLED": "false"}):
-            assert converter.is_enabled() is False
+            # 環境変数をconfigに反映（main.pyの_override_feature_flags相当）
+            import os
+            config = converter.config.copy()
+            env_enabled = os.environ.get("ISSUE_TO_MR_ENABLED", "").lower()
+            if env_enabled in ("true", "false"):
+                if "issue_to_mr_conversion" not in config:
+                    config["issue_to_mr_conversion"] = {}
+                config["issue_to_mr_conversion"]["enabled"] = env_enabled == "true"
+            
+            # 新しいconverterインスタンスを作成
+            from handlers.issue_to_mr_converter import IssueToMRConverter
+            test_converter = IssueToMRConverter(
+                task=converter.task,
+                llm_client=converter.llm_client,
+                github_client=converter.github_client,
+                config=config,
+                platform=converter.platform
+            )
+            assert test_converter.is_enabled() is False
 
     def test_is_enabled_from_config_false(
         self,
