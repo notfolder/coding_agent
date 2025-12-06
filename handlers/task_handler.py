@@ -161,17 +161,26 @@ class TaskHandler:
         
         """
         if not context_manager or not llm_client:
+            self.logger.debug(
+                "統計記録フックをスキップ: context_manager=%s, llm_client=%s",
+                context_manager is not None,
+                llm_client is not None,
+            )
             return
         
-        try:
-            # LLMクライアントにフックを設定
-            def statistics_hook(llm_calls: int, tokens: int) -> None:
-                """統計記録フック関数."""
+        # LLMクライアントにフックを設定
+        def statistics_hook(llm_calls: int, tokens: int) -> None:
+            """統計記録フック関数."""
+            try:
                 context_manager.update_statistics(
                     llm_calls=llm_calls,
                     tokens=tokens,
                 )
-            
+            except Exception as e:
+                # フック内のエラーは無視（統計記録失敗してもLLM処理は継続）
+                self.logger.warning("統計記録フック内でエラーが発生: %s", e, exc_info=True)
+        
+        try:
             llm_client.set_statistics_hook(statistics_hook)
             self.logger.debug("トークン統計記録フックを設定しました")
             
