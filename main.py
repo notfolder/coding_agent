@@ -55,9 +55,7 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
     """設定ファイルを読み込み、環境変数で上書きする.
 
     指定された設定ファイルを読み込み、環境変数で定義された値で
-    設定を上書きします。LLM、MCP、RabbitMQ等の設定が対象です。
-    
-    USE_USER_CONFIG_API環境変数がtrueの場合、API経由で設定を取得します。
+    設定を上書きします。LLM、MCP、RabbitMQ、Database等の設定が対象です。
 
     Args:
         config_file: 読み込む設定ファイルのパス
@@ -77,28 +75,109 @@ def load_config(config_file: str = "config.yaml") -> dict[str, Any]:
     with Path(config_file).open() as f:
         config = yaml.safe_load(f)
     
-    # 環境変数による設定上書きを先に実行
+    # 環境変数による設定上書きを実行
+    _override_task_source_config(config)
+    _override_database_config(config)
+    _override_user_config_api(config)
+    _override_github_config(config)
+    _override_gitlab_config(config)
     _override_mcp_config(config)
     _override_rabbitmq_config(config)
     _override_bot_config(config)
-    
-    # API経由でLLM設定を取得するかチェック
-    use_api = os.environ.get("USE_USER_CONFIG_API", "false").lower() == "true"
-    
-    if use_api:
-        try:
-            config = _fetch_config_from_api(config, logger)
-        except (requests.ConnectionError, requests.Timeout) as e:
-            logger.exception(f"API接続エラー、設定ファイルを使用{e}")
-        except (ValueError, requests.HTTPError) as e:
-            logger.exception(f"API設定取得エラー、設定ファイルを使用{e}")
-        except Exception as e:
-            logger.exception(f"予期しないエラー、設定ファイルを使用{e}")
-    
-    # LLM設定を環境変数で最終的に上書き
     _override_llm_config(config)
+    _override_feature_flags(config)
+    _override_executor_config(config)
 
     return config
+
+
+def _override_task_source_config(config: dict[str, Any]) -> None:
+    """タスクソース設定を環境変数で上書きする."""
+    task_source = os.environ.get("TASK_SOURCE")
+    if task_source:
+        config["task_source"] = task_source
+
+
+def _override_database_config(config: dict[str, Any]) -> None:
+    """データベース設定を環境変数で上書きする."""
+    # DATABASE_URL環境変数が設定されている場合は優先
+    database_url = os.environ.get("DATABASE_URL")
+    if database_url:
+        config["database"]["url"] = database_url
+        return
+    
+    # 個別の環境変数で上書き
+    if "database" not in config:
+        config["database"] = {}
+    
+    db_env = {
+        "host": os.environ.get("DATABASE_HOST"),
+        "port": os.environ.get("DATABASE_PORT"),
+        "name": os.environ.get("DATABASE_NAME"),
+        "user": os.environ.get("DATABASE_USER"),
+        "password": os.environ.get("DATABASE_PASSWORD"),
+    }
+    
+    for k, v in db_env.items():
+        if v is not None:
+            config["database"][k] = v
+    
+    # ポート番号の型変換
+    if "port" in config["database"] and config["database"]["port"] is not None:
+        try:
+            config["database"]["port"] = int(config["database"]["port"])
+        except (ValueError, TypeError):
+            config["database"]["port"] = 5432
+
+
+def _override_user_config_api(config: dict[str, Any]) -> None:
+    """User Config API設定を環境変数で上書きする."""
+    if "user_config_api" not in config:
+        config["user_config_api"] = {}
+    
+    use_api = os.environ.get("USE_USER_CONFIG_API")
+    if use_api is not None:
+        config["user_config_api"]["enabled"] = use_api.lower() == "true"
+    
+    api_url = os.environ.get("USER_CONFIG_API_URL")
+    if api_url:
+        config["user_config_api"]["url"] = api_url
+    
+    api_key = os.environ.get("USER_CONFIG_API_KEY")
+    if api_key:
+        config["user_config_api"]["api_key"] = api_key
+
+
+def _override_github_config(config: dict[str, Any]) -> None:
+    """GitHub設定を環境変数で上書きする."""
+    if "github" not in config:
+        config["github"] = {}
+    
+    # Personal Access Token
+    token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
+    if token:
+        config["github"]["personal_access_token"] = token
+    
+    # API URL
+    api_url = os.environ.get("GITHUB_API_URL")
+    if api_url:
+        config["github"]["api_url"] = api_url
+
+
+def _override_gitlab_config(config: dict[str, Any]) -> None:
+    """GitLab設定を環境変数で上書きする."""
+    if "gitlab" not in config:
+        config["gitlab"] = {}
+    
+    # Personal Access Token
+    token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN")
+    if token:
+        config["gitlab"]["personal_access_token"] = token
+    
+    # API URL
+    api_url = os.environ.get("GITLAB_API_URL")
+    if api_url:
+        config["gitlab"]["api_url"] = api_url
 
 
 def _fetch_config_from_api(
@@ -118,7 +197,7 @@ def _fetch_config_from_api(
         ValueError: 設定エラーまたはAPI呼び出しエラー
     """
     # タスクソースを取得
-    task_source = os.environ.get("TASK_SOURCE", "github")
+    task_source = config.get("task_source", "github")
     
     # ユーザー名が指定されていない場合はconfig.yamlから取得
     if username is None:
@@ -129,12 +208,13 @@ def _fetch_config_from_api(
         else:
             raise ValueError(f"Unknown task source: {task_source}")
     
-    # APIエンドポイントとAPIキー
-    api_url = os.environ.get("USER_CONFIG_API_URL", "http://user-config-api:8080")
-    api_key = os.environ.get("USER_CONFIG_API_KEY", "")
+    # User Config API設定を取得
+    api_config = config.get("user_config_api", {})
+    api_url = api_config.get("url", "http://user-config-api:8080")
+    api_key = api_config.get("api_key", "")
     
     if not api_key:
-        raise ValueError("USER_CONFIG_API_KEY is not set")
+        raise ValueError("user_config_api.api_key is not set")
     
     url = f"{api_url}/config/{task_source}/{username}"
     
@@ -148,10 +228,13 @@ def _fetch_config_from_api(
         # API設定を取得
         api_data = data["data"]
         
-        # LLM設定を上書き
-        config["llm"] = api_data["llm"]
+        # LLM設定をマージ（既存設定にAPIデータで存在するキーだけ上書き）
+        if "llm" in api_data:
+            if "llm" not in config:
+                config["llm"] = {}
+            config["llm"].update(api_data["llm"])
         
-        # システムプロンプトを上書き（環境変数で上書きされていない場合のみ）
+        # システムプロンプトをマージ
         if "system_prompt" in api_data:
             config["system_prompt"] = api_data["system_prompt"]
         
@@ -165,7 +248,7 @@ def _fetch_config_from_api(
 def fetch_user_config(task: Any, base_config: dict[str, Any]) -> dict[str, Any]:
     """タスクのユーザーに基づいて設定を取得する.
 
-    USE_USER_CONFIG_API環境変数がtrueの場合、タスクの作成者のユーザー名を使用して
+    user_config_api.enabledがtrueの場合、タスクの作成者のユーザー名を使用して
     API経由で設定を取得します。そうでない場合はbase_configをそのまま返します。
 
     Args:
@@ -176,7 +259,7 @@ def fetch_user_config(task: Any, base_config: dict[str, Any]) -> dict[str, Any]:
         ユーザー設定でマージされた設定辞書
     """
     # API使用フラグをチェック
-    use_api = os.environ.get("USE_USER_CONFIG_API", "false").lower() == "true"
+    use_api = base_config.get("user_config_api", {}).get("enabled", False)
     if not use_api:
         return base_config
 
@@ -333,15 +416,93 @@ def _override_rabbitmq_config(config: dict[str, Any]) -> None:
         config["rabbitmq"]["queue"] = "mcp_tasks"
 
 
+def _override_feature_flags(config: dict[str, Any]) -> None:
+    """機能フラグを環境変数で上書きする."""
+    # command_executor.enabled
+    env_enabled = os.environ.get("COMMAND_EXECUTOR_ENABLED", "").lower()
+    if env_enabled in ("true", "false"):
+        if "command_executor" not in config:
+            config["command_executor"] = {}
+        config["command_executor"]["enabled"] = env_enabled == "true"
+    
+    # text_editor_mcp.enabled
+    env_enabled = os.environ.get("TEXT_EDITOR_MCP_ENABLED", "").lower()
+    if env_enabled in ("true", "false"):
+        if "text_editor_mcp" not in config:
+            config["text_editor_mcp"] = {}
+        config["text_editor_mcp"]["enabled"] = env_enabled == "true"
+    
+    # issue_to_mr_conversion.enabled
+    env_enabled = os.environ.get("ISSUE_TO_MR_ENABLED", "").lower()
+    if env_enabled in ("true", "false"):
+        if "issue_to_mr_conversion" not in config:
+            config["issue_to_mr_conversion"] = {}
+        config["issue_to_mr_conversion"]["enabled"] = env_enabled == "true"
+    
+    # project_agent_rules.enabled
+    env_enabled = os.environ.get("PROJECT_AGENT_RULES_ENABLED", "").lower()
+    if env_enabled in ("true", "false"):
+        if "project_agent_rules" not in config:
+            config["project_agent_rules"] = {}
+        config["project_agent_rules"]["enabled"] = env_enabled == "true"
+
+
+def _override_executor_config(config: dict[str, Any]) -> None:
+    """Executor設定を環境変数で上書きする."""
+    if "command_executor" not in config:
+        config["command_executor"] = {}
+    if "docker" not in config["command_executor"]:
+        config["command_executor"]["docker"] = {}
+    if "resources" not in config["command_executor"]["docker"]:
+        config["command_executor"]["docker"]["resources"] = {}
+    if "execution" not in config["command_executor"]:
+        config["command_executor"]["execution"] = {}
+    
+    # default_environment
+    default_env = os.environ.get("EXECUTOR_DEFAULT_ENVIRONMENT")
+    if default_env:
+        config["command_executor"]["default_environment"] = default_env
+    
+    # base_image
+    base_image = os.environ.get("EXECUTOR_BASE_IMAGE")
+    if base_image:
+        config["command_executor"]["docker"]["base_image"] = base_image
+    
+    # CPU制限
+    cpu_limit = os.environ.get("EXECUTOR_CPU_LIMIT")
+    if cpu_limit:
+        try:
+            config["command_executor"]["docker"]["resources"]["cpu_limit"] = int(cpu_limit)
+        except ValueError:
+            pass
+    
+    # メモリ制限
+    memory_limit = os.environ.get("EXECUTOR_MEMORY_LIMIT")
+    if memory_limit:
+        config["command_executor"]["docker"]["resources"]["memory_limit"] = memory_limit
+    
+    # タイムアウト
+    timeout = os.environ.get("EXECUTOR_TIMEOUT")
+    if timeout:
+        try:
+            config["command_executor"]["execution"]["timeout_seconds"] = int(timeout)
+        except ValueError:
+            pass
+
+
 def _override_bot_config(config: dict[str, Any]) -> None:
     """ボット名設定を環境変数で上書きする."""
     github_bot_name = os.environ.get("GITHUB_BOT_NAME")
-    if github_bot_name and "github" in config and isinstance(config["github"], dict):
-        config["github"]["assignee"] = github_bot_name
-
+    if github_bot_name:
+        if "github" not in config:
+            config["github"] = {}
+        config["github"]["bot_name"] = github_bot_name
+    
     gitlab_bot_name = os.environ.get("GITLAB_BOT_NAME")
-    if gitlab_bot_name and "gitlab" in config and isinstance(config["gitlab"], dict):
-        config["gitlab"]["assignee"] = gitlab_bot_name
+    if gitlab_bot_name:
+        if "gitlab" not in config:
+            config["gitlab"] = {}
+        config["gitlab"]["bot_name"] = gitlab_bot_name
 
 
 def produce_tasks(
@@ -455,6 +616,12 @@ def consume_tasks(
         
         # Check if this is a resumed task
         task.is_resumed = task_key_dict.get("is_resumed", False)
+
+        # タスクのユーザーに基づいて設定を取得（LLM使用前に実行）
+        task_specific_config = fetch_user_config(task, config)
+        
+        # ハンドラーの設定を更新
+        handler.config = task_specific_config
 
         # タスクの状態確認（再開タスクの場合はスキップ）
         if not task.is_resumed:
@@ -769,14 +936,14 @@ def main() -> None:
     setup_logger()
     logger = logging.getLogger(__name__)
 
-    # タスクソースの設定取得(デフォルト: "github")
-    task_source = os.environ.get("TASK_SOURCE", "github")
-    logger.info("TASK_SOURCE: %s", task_source)
-
     # 設定ファイルの読み込み (環境変数で指定可能、デフォルトはconfig.yaml)
     config_file = os.environ.get("CONFIG_FILE", "config.yaml")
     logger.info("設定ファイル: %s", config_file)
     config = load_config(config_file)
+
+    # タスクソースの設定取得(configから取得)
+    task_source = config.get("task_source", "github")
+    logger.info("TASK_SOURCE: %s", task_source)
 
     # 継続動作モードの判定(コマンドラインオプション優先)
     continuous_mode = args.continuous or config.get("continuous", {}).get("enabled", False)

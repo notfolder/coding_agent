@@ -536,15 +536,34 @@ class TaskGetterFromGitLab(TaskGetter):
     def __init__(self, config: dict[str, Any], mcp_clients: dict[str, MCPToolClient]) -> None:
         self.config = config
         self.mcp_client = mcp_clients["gitlab"]
-        self.gitlab_client = GitlabClient()
+        
+        # configからGitLab設定を取得してクライアントを初期化
+        gitlab_config = config.get("gitlab", {})
+        token = gitlab_config.get("personal_access_token")
+        if not token:
+            raise ValueError(
+                "GitLab Personal Access Token is not configured. "
+                "Please set 'gitlab.personal_access_token' in config.yaml or "
+                "set GITLAB_PERSONAL_ACCESS_TOKEN environment variable."
+            )
+        api_url = gitlab_config.get("api_url")
+        if not api_url:
+            logger.error(
+                "GitLab API URL is not configured. "
+                "gitlab_config: %s", gitlab_config
+            )
+            raise ValueError(
+                "GitLab API URL is not configured. "
+                "Please set 'gitlab.api_url' in config.yaml or "
+                "set GITLAB_API_URL environment variable."
+            )
+        self.gitlab_client = GitlabClient(token=token, api_url=api_url)
 
     def get_task_list(self) -> list[Task]:
         tasks = []
 
         query = self.config["gitlab"].get("query", "")
-        assignee = self.config["gitlab"].get("assignee")
-        if not assignee:
-            assignee = self.config["gitlab"].get("owner", "")
+        assignee = self.config["gitlab"].get("bot_name")
         issues = self.gitlab_client.search_issues(query)
         issues = [
             issue

@@ -432,7 +432,28 @@ class TaskGetterFromGitHub(TaskGetter):
     def __init__(self, config: dict[str, Any], mcp_clients: dict[str, MCPToolClient]) -> None:
         self.config = config
         self.mcp_client = mcp_clients["github"]
-        self.github_client = GithubClient()
+        
+        # configからGitHub設定を取得してクライアントを初期化
+        github_config = config.get("github", {})
+        token = github_config.get("personal_access_token")
+        if not token:
+            raise ValueError(
+                "GitHub Personal Access Token is not configured. "
+                "Please set 'github.personal_access_token' in config.yaml or "
+                "set GITHUB_PERSONAL_ACCESS_TOKEN environment variable."
+            )
+        api_url = github_config.get("api_url")
+        if not api_url:
+            logger.error(
+                "GitHub API URL is not configured. "
+                "github_config: %s", github_config
+            )
+            raise ValueError(
+                "GitHub API URL is not configured. "
+                "Please set 'github.api_url' in config.yaml or "
+                "set GITHUB_API_URL environment variable."
+            )
+        self.github_client = GithubClient(token=token, api_url=api_url)
 
     def get_task_list(self) -> list[Task]:
         # MCPサーバーでissue検索

@@ -96,13 +96,10 @@ class TaskHandler:
             task: 処理対象のタスクオブジェクト
 
         """
-        # タスク固有の設定を取得
-        task_config = self._get_task_config(task)
-
         # Issue → MR/PR 変換処理のチェック
         # Issueタスクの場合、MR/PRに変換して処理を終了する（MRは次回スケジュールで処理される）
-        if self._should_convert_issue_to_mr(task, task_config):
-            conversion_result = self._convert_issue_to_mr(task, task_config)
+        if self._should_convert_issue_to_mr(task, self.config):
+            conversion_result = self._convert_issue_to_mr(task, self.config)
             if conversion_result:
                 self.logger.info(
                     "Issue #%s をMR/PR #%s に変換しました。MR/PRは次回スケジュールで処理されます。",
@@ -114,13 +111,13 @@ class TaskHandler:
             self.logger.warning("Issue→MR/PR変換に失敗しました。通常処理を継続します。")
 
         # 計画機能の有効可否を先に判定する
-        planning_config = task_config.get("planning", {})
+        planning_config = self.config.get("planning", {})
         planning_enabled = planning_config.get("enabled", True)
 
         # 実行環境の初期化（計画前情報収集でもツールが必要なため常に準備）
         execution_manager = self._init_execution_environment(
             task,
-            task_config,
+            self.config,
             prepare=True,
         )
 
@@ -130,17 +127,17 @@ class TaskHandler:
                 # LLMクライアントのツール定義を更新（実行環境ラッパー含む）
                 self._update_llm_client_tools()
                 # Use planning-based task handling
-                self._handle_with_planning(task, task_config, execution_manager)
+                self._handle_with_planning(task, self.config, execution_manager)
             else:
                 # Check if context storage is enabled
-                context_storage_enabled = task_config.get("context_storage", {}).get("enabled", False)
+                context_storage_enabled = self.config.get("context_storage", {}).get("enabled", False)
                 
                 if context_storage_enabled and task.uuid:
                     # Use file-based context storage
-                    self._handle_with_context_storage(task, task_config)
+                    self._handle_with_context_storage(task, self.config)
                 else:
                     # Use legacy in-memory handling
-                    self._handle_legacy(task, task_config)
+                    self._handle_legacy(task, self.config)
         finally:
             # 実行環境のクリーンアップ
             self._cleanup_execution_environment(execution_manager, task)
@@ -572,33 +569,6 @@ class TaskHandler:
                 break
             count += 1
 
-    def _get_task_config(self, task: Task) -> dict[str, Any]:
-        """タスクに応じた設定を取得する.
-        
-        USE_USER_CONFIG_API環境変数がtrueの場合、タスクのユーザーに基づいて
-        API経由で設定を取得します。
-        
-        Args:
-            task: タスクオブジェクト
-        
-        Returns:
-            タスク用の設定辞書
-        """
-        import os
-        
-        # API使用フラグをチェック
-        use_api = os.environ.get("USE_USER_CONFIG_API", "false").lower() == "true"
-        if not use_api:
-            return self.config
-        
-        # main.pyのfetch_user_configを使用
-        try:
-            from main import fetch_user_config
-            return fetch_user_config(task, self.config)
-        except Exception as e:
-            self.logger.warning(f"ユーザー設定の取得に失敗しました: {e}。デフォルト設定を使用します。")
-            return self.config
-
     def _setup_task_handling(self, task: Task, task_config: dict[str, Any] | None = None) -> None:
         """タスク処理の初期設定を行う.
         
@@ -915,20 +885,12 @@ class TaskHandler:
             Command Executorのシステムプロンプト文字列（無効な場合は空文字列）
 
         """
-        import os
-        
         from handlers.execution_environment_manager import ExecutionEnvironmentManager
 
-        # 環境変数による有効/無効チェック
-        env_enabled = os.environ.get("COMMAND_EXECUTOR_ENABLED", "").lower()
-        if env_enabled:
-            if env_enabled != "true":
-                return ""
-        else:
-            # 設定ファイルによる有効/無効チェック
-            executor_config = task_config.get("command_executor", {})
-            if not executor_config.get("enabled", False):
-                return ""
+        # 設定ファイルによる有効/無効チェック
+        executor_config = task_config.get("command_executor", {})
+        if not executor_config.get("enabled", False):
+            return ""
 
         # プロンプトテンプレートを読み込む
         prompt_path = Path("system_prompt_command_executor.txt")
@@ -968,16 +930,10 @@ class TaskHandler:
         """
         import os
 
-        # 環境変数による有効/無効チェック
-        env_enabled = os.environ.get("TEXT_EDITOR_MCP_ENABLED", "").lower()
-        if env_enabled:
-            if env_enabled != "true":
-                return ""
-        else:
-            # 設定ファイルによる有効/無効チェック
-            text_editor_config = task_config.get("text_editor_mcp", {})
-            if not text_editor_config.get("enabled", True):
-                return ""
+        # 設定ファイルによる有効/無効チェック
+        text_editor_config = task_config.get("text_editor_mcp", {})
+        if not text_editor_config.get("enabled", True):
+            return ""
 
         # プロンプトテンプレートを読み込む
         prompt_path = Path("system_prompt_text_editor.txt")
@@ -1452,16 +1408,9 @@ class TaskHandler:
             変換を実行すべき場合 True
 
         """
-        import os
-
         # Issue タスクでない場合は変換不要
         if not self._is_issue_task(task):
             return False
-
-        # 環境変数による有効/無効チェック
-        env_enabled = os.environ.get("ISSUE_TO_MR_ENABLED", "").lower()
-        if env_enabled:
-            return env_enabled == "true"
 
         # 設定ファイルによる有効/無効チェック
         conversion_config = task_config.get("issue_to_mr_conversion", {})

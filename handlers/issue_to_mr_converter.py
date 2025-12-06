@@ -142,11 +142,6 @@ Examples:
 
     def _get_bot_name(self) -> str:
         """ボット名を取得する."""
-        # 環境変数から取得
-        bot_name = os.environ.get("GITHUB_BOT_NAME") or os.environ.get("GITLAB_BOT_NAME")
-        if bot_name:
-            return self._sanitize_for_branch(bot_name)
-
         # 設定から取得
         github_config = self.config.get("github", {})
         gitlab_config = self.config.get("gitlab", {})
@@ -380,11 +375,11 @@ class ContentTransferManager:
         # ボット名を取得
         bot_names = []
 
-        github_bot = os.environ.get("GITHUB_BOT_NAME") or self.config.get("github", {}).get("bot_name")
+        github_bot = self.config.get("github", {}).get("bot_name")
         if github_bot:
             bot_names.append(github_bot.lower())
 
-        gitlab_bot = os.environ.get("GITLAB_BOT_NAME") or self.config.get("gitlab", {}).get("bot_name")
+        gitlab_bot = self.config.get("gitlab", {}).get("bot_name")
         if gitlab_bot:
             bot_names.append(gitlab_bot.lower())
 
@@ -435,11 +430,6 @@ class IssueToMRConverter:
 
     def is_enabled(self) -> bool:
         """Issue→MR/PR変換機能が有効かどうかを確認する."""
-        # 環境変数による有効/無効チェック
-        env_enabled = os.environ.get("ISSUE_TO_MR_ENABLED", "").lower()
-        if env_enabled:
-            return env_enabled == "true"
-
         # 設定ファイルによる有効/無効チェック
         return self._conversion_config.get("enabled", True)
 
@@ -728,8 +718,7 @@ class IssueToMRConverter:
 
                 # アサインを設定（ボット名を優先）
                 bot_name = (
-                    os.environ.get("GITHUB_BOT_NAME")
-                    or self.config.get("github", {}).get("bot_name")
+                    self.config.get("github", {}).get("bot_name")
                     or self.config.get("github", {}).get("assignee")
                 )
                 if bot_name:
@@ -753,8 +742,7 @@ class IssueToMRConverter:
 
                 # アサインを設定（ボット名を優先）
                 bot_name = (
-                    os.environ.get("GITLAB_BOT_NAME")
-                    or self.config.get("gitlab", {}).get("bot_name")
+                    self.config.get("gitlab", {}).get("bot_name")
                     or self.config.get("gitlab", {}).get("assignee")
                 )
                 if bot_name:
