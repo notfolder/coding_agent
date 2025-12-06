@@ -142,6 +142,9 @@ class PrePlanningManager:
         self.llm_client.send_user_message(prompt)
         response, _, tokens = self.llm_client.get_response()
         self.logger.info("依頼内容の理解LLM応答 (トークン数: %d)", tokens)
+        
+        # ProgressCommentManagerを更新
+        self._update_progress_after_llm_call(response)
 
         # トークン数を記録
         if self.context_manager:
@@ -177,6 +180,9 @@ class PrePlanningManager:
         self.llm_client.send_user_message(prompt)
         response, _, tokens = self.llm_client.get_response()
         self.logger.info("情報収集計画LLM応答 (トークン数: %d)", tokens)
+        
+        # ProgressCommentManagerを更新
+        self._update_progress_after_llm_call(response)
 
         # トークン数を記録
         if self.context_manager:
@@ -771,6 +777,9 @@ class PrePlanningManager:
         prompt = self._build_assumption_prompt(failed_item, plan_item)
         self.llm_client.send_user_message(prompt)
         response, _, tokens = self.llm_client.get_response()
+        
+        # ProgressCommentManagerを更新
+        self._update_progress_after_llm_call(response)
 
         # トークン数を記録
         if self.context_manager:
@@ -1084,4 +1093,33 @@ class PrePlanningManager:
             title="⚠️ Information Assumed",
             details=details,
         )
+
+    def _update_progress_after_llm_call(self, response: str | dict[str, Any]) -> None:
+        """LLM呼び出し後にProgressCommentManagerを更新.
+        
+        Args:
+            response: LLM応答（dictまたはstr）
+        
+        """
+        if not self.progress_manager:
+            return
+        
+        # LLM呼び出し回数更新
+        self.progress_manager.update_status(
+            llm_call_count=self.progress_manager.llm_call_count + 1,
+        )
+        
+        # commentフィールド抽出
+        llm_comment = None
+        if isinstance(response, dict):
+            llm_comment = response.get("comment")
+        elif isinstance(response, str):
+            try:
+                parsed = json.loads(response)
+                if isinstance(parsed, dict):
+                    llm_comment = parsed.get("comment")
+            except (json.JSONDecodeError, ValueError):
+                pass
+        
+        self.progress_manager.set_llm_comment(llm_comment)
 
