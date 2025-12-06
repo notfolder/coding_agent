@@ -106,6 +106,24 @@ class TaskHandler:
                     self._get_issue_number(task),
                     conversion_result.mr_number,
                 )
+                # Issue→MR変換が成功した場合、タスクをcompletedに更新
+                if task.uuid:
+                    try:
+                        from db.task_db import TaskDBManager
+                        
+                        db_manager = TaskDBManager(self.config)
+                        db_task = db_manager.get_task(task.uuid)
+                        if db_task:
+                            db_task.status = "completed"
+                            db_manager.save_task(db_task)
+                            self.logger.debug(
+                                "Issue→MR変換完了: タスクステータスをcompletedに更新: uuid=%s",
+                                task.uuid,
+                            )
+                    except Exception as e:
+                        self.logger.warning(
+                            "Issue→MR変換後のステータス更新に失敗: %s", e, exc_info=True
+                        )
                 return
             # 変換に失敗した場合は通常処理に進む（エラーはログに記録済み）
             self.logger.warning("Issue→MR/PR変換に失敗しました。通常処理を継続します。")
@@ -1692,8 +1710,27 @@ class TaskHandler:
                         from context_storage import TaskContextManager
                         from db.task_db import TaskDBManager
 
-                        # TaskContextManagerを一時的に作成（統計記録用）
+                        # タスクがDBに存在しない場合は、TaskContextManagerを使って登録
                         db_manager = TaskDBManager(task_config)
+                        db_task = db_manager.get_task(task.uuid)
+                        
+                        if not db_task:
+                            # TaskContextManagerを使ってタスクを登録
+                            # （TaskContextManagerの__init__で_register_or_update_taskが呼ばれる）
+                            task_key = task.get_task_key()
+                            temp_context_manager = TaskContextManager(
+                                task_key=task_key,
+                                task_uuid=task.uuid,
+                                config=task_config,
+                                user=task.user,
+                                is_resumed=False,
+                            )
+                            # DBTaskを取得
+                            db_task = temp_context_manager._db_task
+                            self.logger.debug(
+                                "Issue→MR変換用にTaskContextManagerでタスクをDBに登録: uuid=%s",
+                                task.uuid,
+                            )
                         
                         # 統計記録用のフック関数を設定
                         def conversion_statistics_hook(llm_calls: int, tokens: int) -> None:
