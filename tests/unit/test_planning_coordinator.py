@@ -1158,14 +1158,14 @@ class TestEnvironmentSelection(unittest.TestCase):
         prompt = coordinator._build_environment_selection_prompt()
 
         # プロンプトに必要な要素が含まれていることを確認
-        assert "Execution Environment Selection" in prompt
+        assert "Environment Setup" in prompt
         assert "python" in prompt
         assert "node" in prompt
         assert "java" in prompt
         assert "go" in prompt
         assert "miniforge" in prompt
-        assert "Default Environment" in prompt
-        assert "Selection Criteria" in prompt
+        assert "setup_commands" in prompt
+        assert "verification" in prompt
         assert "selected_environment" in prompt
 
     def test_build_planning_prompt_includes_environment_selection(self) -> None:
@@ -1182,7 +1182,7 @@ class TestEnvironmentSelection(unittest.TestCase):
         prompt = coordinator._build_planning_prompt([])
 
         # 環境選択情報が含まれていることを確認
-        assert "Execution Environment Selection" in prompt
+        assert "Environment Setup" in prompt
         assert "selected_environment" in prompt
 
     def test_get_planning_state_includes_selected_environment(self) -> None:
