@@ -4,7 +4,13 @@
 継承される抽象基底クラスを定義しています。
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    pass
 
 
 class LLMClient(ABC):
@@ -12,7 +18,16 @@ class LLMClient(ABC):
 
     このクラスは、OpenAI、Ollama、LM Studio等の様々なLLMプロバイダーに対して
     統一されたインターフェースを提供するための基底クラスです。
+    
+    トークン統計記録フック機能:
+    - set_statistics_hook()でフック関数を設定
+    - get_response()呼び出し後に自動的にフックが実行される
     """
+
+    def __init__(self) -> None:
+        """LLMクライアントを初期化する."""
+        # トークン統計記録用のフック関数
+        self._statistics_hook: Callable[[int, int], None] | None = None
 
     @abstractmethod
     def send_system_prompt(self, prompt: str) -> None:
@@ -40,6 +55,36 @@ class LLMClient(ABC):
             タプル: (LLMが生成したレスポンス文字列, function callsのリスト, トークン数)
 
         """
+
+    def set_statistics_hook(self, hook: Callable[[int, int], None] | None) -> None:
+        """トークン統計記録用のフック関数を設定する.
+        
+        このフックはget_response()が呼ばれるたびに自動的に実行されます。
+        
+        Args:
+            hook: フック関数。引数は(llm_calls: int, tokens: int)。
+                  Noneを設定するとフックを無効化します。
+        
+        """
+        self._statistics_hook = hook
+
+    def _invoke_statistics_hook(self, tokens: int) -> None:
+        """統計記録フックを呼び出す.
+        
+        サブクラスのget_response()実装内で呼び出す必要があります。
+        
+        Args:
+            tokens: 使用したトークン数
+        
+        """
+        if self._statistics_hook is not None:
+            try:
+                self._statistics_hook(llm_calls=1, tokens=tokens)
+            except Exception:
+                # フックのエラーは無視（統計記録失敗してもLLM処理は継続）
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning("統計記録フックの実行に失敗しました", exc_info=True)
 
     def add_assistant_message(self, message: str) -> None:  # noqa: B027
         """アシスタントメッセージをメッセージ履歴に追加する.

@@ -110,6 +110,10 @@ class TaskHandler:
             # 変換に失敗した場合は通常処理に進む（エラーはログに記録済み）
             self.logger.warning("Issue→MR/PR変換に失敗しました。通常処理を継続します。")
 
+        # トークン統計記録フックを設定（全モード共通）
+        # UUIDがある場合のみ統計記録を有効化
+        self._setup_statistics_hook(task)
+
         # 計画機能の有効可否を先に判定する
         planning_config = self.config.get("planning", {})
         planning_enabled = planning_config.get("enabled", True)
@@ -141,6 +145,59 @@ class TaskHandler:
         finally:
             # 実行環境のクリーンアップ
             self._cleanup_execution_environment(execution_manager, task)
+            
+            # 統計記録フックをクリア
+            self._clear_statistics_hook()
+
+    def _setup_statistics_hook(self, task: Task) -> None:
+        """トークン統計記録フックを設定する.
+        
+        タスクにUUIDがある場合、TaskContextManagerを作成（または取得）し、
+        LLMクライアントに統計記録フックを設定します。
+        
+        Args:
+            task: タスクオブジェクト
+        
+        """
+        if not task.uuid:
+            self.logger.info("タスクにUUIDがないため、トークン統計記録は無効です")
+            return
+        
+        try:
+            from context_storage import TaskContextManager
+            
+            # TaskContextManagerを作成してインスタンス変数に保持
+            # （planning/context_storageモードでは既に作成されているが、legacyモード用に保険）
+            self._statistics_context_manager = TaskContextManager(
+                task_key=task.get_task_key(),
+                task_uuid=task.uuid,
+                config=self.config,
+                user=task.user,
+            )
+            
+            # LLMクライアントにフックを設定
+            def statistics_hook(llm_calls: int, tokens: int) -> None:
+                """統計記録フック関数."""
+                self._statistics_context_manager.update_statistics(
+                    llm_calls=llm_calls,
+                    tokens=tokens,
+                )
+            
+            self.llm_client.set_statistics_hook(statistics_hook)
+            self.logger.info("トークン統計記録フックを設定しました: uuid=%s", task.uuid)
+            
+        except Exception as e:
+            self.logger.warning(
+                "トークン統計記録フックの設定に失敗しました（統計は記録されません）: %s", 
+                e,
+                exc_info=True,
+            )
+            self._statistics_context_manager = None
+    
+    def _clear_statistics_hook(self) -> None:
+        """トークン統計記録フックをクリアする."""
+        if hasattr(self, 'llm_client') and self.llm_client:
+            self.llm_client.set_statistics_hook(None)
 
     def _init_execution_environment(
         self,
