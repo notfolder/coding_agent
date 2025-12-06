@@ -473,6 +473,7 @@ class IssueToMRConverter:
         llm_client: LLMClient,
         config: dict[str, Any],
         platform: str,
+        task_uuid: str | None = None,
         gitlab_client: GitlabClient = None,
         github_client: GithubClient = None,
     ) -> None:
@@ -483,6 +484,7 @@ class IssueToMRConverter:
             llm_client: LLMクライアント
             config: アプリケーション設定
             platform: プラットフォーム名 ("github" または "gitlab")
+            task_uuid: タスクのUUID（記録・追跡用）
             gitlab_client: GitLabClientインスタンス (GitLabの場合)
             github_client: GithubClientインスタンス (GitHubの場合)
 
@@ -491,6 +493,7 @@ class IssueToMRConverter:
         self.llm_client = llm_client
         self.config = config
         self.platform = platform
+        self.task_uuid = task_uuid
         self.gitlab_client = gitlab_client
         self.github_client = github_client
         self.logger = logging.getLogger(__name__)
@@ -901,6 +904,12 @@ class IssueToMRConverter:
     def _notify_source_issue(self, mr_number: int, branch_name: str, mr_url: str | None, base_branch: str) -> None:
         """元Issueに作成報告をコメントする."""
         mr_pr_type = "マージリクエスト" if self.platform == "gitlab" else "プルリクエスト"
+        
+        # UUID行を追加
+        uuid_line = ""
+        if self.task_uuid:
+            uuid_line = f"\n- **Task UUID**: `{self.task_uuid}`"
+        
         comment_body = f"""## 🚀 {mr_pr_type}を作成しました
 
 この Issue の内容に基づいて、以下の{mr_pr_type}を作成しました：
@@ -908,7 +917,7 @@ class IssueToMRConverter:
 - **{mr_pr_type}**: #{mr_number}
 - **作業用ブランチ**: `{branch_name}`
 - **ベースブランチ**: `{base_branch}`
-- **リンク**: {mr_url or "N/A"}
+- **リンク**: {mr_url or "N/A"}{uuid_line}
 
 以降の処理は{mr_pr_type}上で進めます。"""
 

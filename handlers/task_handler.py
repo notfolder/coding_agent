@@ -1768,6 +1768,7 @@ class TaskHandler:
                         llm_client=conversion_llm_client,
                         config=task_config,
                         platform=platform,
+                        task_uuid=task.uuid,
                         gitlab_client=task.gitlab_client if hasattr(task, "gitlab_client") else None,
                     )
                 else:
@@ -1777,6 +1778,7 @@ class TaskHandler:
                         llm_client=conversion_llm_client,
                         config=task_config,
                         platform=platform,
+                        task_uuid=task.uuid,
                         github_client=task.github_client if hasattr(task, "github_client") else None,
                     )
 

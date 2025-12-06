@@ -45,6 +45,7 @@ class ProgressCommentManager:
         self,
         task: Any,
         logger: logging.Logger,
+        task_uuid: str | None = None,
         enabled: bool = True,
         max_history_entries: int = 100,
     ) -> None:
@@ -53,11 +54,13 @@ class ProgressCommentManager:
         Args:
             task: Taskオブジェクト（comment/update_commentメソッドを持つ）
             logger: ロガー
+            task_uuid: タスクのUUID（記録・追跡用）
             enabled: 進捗コメント機能の有効/無効
             max_history_entries: 履歴エントリの最大保持数
         """
         self.task = task
         self.logger = logger
+        self.task_uuid = task_uuid
         self.enabled = enabled
         self.max_history_entries = max_history_entries
 
@@ -323,8 +326,11 @@ class ProgressCommentManager:
         """
         sections = []
 
-        # ヘッダー
-        sections.append("# 🤖 タスク実行進捗")
+        # ヘッダー（UUID含む）
+        header = "# 🤖 タスク実行進捗"
+        if self.task_uuid:
+            header += f"\n\n**Task UUID:** `{self.task_uuid}`"
+        sections.append(header)
         
         if task_info:
             sections.append(f"\n{task_info}")

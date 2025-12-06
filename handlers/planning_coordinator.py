@@ -102,6 +102,7 @@ class PlanningCoordinator:
         self.progress_manager = ProgressCommentManager(
             task=task,
             logger=self.logger,
+            task_uuid=task.uuid,
             enabled=progress_config.get("enabled", True),
             max_history_entries=progress_config.get("max_history_entries", 100),
         )
