@@ -3,7 +3,6 @@ import unittest
 from unittest.mock import MagicMock
 
 from handlers.environment_verifier import EnvironmentVerifier
-from handlers.execution_environment_manager import ExecutionResult
 
 
 class TestEnvironmentVerifier(unittest.TestCase):
@@ -24,14 +23,14 @@ class TestEnvironmentVerifier(unittest.TestCase):
         ]
         
         # モックの設定
-        self.execution_manager.execute_command.return_value = ExecutionResult(
-            exit_code=0,
-            stdout="OK\n",
-            stderr="",
-            duration_ms=100,
-        )
+        self.execution_manager.execute_command.return_value = {
+            "exit_code": 0,
+            "stdout": "OK\n",
+            "stderr": "",
+            "duration_ms": 100,
+        }
         
-        result = self.verifier.verify_setup(verification_commands, "container_id")
+        result = self.verifier.verify_setup(verification_commands)
         
         self.assertTrue(result["success"])
         self.assertEqual(len(result["results"]), 1)
@@ -47,14 +46,14 @@ class TestEnvironmentVerifier(unittest.TestCase):
         ]
         
         # モックの設定（出力が異なる）
-        self.execution_manager.execute_command.return_value = ExecutionResult(
-            exit_code=0,
-            stdout="NG\n",
-            stderr="",
-            duration_ms=100,
-        )
+        self.execution_manager.execute_command.return_value = {
+            "exit_code": 0,
+            "stdout": "NG\n",
+            "stderr": "",
+            "duration_ms": 100,
+        }
         
-        result = self.verifier.verify_setup(verification_commands, "container_id")
+        result = self.verifier.verify_setup(verification_commands)
         
         self.assertFalse(result["success"])
         self.assertFalse(result["results"][0]["success"])
@@ -70,14 +69,14 @@ class TestEnvironmentVerifier(unittest.TestCase):
         ]
         
         # モックの設定（exit_codeが非ゼロ）
-        self.execution_manager.execute_command.return_value = ExecutionResult(
-            exit_code=1,
-            stdout="",
-            stderr="ModuleNotFoundError: No module named 'nonexistent'",
-            duration_ms=100,
-        )
+        self.execution_manager.execute_command.return_value = {
+            "exit_code": 1,
+            "stdout": "",
+            "stderr": "ModuleNotFoundError: No module named 'nonexistent'",
+            "duration_ms": 100,
+        }
         
-        result = self.verifier.verify_setup(verification_commands, "container_id")
+        result = self.verifier.verify_setup(verification_commands)
         
         self.assertFalse(result["success"])
         self.assertFalse(result["results"][0]["success"])
@@ -98,11 +97,11 @@ class TestEnvironmentVerifier(unittest.TestCase):
         
         # モックの設定
         self.execution_manager.execute_command.side_effect = [
-            ExecutionResult(exit_code=0, stdout="OK\n", stderr="", duration_ms=100),
-            ExecutionResult(exit_code=0, stdout="3\n", stderr="", duration_ms=100),
+            {"exit_code": 0, "stdout": "OK\n", "stderr": "", "duration_ms": 100},
+            {"exit_code": 0, "stdout": "3\n", "stderr": "", "duration_ms": 100},
         ]
         
-        result = self.verifier.verify_setup(verification_commands, "container_id")
+        result = self.verifier.verify_setup(verification_commands)
         
         self.assertTrue(result["success"])
         self.assertEqual(len(result["results"]), 2)
@@ -113,7 +112,7 @@ class TestEnvironmentVerifier(unittest.TestCase):
         """検証コマンドが空の場合のテスト."""
         verification_commands = []
         
-        result = self.verifier.verify_setup(verification_commands, "container_id")
+        result = self.verifier.verify_setup(verification_commands)
         
         self.assertTrue(result["success"])
         self.assertEqual(len(result["results"]), 0)
@@ -130,7 +129,7 @@ class TestEnvironmentVerifier(unittest.TestCase):
         # モックの設定（例外を発生させる）
         self.execution_manager.execute_command.side_effect = Exception("Test error")
         
-        result = self.verifier.verify_setup(verification_commands, "container_id")
+        result = self.verifier.verify_setup(verification_commands)
         
         self.assertFalse(result["success"])
         self.assertFalse(result["results"][0]["success"])
