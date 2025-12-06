@@ -32,9 +32,6 @@ class LMStudioClient(LLMClient):
             context_dir: コンテキストディレクトリパス(必須)
 
         """
-        # 基底クラスの初期化（統計フック初期化）
-        super().__init__()
-        
         base_url = config.get("base_url", "localhost:1234")
         # Add http:// if not present
         if not base_url.startswith(("http://", "https://")):
@@ -207,9 +204,6 @@ class LMStudioClient(LLMClient):
             request_tokens = estimate_messages_tokens(request_data.get("messages", []))
             response_tokens = len(reply) if reply else 0
             total_tokens = request_tokens + response_tokens
-            
-            # 統計記録フックを呼び出し
-            self._invoke_statistics_hook(total_tokens)
             
             return reply, functions, total_tokens
         

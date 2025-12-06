@@ -148,6 +148,7 @@ class PrePlanningManager:
 
         # トークン数を記録
         if self.context_manager:
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
 
         # レスポンスをパース
         result = self._parse_understanding_response(response)
@@ -185,6 +186,7 @@ class PrePlanningManager:
 
         # トークン数を記録
         if self.context_manager:
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
 
         # レスポンスをパース
         result = self._parse_collection_planning_response(response)
@@ -781,6 +783,7 @@ class PrePlanningManager:
 
         # トークン数を記録
         if self.context_manager:
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
 
         # レスポンスをパース
         result = self._parse_json_response(response)

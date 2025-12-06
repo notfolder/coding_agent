@@ -1078,6 +1078,7 @@ class PlanningCoordinator:
             self.logger.info("Planning LLM response (tokens: %d)", tokens)
 
             # トークン数を記録
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
 
             # Parse response
             plan = self._parse_planning_response(response)
@@ -1307,6 +1308,7 @@ class PlanningCoordinator:
             self.logger.info("Action execution LLM response: %s", resp)
 
             # トークン数を記録
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
 
             # Initialize error state for tool execution
             error_state = {"last_tool": None, "tool_error_count": 0}
@@ -1505,6 +1507,7 @@ class PlanningCoordinator:
             self.logger.info("Reflection LLM response (tokens: %d)", tokens)
 
             # トークン数を記録
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
 
             # Parse reflection
             reflection = self._parse_reflection_response(response)
@@ -1553,6 +1556,7 @@ class PlanningCoordinator:
             self.logger.info("Plan revision LLM response (tokens: %d)", tokens)
 
             # トークン数を記録
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
 
             # Parse revised plan
             revised_plan = self._parse_planning_response(response)
@@ -1761,6 +1765,7 @@ Please reply to this comment with your answers."""
             )
             self.llm_client.send_user_message(remaining_prompt)
             response, _, tokens = self.llm_client.get_response()
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
 
             # 新しいアクションをパース
             new_plan = self._parse_planning_response(response)
@@ -2435,6 +2440,7 @@ Maintain the same JSON format as before for action_plan.actions."""
             self.logger.info("Verification phase LLM response (tokens: %d)", tokens)
 
             # トークン数を記録
+            self.context_manager.update_statistics(llm_calls=1, tokens=tokens)
 
             # 検証のためにツールを使用する可能性があるため、function callsを処理
             error_state = {"last_tool": None, "tool_error_count": 0}
@@ -2447,6 +2453,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                 # ツール実行後の追加応答を取得
                 response, _, additional_tokens = self.llm_client.get_response()
                 tokens += additional_tokens
+                self.context_manager.update_statistics(llm_calls=1, tokens=additional_tokens)
 
             # 検証結果をパース
             verification_result = self._parse_planning_response(response)
