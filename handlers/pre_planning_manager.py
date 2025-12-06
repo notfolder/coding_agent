@@ -67,6 +67,7 @@ class PrePlanningManager:
         self.collection_results: list[dict[str, Any]] = []
         self.assumptions: list[dict[str, Any]] = []
         self.information_gaps: list[dict[str, Any]] = []
+        self.environment_info: dict[str, Any] = {}
 
         # 現在のサブフェーズ
         self.current_subphase = "understanding"
@@ -90,6 +91,9 @@ class PrePlanningManager:
         # 1. 依頼内容の理解
         self.current_subphase = "understanding"
         self.understanding_result = self.execute_understanding()
+
+        # 1.5. 環境情報の収集
+        self.environment_info = self.collect_environment_info()
 
         # 理解完了通知
         if self.notification_config.get("notify_on_understanding_complete", True):
@@ -293,7 +297,8 @@ class PrePlanningManager:
                 "assumptions": self.assumptions,
                 "information_gaps": self.information_gaps,
                 "recommendations_for_planning": recommendations,
-            }
+            },
+            "environment_info": self.environment_info,
         }
 
     def get_pre_planning_state(self) -> dict[str, Any]:
@@ -1084,6 +1089,76 @@ class PrePlanningManager:
             title="⚠️ Information Assumed",
             details=details,
         )
+
+    def collect_environment_info(self) -> dict[str, Any]:
+        """環境情報を収集する.
+        
+        Returns:
+            環境情報の辞書
+        """
+        from handlers.environment_analyzer import EnvironmentAnalyzer
+        
+        self.logger.info("環境情報の収集を開始します")
+        
+        # EnvironmentAnalyzerを初期化
+        analyzer = EnvironmentAnalyzer(self.mcp_clients)
+        
+        # ファイルリストを取得
+        file_list = self._get_project_file_list()
+        
+        if not file_list:
+            self.logger.warning("プロジェクトのファイルリストを取得できませんでした")
+            return {
+                "detected_files": {},
+                "file_contents": {},
+            }
+        
+        # 環境ファイルを検出
+        detected_files = analyzer.detect_environment_files(file_list)
+        
+        # ファイル内容を解析
+        environment_info = analyzer.analyze_environment_files(detected_files)
+        
+        self.logger.info("環境情報の収集が完了しました")
+        return environment_info
+
+    def _get_project_file_list(self) -> list[str]:
+        """プロジェクトのファイルリストを取得する.
+        
+        Returns:
+            ファイルパスのリスト
+        """
+        from handlers.file_list_context_loader import FileListContextLoader
+        
+        try:
+            # FileListContextLoaderを使用してファイルリストを取得
+            loader = FileListContextLoader(
+                config=self.config,
+                mcp_clients=self.mcp_clients,
+            )
+            
+            # タスクからリポジトリ情報を取得
+            task_key = self.task.get_task_key()
+            owner = getattr(task_key, "owner", None)
+            repo = getattr(task_key, "repo", None)
+            project_id = getattr(task_key, "project_id", None)
+            
+            # GitHub の場合
+            if owner and repo and "github" in self.mcp_clients:
+                file_list = loader._fetch_file_list_from_github(owner, repo)
+                if file_list:
+                    return loader._apply_depth_limit(file_list, loader.max_depth)
+            
+            # GitLab の場合
+            elif project_id and "gitlab" in self.mcp_clients:
+                file_list = loader._fetch_file_list_from_gitlab(str(project_id))
+                if file_list:
+                    return loader._apply_depth_limit(file_list, loader.max_depth)
+            
+        except Exception as e:
+            self.logger.debug("ファイルリスト取得失敗: %s", e)
+        
+        return []
 
     def _update_progress_after_llm_call(self, response: str | dict[str, Any]) -> None:
         """LLM呼び出し後にProgressCommentManagerを更新.

@@ -445,6 +445,12 @@ class PlanningCoordinator:
             # Check for new comments after planning phase
             self._check_and_add_new_comments()
 
+            # Environment setup sub-phase
+            environment_setup_result = self._execute_environment_setup_phase()
+            if environment_setup_result and environment_setup_result.get("overall_status") == "failed":
+                # 環境構築失敗時は警告を出すが実行フェーズに進む
+                self.logger.warning("環境構築が失敗しましたが、実行フェーズに進みます")
+
             # Ensure execution environment is ready before execution phase
             if not self._ensure_execution_environment_ready():
                 self.logger.error("Execution environment preparation failed. Aborting task.")
@@ -1098,6 +1104,56 @@ class PlanningCoordinator:
             self._post_llm_error_comment("planning", str(e))
             return None
 
+    def _execute_environment_setup_phase(self) -> dict[str, Any] | None:
+        """環境構築サブフェーズを実行する.
+        
+        計画フェーズで生成された環境構築情報を使用して環境を構築します。
+        
+        Returns:
+            環境構築結果の辞書、または実行しない場合はNone
+        """
+        if not self.current_plan:
+            self.logger.warning("計画が存在しないため環境構築をスキップします")
+            return None
+
+        if not self.execution_manager:
+            self.logger.info("実行環境マネージャーがないため環境構築をスキップします")
+            return None
+
+        # 計画から環境構築情報を抽出
+        environment_setup_info = self._extract_environment_setup_info(self.current_plan)
+        
+        # セットアップコマンドがない場合はスキップ
+        if not environment_setup_info.get("setup_commands"):
+            self.logger.info("環境構築コマンドがないため環境構築をスキップします")
+            return None
+
+        try:
+            # EnvironmentSetupManagerを作成して実行
+            from handlers.environment_setup_manager import EnvironmentSetupManager
+
+            setup_manager = EnvironmentSetupManager(
+                config=self.config,
+                llm_client=self.llm_client,
+                execution_manager=self.execution_manager,
+                progress_manager=self.progress_manager,
+                task=self.task,
+            )
+
+            self.logger.info("環境構築サブフェーズを開始します")
+            result = setup_manager.execute(environment_setup_info)
+            
+            return result
+
+        except Exception as e:
+            self.logger.error("環境構築サブフェーズでエラーが発生しました: %s", e, exc_info=True)
+            # エラーが発生しても実行フェーズに進む
+            return {
+                "overall_status": "failed",
+                "errors": [{"type": "exception", "message": str(e)}],
+            }
+
+
     def _prepare_default_environment(self) -> None:
         """計画フェーズ前にデフォルト実行環境を準備する.
         
@@ -1190,6 +1246,50 @@ class PlanningCoordinator:
             return selected_env
 
         return None
+
+    def _extract_environment_setup_info(self, plan: dict[str, Any]) -> dict[str, Any]:
+        """計画応答から環境構築情報を抽出する.
+
+        Args:
+            plan: 計画応答の辞書
+
+        Returns:
+            環境構築情報の辞書
+
+        """
+        from handlers.execution_environment_manager import DEFAULT_ENVIRONMENT
+
+        if not isinstance(plan, dict):
+            self.logger.warning("計画が辞書形式ではありません")
+            return {"name": DEFAULT_ENVIRONMENT, "setup_commands": [], "verification": []}
+
+        selected_env = plan.get("selected_environment")
+
+        if selected_env is None:
+            self.logger.info("計画応答にselected_environmentが含まれていません")
+            return {"name": DEFAULT_ENVIRONMENT, "setup_commands": [], "verification": []}
+
+        # selected_environmentが辞書形式の場合
+        if isinstance(selected_env, dict):
+            env_name = selected_env.get("name", DEFAULT_ENVIRONMENT)
+            setup_commands = selected_env.get("setup_commands", [])
+            verification = selected_env.get("verification", [])
+            reason = selected_env.get("reason", "")
+            detected_files = selected_env.get("detected_files", [])
+
+            return {
+                "name": env_name,
+                "reason": reason,
+                "detected_files": detected_files,
+                "setup_commands": setup_commands,
+                "verification": verification,
+            }
+
+        # selected_environmentが文字列形式の場合
+        if isinstance(selected_env, str):
+            return {"name": selected_env, "setup_commands": [], "verification": []}
+
+        return {"name": DEFAULT_ENVIRONMENT, "setup_commands": [], "verification": []}
 
     def _ensure_execution_environment_ready(self) -> bool:
         """実行フェーズ開始前に実行環境コンテナを準備する.
@@ -2111,7 +2211,7 @@ Maintain the same JSON format as before for action_plan.actions."""
     def _build_environment_selection_prompt(self) -> str:
         """実行環境選択プロンプトを構築する.
 
-        利用可能な環境リストと選択指示を含むプロンプトを生成します。
+        利用可能な環境リストと選択指示、環境構築コマンド生成指示を含むプロンプトを生成します。
 
         Returns:
             環境選択プロンプト文字列
@@ -2142,35 +2242,75 @@ Maintain the same JSON format as before for action_plan.actions."""
             "go": "Go projects, CLI tools, microservices",
         }
 
+        # 計画前情報収集フェーズで収集された環境情報を取得
+        environment_info_text = ""
+        if self.pre_planning_result:
+            environment_info = self.pre_planning_result.get("environment_info", {})
+            if environment_info:
+                detected_files = environment_info.get("detected_files", {})
+                if detected_files:
+                    environment_info_text = "\n**Detected Project Environment Files:**\n"
+                    for file_path, env_type in detected_files.items():
+                        environment_info_text += f"- {file_path} ({env_type})\n"
+                    environment_info_text += "\n"
+
         prompt_lines = [
             "",
-            "## Execution Environment Selection",
+            "## Environment Setup",
             "",
-            "You must select an appropriate execution environment for this task. The following environments are available:",
+            "Available execution environments:",
+            "- python: Python 3.11 environment with pip",
+            "- miniforge: Miniforge environment with conda, suitable for scientific computing",
+            "- node: Node.js environment with npm",
+            "- java: Java environment with Maven/Gradle",
+            "- go: Go environment with go command",
             "",
-            "| Environment | Image | Recommended For |",
-            "|-------------|-------|-----------------|",
         ]
-
-        for env_name, image in environments.items():
-            recommendation = env_recommendations.get(env_name, "General purpose")
-            prompt_lines.append(f"| {env_name} | {image} | {recommendation} |")
-
+        
+        if environment_info_text:
+            prompt_lines.append(environment_info_text)
+        
         prompt_lines.extend([
+            "Tasks to perform:",
+            "1. Select the most appropriate execution environment based on the project environment information",
+            "2. Generate environment setup commands for the selected environment",
+            "3. Generate verification commands with exact expected outputs",
             "",
-            f"**Default Environment**: {default_env}",
-            "",
-            "**Selection Criteria:**",
-            "- Check the project's dependency files (requirements.txt, package.json, go.mod, pom.xml, condaenv.yaml, environment.yml)",
-            "- Consider the main programming language of the task",
-            "- For data science projects with conda environments, select 'miniforge'",
-            "- For pure Python projects without conda, select 'python'",
-            "",
-            "Include your selection in the response with 'selected_environment' field:",
+            "Include the following in your planning JSON response:",
+            "{",
             '  "selected_environment": {',
             '    "name": "environment_name",',
-            '    "reasoning": "Why this environment was selected"',
-            '  }',
+            '    "reason": "reason for selection",',
+            '    "detected_files": ["detected file list"],',
+            '    "setup_commands": [',
+            '      "setup command 1",',
+            '      "setup command 2"',
+            "    ],",
+            '    "verification": [',
+            "      {",
+            '        "command": "verification command 1",',
+            '        "expected_output": "exact expected output for complete match"',
+            "      },",
+            "      {",
+            '        "command": "verification command 2",',
+            '        "expected_output": "exact expected output for complete match"',
+            "      }",
+            "    ]",
+            "  }",
+            "}",
+            "",
+            "Important notes for verification commands:",
+            "- Generate verification commands that produce deterministic, exact outputs",
+            "- The expected_output must match the actual command output exactly (complete string match)",
+            "- Use simple commands that return predictable outputs",
+            "- Examples of good verification commands:",
+            "  - `python -c 'print(\"OK\")'` with expected_output: \"OK\"",
+            "  - `node -e 'console.log(\"OK\")'` with expected_output: \"OK\"",
+            "  - `python -c 'import sys; print(sys.version_info.major)'` with expected_output: \"3\"",
+            "- Avoid commands with variable outputs (version numbers, timestamps, etc.) unless you can control the output format",
+            "- If you need to check versions, use commands that extract only the major version or a specific component",
+            "",
+            "The environment setup commands will be executed in the environment setup sub-phase after the planning phase.",
             "",
         ])
 
