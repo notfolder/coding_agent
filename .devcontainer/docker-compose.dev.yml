@@ -4,7 +4,7 @@ services:
   coding-agent-dev:
     build:
       context: ../coding_agent
-      dockerfile: Dockerfile
+      dockerfile: .devcontainer/Dockerfile
     container_name: coding-agent-dev
     command: sleep infinity
     depends_on:
