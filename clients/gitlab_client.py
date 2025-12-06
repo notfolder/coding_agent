@@ -278,6 +278,7 @@ class GitlabClient:
         description: str | None = None,
         assignee_ids: list[int] | None = None,
         labels: list[str] | None = None,
+        draft: bool = False,
     ) -> dict[str, Any]:
         """Create a new merge request.
         
@@ -289,15 +290,22 @@ class GitlabClient:
             description: MR description (optional)
             assignee_ids: List of user IDs to assign (optional)
             labels: List of labels to add (optional)
+            draft: Create as draft MR (optional, default: False)
             
         Returns:
             Created merge request information
         """
         url = f"{self.api_url}/projects/{project_id}/merge_requests"
+        
+        # GitLabではタイトルに"Draft: "または"WIP: "プレフィックスを付けるとドラフトMRになる
+        mr_title = title
+        if draft and not (title.startswith("Draft: ") or title.startswith("WIP: ")):
+            mr_title = f"Draft: {title}"
+        
         data: dict[str, Any] = {
             "source_branch": source_branch,
             "target_branch": target_branch,
-            "title": title,
+            "title": mr_title,
         }
         if description:
             data["description"] = description

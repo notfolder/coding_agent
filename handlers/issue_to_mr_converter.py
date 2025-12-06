@@ -746,6 +746,7 @@ class IssueToMRConverter:
                     target_branch=base_branch,
                     title=title,
                     description=body,
+                    draft=self._conversion_config.get("auto_draft", True),
                 )
                 return result
         except Exception as e:
