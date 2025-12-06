@@ -602,24 +602,24 @@ Return the response in JSON format:
 
 **コメント形式**:
 ```markdown
-## Environment Setup Failed
+## 環境構築失敗
 
-**Status**: Failed with warnings ⚠
-**Environment**: {environment_name}
+**ステータス**: 警告付きで失敗 ⚠
+**環境**: {environment_name}
 
-Environment setup encountered errors. Proceeding to execution phase with limitations.
+環境構築中にエラーが発生しました。制限付きで実行フェーズに進みます。
 
-**Error Details**:
+**エラー詳細**:
 ```
 {error_message}
 ```
 
-**Attempted Fixes**:
-- Network retry attempts: {network_retry_count}
-- LLM regeneration attempts: {llm_regeneration_count}/3
-- Error classification: {error_classification}
+**試行した対応**:
+- ネットワークリトライ回数: {network_retry_count}
+- LLM再生成回数: {llm_regeneration_count}/3
+- エラー分類: {error_classification}
 
-The execution phase will proceed, but some features may not be available due to incomplete environment setup.
+実行フェーズに進みますが、環境構築が不完全なため一部機能が利用できない可能性があります。
 ```
 
 ### 5.4 ProgressCommentManagerの拡張
@@ -1071,7 +1071,13 @@ LLMに修正依頼して再生成します（最大3回固定）。
 
 処理内容:
 1. プロジェクトのルートディレクトリからファイル一覧を取得
-2. 環境構築関連ファイルパターンとマッチング（requirements.txt、package.json、pom.xml、go.mod、condaenv.yaml等）
+2. 以下の環境構築関連ファイルパターンとマッチング：
+   - Python: `requirements.txt`, `pyproject.toml`, `setup.py`, `Pipfile`, `poetry.lock`
+   - Conda: `environment.yml`, `condaenv.yaml`
+   - Node.js: `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`
+   - Java: `pom.xml`, `build.gradle`, `build.gradle.kts`
+   - Go: `go.mod`, `go.sum`
+   - 共通: `Dockerfile`, `docker-compose.yml`, `Makefile`
 3. 検出されたファイルのリストを返す
 
 **analyze_environment_files**
@@ -1079,15 +1085,7 @@ LLMに修正依頼して再生成します（最大3回固定）。
 処理内容:
 1. 検出されたファイルの内容を読み込み
 2. ファイル種類に応じて依存関係を抽出
-3. 推奨される環境タイプを判定
-4. 環境情報の辞書を返す
-
-**infer_environment_type**
-
-処理内容:
-1. 検出されたファイル種類から環境タイプを推測
-2. 複数の環境タイプが候補の場合、優先順位に基づいて選択
-3. 環境タイプ名を返す
+3. 環境情報の辞書を返す（環境タイプの推測はLLMが実施）
 
 ### 9.2 EnvironmentVerifier
 
