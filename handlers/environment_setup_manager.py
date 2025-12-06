@@ -99,30 +99,21 @@ class EnvironmentSetupManager:
         self.logger.info("セットアップコマンド数: %d", len(setup_commands))
         self.logger.info("検証コマンド数: %d", len(verification_commands))
         
-        # Docker環境を起動（実行ループ外で1回のみ）
+        # Docker環境を準備（コンテナ作成とプロジェクトクローンを実行）
         try:
-            container_info = self.execution_manager.create_container(
+            container_info = self.execution_manager.prepare(
                 self.task,
                 environment_name=environment_name,
             )
             container_id = container_info.container_id
-            self.logger.info("コンテナを作成しました: %s", container_id)
+            self.logger.info("実行環境の準備が完了しました: %s", container_id)
+            
+            # ExecutionEnvironmentManagerに現在のタスクを設定
+            self.execution_manager.set_current_task(self.task)
         except Exception as e:
-            self.logger.error("コンテナ作成失敗: %s", e, exc_info=True)
+            self.logger.error("実行環境の準備に失敗: %s", e, exc_info=True)
             return self._handle_fatal_error(
-                "Container creation failed",
-                str(e),
-                environment_name,
-            )
-        
-        # プロジェクトをクローン
-        try:
-            self.execution_manager.clone_project(self.task, container_id)
-            self.logger.info("プロジェクトをクローンしました")
-        except Exception as e:
-            self.logger.error("プロジェクトクローン失敗: %s", e, exc_info=True)
-            return self._handle_fatal_error(
-                "Project clone failed",
+                "Environment preparation failed",
                 str(e),
                 environment_name,
             )
@@ -130,7 +121,6 @@ class EnvironmentSetupManager:
         # セットアップコマンドを実行（エラー時は再試行）
         setup_result = self._execute_setup_commands_with_retry(
             setup_commands,
-            container_id,
             environment_setup_info,
         )
         
@@ -146,7 +136,6 @@ class EnvironmentSetupManager:
         # 環境検証を実行
         verification_result = self._verify_environment_with_retry(
             verification_commands,
-            container_id,
             environment_setup_info,
         )
         
@@ -174,14 +163,12 @@ class EnvironmentSetupManager:
     def _execute_setup_commands_with_retry(
         self,
         setup_commands: list[str],
-        container_id: str,
         environment_setup_info: dict[str, Any],
     ) -> dict[str, Any]:
         """セットアップコマンドをリトライ付きで実行する.
         
         Args:
             setup_commands: セットアップコマンドのリスト
-            container_id: コンテナID
             environment_setup_info: 環境構築情報（LLM修正時に使用）
             
         Returns:
@@ -190,7 +177,7 @@ class EnvironmentSetupManager:
         current_commands = setup_commands
         
         while self.llm_regeneration_count < self.MAX_LLM_REGENERATION:
-            result = self._execute_setup_commands(current_commands, container_id)
+            result = self._execute_setup_commands(current_commands)
             
             if result["success"]:
                 return result
@@ -231,13 +218,11 @@ class EnvironmentSetupManager:
     def _execute_setup_commands(
         self,
         setup_commands: list[str],
-        container_id: str,
     ) -> dict[str, Any]:
         """セットアップコマンドを実行する.
         
         Args:
             setup_commands: セットアップコマンドのリスト
-            container_id: コンテナID
             
         Returns:
             実行結果の辞書
@@ -257,23 +242,22 @@ class EnvironmentSetupManager:
             
             try:
                 exec_result = self.execution_manager.execute_command(
-                    container_id=container_id,
                     command=command,
                 )
                 
                 result_info = {
                     "command": command,
-                    "exit_code": exec_result.exit_code,
-                    "stdout": exec_result.stdout,
-                    "stderr": exec_result.stderr,
+                    "exit_code": exec_result["exit_code"],
+                    "stdout": exec_result["stdout"],
+                    "stderr": exec_result["stderr"],
                 }
                 
-                if exec_result.exit_code != 0:
+                if exec_result["exit_code"] != 0:
                     # コマンド失敗
                     self.logger.error(
                         "セットアップコマンド%d失敗: exit_code=%d",
                         i + 1,
-                        exec_result.exit_code,
+                        exec_result["exit_code"],
                     )
                     result_info["success"] = False
                     results.append(result_info)
@@ -282,8 +266,8 @@ class EnvironmentSetupManager:
                         "error": f"Command failed: {command}",
                         "results": results,
                         "failed_command": command,
-                        "exit_code": exec_result.exit_code,
-                        "stderr": exec_result.stderr,
+                        "exit_code": exec_result["exit_code"],
+                        "stderr": exec_result["stderr"],
                     }
                 
                 result_info["success"] = True
@@ -307,16 +291,14 @@ class EnvironmentSetupManager:
 
     def _verify_environment_with_retry(
         self,
-        verification_commands: list[dict[str, str]],
-        container_id: str,
+        verification_commands: list[dict[str, Any]],
         environment_setup_info: dict[str, Any],
     ) -> dict[str, Any]:
         """環境検証をリトライ付きで実行する.
         
         Args:
             verification_commands: 検証コマンドのリスト
-            container_id: コンテナID
-            environment_setup_info: 環境構築情報（LLM修正時に使用）
+            environment_setup_info: 環境構築情報
             
         Returns:
             検証結果の辞書
@@ -324,7 +306,7 @@ class EnvironmentSetupManager:
         current_verification = verification_commands
         
         while self.llm_regeneration_count < self.MAX_LLM_REGENERATION:
-            result = self.verifier.verify_setup(current_verification, container_id)
+            result = self.verifier.verify_setup(current_verification)
             
             if result["success"]:
                 return result
@@ -475,19 +457,49 @@ class EnvironmentSetupManager:
             self.llm_client.send_user_message(prompt)
             response, _, _ = self.llm_client.get_response()
             
-            # レスポンスをパース
-            # JSONブロックを抽出
-            json_match = re.search(r"```json\s*(\{.*?\})\s*```", response, re.DOTALL)
-            if not json_match:
-                json_match = re.search(r"(\{.*?\})", response, re.DOTALL)
+            self.logger.debug("LLM応答: %s", response[:500])  # 最初の500文字のみログ出力
             
+            # レスポンスをパース
+            # JSONブロックを抽出（複数パターンに対応）
+            json_str = None
+            
+            # パターン1: ```json ... ```
+            json_match = re.search(r"```json\s*(\{.*?\})\s*```", response, re.DOTALL)
             if json_match:
                 json_str = json_match.group(1)
-                result = json.loads(json_str)
-                self.logger.info("LLMによるコマンド再生成成功")
-                return result
+            else:
+                # パターン2: ``` ... ``` (jsonタグなし)
+                json_match = re.search(r"```\s*(\{.*?\})\s*```", response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1)
+                else:
+                    # パターン3: {...} のみ
+                    json_match = re.search(r"(\{.*?\})", response, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(1)
+            
+            if json_str:
+                # コメントを削除（// や /* */ 形式）
+                json_str = re.sub(r'//.*?$', '', json_str, flags=re.MULTILINE)
+                json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
+                
+                # 末尾のカンマを削除
+                json_str = re.sub(r',\s*}', '}', json_str)
+                json_str = re.sub(r',\s*]', ']', json_str)
+                
+                self.logger.debug("抽出したJSON: %s", json_str[:300])
+                
+                try:
+                    result = json.loads(json_str)
+                    self.logger.info("LLMによるコマンド再生成成功")
+                    return result
+                except json.JSONDecodeError as e:
+                    self.logger.error("JSON解析エラー: %s (位置: %d)", e.msg, e.pos)
+                    self.logger.debug("パース失敗したJSON: %s", json_str)
+                    return None
             
             self.logger.warning("LLM応答からJSONを抽出できませんでした")
+            self.logger.debug("LLM応答全体: %s", response)
             return None
             
         except Exception as e:

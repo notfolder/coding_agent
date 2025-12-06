@@ -8,10 +8,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from handlers.execution_environment_manager import (
-        ExecutionEnvironmentManager,
-        ExecutionResult,
-    )
+    from handlers.execution_environment_manager import ExecutionEnvironmentManager
 
 
 class EnvironmentVerifier:
@@ -34,14 +31,12 @@ class EnvironmentVerifier:
     def verify_setup(
         self,
         verification_commands: list[dict[str, str]],
-        container_id: str,
     ) -> dict[str, Any]:
         """環境構築を検証する.
         
         Args:
             verification_commands: 検証コマンドのリスト
                 各要素は {"command": str, "expected_output": str} の形式
-            container_id: 検証対象のコンテナID
             
         Returns:
             検証結果の辞書
@@ -76,7 +71,6 @@ class EnvironmentVerifier:
             try:
                 # コマンドを実行
                 exec_result = self.execution_manager.execute_command(
-                    container_id=container_id,
                     command=command,
                 )
                 
@@ -86,17 +80,17 @@ class EnvironmentVerifier:
                 result_info = {
                     "command": command,
                     "expected_output": expected_output,
-                    "actual_output": exec_result.stdout.rstrip(),
-                    "exit_code": exec_result.exit_code,
+                    "actual_output": exec_result["stdout"].rstrip(),
+                    "exit_code": exec_result["exit_code"],
                     "success": success,
                 }
                 
                 if not success:
                     all_passed = False
                     # 失敗理由を追加
-                    if exec_result.exit_code != 0:
-                        result_info["error"] = f"Command failed with exit code {exec_result.exit_code}"
-                        result_info["stderr"] = exec_result.stderr
+                    if exec_result["exit_code"] != 0:
+                        result_info["error"] = f"Command failed with exit code {exec_result['exit_code']}"
+                        result_info["stderr"] = exec_result["stderr"]
                     else:
                         result_info["error"] = "Output mismatch"
                 
@@ -109,7 +103,7 @@ class EnvironmentVerifier:
                         "検証コマンド%d: 失敗 - expected: %r, actual: %r",
                         i + 1,
                         expected_output,
-                        exec_result.stdout.rstrip(),
+                        exec_result["stdout"].rstrip(),
                     )
                     
             except Exception as e:
@@ -129,25 +123,25 @@ class EnvironmentVerifier:
 
     def _verify_result(
         self,
-        exec_result: ExecutionResult,
+        exec_result: dict[str, Any],
         expected_output: str,
     ) -> bool:
         """実行結果を検証する.
         
         Args:
-            exec_result: コマンド実行結果
+            exec_result: コマンド実行結果の辞書
             expected_output: 期待される出力
             
         Returns:
             検証成功の場合True
         """
         # exit codeが0でない場合は失敗
-        if exec_result.exit_code != 0:
+        if exec_result["exit_code"] != 0:
             return False
         
         # stdoutとexpected_outputの末尾の空白・改行を削除して比較
         # 先頭の空白は意味がある可能性があるため残す
-        actual_output = exec_result.stdout.rstrip()
+        actual_output = exec_result["stdout"].rstrip()
         expected = expected_output.rstrip()
         
         # 完全一致確認
