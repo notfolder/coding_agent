@@ -249,12 +249,28 @@ class PlanningCoordinator:
             # Check for pause signal before starting
             if self._check_pause_signal():
                 self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                self.progress_manager.finalize(
+                    final_status="paused",
+                    summary="タスクが一時停止されました",
+                )
+                self._post_completion_comment(
+                    status="paused",
+                    reason="一時停止シグナルが検出されました。",
+                )
                 self._handle_pause()
                 return True  # Return success to avoid marking as failed
 
             # Check for stop signal before starting
             if self._check_stop_signal():
                 self.logger.info("アサイン解除を検出、タスクを停止します")
+                self.progress_manager.finalize(
+                    final_status="stopped",
+                    summary="タスクが停止されました",
+                )
+                self._post_completion_comment(
+                    status="stopped",
+                    reason="アサイン解除が検出されました。",
+                )
                 self._handle_stop()
                 return True  # Return success to avoid marking as failed
 
@@ -266,7 +282,6 @@ class PlanningCoordinator:
 
             # Step 0: Execute pre-planning phase (計画前情報収集フェーズ)
             if self.pre_planning_manager is not None:
-                self._post_phase_comment("pre_planning", "started", "タスク内容を分析し、必要な情報を収集しています...")
                 self.pre_planning_result = self._execute_pre_planning_phase()
                 self._post_phase_comment("pre_planning", "completed", "計画前情報収集が完了しました")
 
@@ -301,17 +316,41 @@ class PlanningCoordinator:
                 else:
                     self.logger.error("Planning phase failed")
                     self._post_phase_comment("planning", "failed", "Could not generate a valid execution plan.")
+                    self.progress_manager.finalize(
+                        final_status="failed",
+                        summary="計画フェーズが失敗しました",
+                    )
+                    self._post_completion_comment(
+                        status="failed",
+                        summary="実行計画の生成に失敗しました。",
+                    )
                     return False
 
             # Check for pause signal after planning
             if self._check_pause_signal():
                 self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                self.progress_manager.finalize(
+                    final_status="paused",
+                    summary="タスクが一時停止されました",
+                )
+                self._post_completion_comment(
+                    status="paused",
+                    reason="計画完了後、一時停止シグナルが検出されました。",
+                )
                 self._handle_pause()
                 return True
 
             # Check for stop signal after planning
             if self._check_stop_signal():
                 self.logger.info("アサイン解除を検出、タスクを停止します")
+                self.progress_manager.finalize(
+                    final_status="stopped",
+                    summary="タスクが停止されました",
+                )
+                self._post_completion_comment(
+                    status="stopped",
+                    reason="計画完了後、アサイン解除が検出されました。",
+                )
                 self._handle_stop()
                 return True
 
@@ -321,6 +360,14 @@ class PlanningCoordinator:
             # Ensure execution environment is ready before execution phase
             if not self._ensure_execution_environment_ready():
                 self.logger.error("Execution environment preparation failed. Aborting task.")
+                self.progress_manager.finalize(
+                    final_status="failed",
+                    summary="実行環境の準備に失敗しました",
+                )
+                self._post_completion_comment(
+                    status="failed",
+                    summary="実行環境の準備に失敗し、タスクを中止しました。",
+                )
                 return False
 
             # Post execution start
@@ -336,12 +383,28 @@ class PlanningCoordinator:
                 # Check for pause signal before each action
                 if self._check_pause_signal():
                     self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                    self.progress_manager.finalize(
+                        final_status="paused",
+                        summary="タスクが一時停止されました",
+                    )
+                    self._post_completion_comment(
+                        status="paused",
+                        reason="実行中に一時停止シグナルが検出されました。",
+                    )
                     self._handle_pause()
                     return True
 
                 # Check for stop signal before each action
                 if self._check_stop_signal():
                     self.logger.info("アサイン解除を検出、タスクを停止します")
+                    self.progress_manager.finalize(
+                        final_status="stopped",
+                        summary="タスクが停止されました",
+                    )
+                    self._post_completion_comment(
+                        status="stopped",
+                        reason="実行中にアサイン解除が検出されました。",
+                    )
                     self._handle_stop()
                     return True
 
@@ -377,6 +440,15 @@ class PlanningCoordinator:
 
                     # Continue or stop based on configuration
                     if not self.config.get("continue_on_error", False):
+                        error_msg = result.get("error", "Unknown error occurred")
+                        self.progress_manager.finalize(
+                            final_status="failed",
+                            summary=f"エラーが発生しました: {error_msg}",
+                        )
+                        self._post_completion_comment(
+                            status="failed",
+                            summary=f"アクション実行中にエラーが発生しました: {error_msg}",
+                        )
                         return False
                 else:
                     # 成功した場合はエラーカウンターをリセット
@@ -390,12 +462,28 @@ class PlanningCoordinator:
                     # Check for pause signal before reflection
                     if self._check_pause_signal():
                         self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                        self.progress_manager.finalize(
+                            final_status="paused",
+                            summary="タスクが一時停止されました",
+                        )
+                        self._post_completion_comment(
+                            status="paused",
+                            reason="Reflection前に一時停止シグナルが検出されました。",
+                        )
                         self._handle_pause()
                         return True
 
                     # Check for stop signal before reflection
                     if self._check_stop_signal():
                         self.logger.info("アサイン解除を検出、タスクを停止します")
+                        self.progress_manager.finalize(
+                            final_status="stopped",
+                            summary="タスクが停止されました",
+                        )
+                        self._post_completion_comment(
+                            status="stopped",
+                            reason="Reflection前にアサイン解除が検出されました。",
+                        )
                         self._handle_stop()
                         return True
 
@@ -410,12 +498,28 @@ class PlanningCoordinator:
                         # Check for pause signal before revision
                         if self._check_pause_signal():
                             self.logger.info("一時停止シグナルを検出、タスクを一時停止します")
+                            self.progress_manager.finalize(
+                                final_status="paused",
+                                summary="タスクが一時停止されました",
+                            )
+                            self._post_completion_comment(
+                                status="paused",
+                                reason="Revision前に一時停止シグナルが検出されました。",
+                            )
                             self._handle_pause()
                             return True
 
                         # Check for stop signal before revision
                         if self._check_stop_signal():
                             self.logger.info("アサイン解除を検出、タスクを停止します")
+                            self.progress_manager.finalize(
+                                final_status="stopped",
+                                summary="タスクが停止されました",
+                            )
+                            self._post_completion_comment(
+                                status="stopped",
+                                reason="Revision前にアサイン解除が検出されました。",
+                            )
                             self._handle_stop()
                             return True
 
@@ -457,11 +561,27 @@ class PlanningCoordinator:
                     # Check for pause/stop signals before verification
                     if self._check_pause_signal():
                         self.logger.info("Pause signal detected during verification")
+                        self.progress_manager.finalize(
+                            final_status="paused",
+                            summary="タスクが一時停止されました",
+                        )
+                        self._post_completion_comment(
+                            status="paused",
+                            reason="Verification中に一時停止シグナルが検出されました。",
+                        )
                         self._handle_pause()
                         return True
 
                     if self._check_stop_signal():
                         self.logger.info("Stop signal detected during verification")
+                        self.progress_manager.finalize(
+                            final_status="stopped",
+                            summary="タスクが停止されました",
+                        )
+                        self._post_completion_comment(
+                            status="stopped",
+                            reason="Verification中にアサイン解除が検出されました。",
+                        )
                         self._handle_stop()
                         return True
 
@@ -523,11 +643,27 @@ class PlanningCoordinator:
                         # Check for pause/stop signals
                         if self._check_pause_signal():
                             self.logger.info("Pause signal detected during additional work")
+                            self.progress_manager.finalize(
+                                final_status="paused",
+                                summary="タスクが一時停止されました",
+                            )
+                            self._post_completion_comment(
+                                status="paused",
+                                reason="追加作業中に一時停止シグナルが検出されました。",
+                            )
                             self._handle_pause()
                             return True
 
                         if self._check_stop_signal():
                             self.logger.info("Stop signal detected during additional work")
+                            self.progress_manager.finalize(
+                                final_status="stopped",
+                                summary="タスクが停止されました",
+                            )
+                            self._post_completion_comment(
+                                status="stopped",
+                                reason="追加作業中にアサイン解除が検出されました。",
+                            )
                             self._handle_stop()
                             return True
 
@@ -553,6 +689,15 @@ class PlanningCoordinator:
                                     continue
 
                             if not self.config.get("continue_on_error", False):
+                                error_msg = result.get("error", "Unknown error occurred")
+                                self.progress_manager.finalize(
+                                    final_status="failed",
+                                    summary=f"エラーが発生しました: {error_msg}",
+                                )
+                                self._post_completion_comment(
+                                    status="failed",
+                                    summary=f"追加作業中にエラーが発生しました: {error_msg}",
+                                )
                                 return False
                         else:
                             self.consecutive_errors = 0
@@ -579,6 +724,12 @@ class PlanningCoordinator:
                 summary="タスクが正常に完了しました",
             )
 
+            # Post completion comment
+            self._post_completion_comment(
+                status="completed",
+                summary="全ての計画アクションが正常に実行され、検証も完了しました。",
+            )
+
             return True
 
         except Exception as e:
@@ -589,6 +740,12 @@ class PlanningCoordinator:
             self.progress_manager.finalize(
                 final_status="failed",
                 summary=f"エラーが発生しました: {str(e)}",
+            )
+
+            # Post completion comment
+            self._post_completion_comment(
+                status="failed",
+                summary=f"実行中に予期せぬエラーが発生しました: {str(e)}",
             )
             
             return False
@@ -604,6 +761,73 @@ class PlanningCoordinator:
 
         # Pause the task with planning state
         self.pause_manager.pause_task(self.task, self.task.uuid, planning_state=planning_state)
+
+    def _post_completion_comment(self, status: str, summary: str = "", reason: str = "") -> None:
+        """タスク完了コメントを投稿.
+        
+        Args:
+            status: 終了ステータス (completed/failed/paused/stopped)
+            summary: 完了サマリー
+            reason: 一時停止または停止の理由
+        """
+        # 絵文字とタイトルを決定
+        emoji_map = {
+            "completed": "✅",
+            "failed": "❌",
+            "paused": "⏸️",
+            "stopped": "⏹️",
+        }
+        title_map = {
+            "completed": "タスク完了",
+            "failed": "タスク失敗",
+            "paused": "タスク一時停止",
+            "stopped": "タスク停止",
+        }
+        
+        emoji = emoji_map.get(status, "✅")
+        title = title_map.get(status, "タスク終了")
+        
+        comment_lines = [
+            f"## {emoji} {title}",
+            "",
+        ]
+        
+        # サマリーまたは理由を追加
+        if summary:
+            comment_lines.append(summary)
+        elif reason:
+            comment_lines.append(reason)
+        else:
+            comment_lines.append(f"タスクが{status}しました。")
+        
+        comment_lines.append("")
+        comment_lines.append(f"*終了時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+        
+        # 統計情報を追加
+        comment_lines.extend([
+            "",
+            "### 📊 実行統計",
+            f"- LLM呼び出し回数: {self.progress_manager.llm_call_count}",
+        ])
+        
+        # 進捗情報を追加
+        if self.current_plan:
+            action_plan = self.current_plan.get("action_plan", {})
+            total_actions = len(action_plan.get("actions", []))
+            if total_actions > 0:
+                comment_lines.extend([
+                    "",
+                    f"完了アクション数: {self.action_counter}/{total_actions}",
+                ])
+        
+        comment = "\n".join(comment_lines)
+        
+        try:
+            if hasattr(self.task, "comment"):
+                self.task.comment(comment)
+                self.logger.info(f"完了コメントを投稿しました: {status}")
+        except Exception as e:
+            self.logger.error(f"完了コメントの投稿に失敗しました: {e}")
 
     def _handle_context_inheritance(self) -> None:
         """過去コンテキスト引き継ぎを処理する.

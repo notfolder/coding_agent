@@ -162,12 +162,15 @@ class ProgressCommentManager:
         実行状態セクションの「最新コメント」に反映される。
         
         Args:
-            comment: LLM応答のcommentフィールドの内容（Noneの場合は「なし」と表示）
+            comment: LLM応答のcommentフィールドの内容（Noneの場合は以前のコメントを維持）
         """
         if not self.enabled or self.comment_id is None:
             return
 
-        self.llm_comment = comment
+        # commentがNoneまたは空文字列の場合は以前のコメントを維持
+        if comment:
+            self.llm_comment = comment
+        
         self.last_update_time = datetime.now()
         self._update_comment()
 
@@ -375,15 +378,14 @@ class ProgressCommentManager:
         lines.append(f"- **現在フェーズ**: {self.current_phase}")
         lines.append(f"- **ステータス**: {self.current_status}")
 
-        # LLMコメント
+        # LLMコメント（複数行、省略なし）
         if self.llm_comment:
-            # 100文字超過で省略
-            comment_display = self.llm_comment
-            if len(comment_display) > 100:
-                comment_display = comment_display[:97] + "..."
-            lines.append(f"- **最新コメント**: {comment_display}")
-        else:
-            lines.append("- **最新コメント**: なし")
+            lines.append("- **最新コメント**:")
+            # 改行で分割して各行をインデントして表示
+            comment_lines = self.llm_comment.split('\n')
+            for comment_line in comment_lines:
+                lines.append(f"  {comment_line}")
+        # コメントがない場合は項目自体を表示しない（初期状態）
 
         # 進捗情報
         if self.total_actions > 0:
