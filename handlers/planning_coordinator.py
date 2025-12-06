@@ -192,6 +192,12 @@ class PlanningCoordinator:
         pre_planning_config = config.get("pre_planning", {})
         if pre_planning_config.get("enabled", True):
             self._init_pre_planning_manager(pre_planning_config)
+        
+        # 完了時のフックを登録
+        self._register_completion_hooks()
+        
+        # 停止時のフックを登録
+        self._register_stop_hooks()
 
     def _init_pre_planning_manager(self, pre_planning_config: dict[str, Any]) -> None:
         """PrePlanningManagerを初期化する.
@@ -212,6 +218,83 @@ class PlanningCoordinator:
         # コンテキストマネージャを設定
         self.pre_planning_manager.context_manager = self.context_manager
         self.logger.info("PrePlanningManagerを初期化しました")
+
+    def _register_completion_hooks(self) -> None:
+        """完了時に実行するフックを登録する.
+        
+        完了時に実行する処理：
+        - 元Issueのラベル更新（processing → done）
+        """
+        def update_issue_labels() -> None:
+            """元Issueのラベルを更新するフック関数."""
+            try:
+                # プラットフォーム判定
+                task_type = self.task.get_task_key().to_dict().get("type", "")
+                if task_type.startswith("github"):
+                    label_config = self.config.get("main_config", {}).get("github", {})
+                elif task_type.startswith("gitlab"):
+                    label_config = self.config.get("main_config", {}).get("gitlab", {})
+                else:
+                    self.logger.warning("不明なタスクタイプ、ラベル更新をスキップ: %s", task_type)
+                    return
+                
+                # ラベル設定取得
+                bot_label = label_config.get("bot_label", "coding agent")
+                processing_label = label_config.get("processing_label", "coding agent processing")
+                done_label = label_config.get("done_label", "coding agent done")
+                
+                # ラベル更新（remove → add の順）
+                try:
+                    self.task.remove_label(processing_label)
+                    self.logger.info("処理中ラベルを削除しました: %s", processing_label)
+                except Exception as e:
+                    self.logger.warning("処理中ラベルの削除に失敗: %s", e)
+                
+                try:
+                    self.task.add_label(done_label)
+                    self.logger.info("完了ラベルを追加しました: %s", done_label)
+                except Exception as e:
+                    self.logger.warning("完了ラベルの追加に失敗: %s", e)
+                    
+            except Exception as e:
+                self.logger.error("ラベル更新中にエラー発生: %s", e, exc_info=True)
+        
+        # 完了フックを登録
+        self.context_manager.register_completion_hook("update_issue_labels", update_issue_labels)
+
+    def _register_stop_hooks(self) -> None:
+        """停止時に実行するフックを登録する.
+        
+        停止時に実行する処理：
+        - 停止通知コメントの投稿
+        - ラベル更新（processing → stopped）
+        """
+        if self.stop_manager is None:
+            self.logger.debug("停止マネージャが未設定のため、停止フックをスキップします")
+            return
+        
+        def post_stop_notification() -> None:
+            """停止通知を投稿するフック関数."""
+            # stop_managerのNoneチェック（型ガード）
+            if self.stop_manager is None:
+                self.logger.warning("停止マネージャが未設定のため、停止通知をスキップします")
+                return
+            
+            try:
+                # 現在の計画状態を取得
+                planning_state = self.get_planning_state()
+                
+                # 停止通知を投稿（コメントとラベル更新）
+                self.stop_manager.post_stop_notification(
+                    self.task,
+                    planning_state=planning_state,
+                )
+                self.logger.info("停止通知を投稿しました")
+            except Exception as e:
+                self.logger.error("停止通知の投稿に失敗しました: %s", e, exc_info=True)
+        
+        # 停止フックを登録
+        self.context_manager.register_stop_hook("post_stop_notification", post_stop_notification)
 
     def _get_available_tool_names(self) -> list[str]:
         """MCPクライアントから利用可能なツール名のリストを取得する.
@@ -743,6 +826,9 @@ class PlanningCoordinator:
                 status="completed",
                 summary="全ての計画アクションが正常に実行され、検証も完了しました。",
             )
+            
+            # タスク完了処理（最終要約→フック実行→DB更新→ディレクトリ移動）
+            self.context_manager.complete()
 
             return True
 
@@ -761,6 +847,9 @@ class PlanningCoordinator:
                 status="failed",
                 summary=f"実行中に予期せぬエラーが発生しました: {str(e)}",
             )
+            
+            # タスク失敗処理（最終要約→フック実行→DB更新→ディレクトリ移動）
+            self.context_manager.fail(str(e))
             
             return False
 
@@ -3059,22 +3148,18 @@ Maintain the same JSON format as before for action_plan.actions."""
         return False
 
     def _handle_stop(self) -> None:
-        """Handle stop operation for planning mode."""
+        """停止処理を実行する.
+        
+        Note:
+            停止通知・ラベル更新はcontext_manager.stop()内で
+            登録されたフック経由で実行される
+        """
         if self.stop_manager is None:
-            self.logger.warning("Stop manager not set, cannot stop")
+            self.logger.warning("停止マネージャが未設定のため、停止処理をスキップします")
             return
 
-        # Get current planning state with total actions
-        planning_state = self.get_planning_state()
-
-        # 最終要約を作成してコンテキストをcompletedに移動
+        # 最終要約作成→フック実行→DB更新→ディレクトリ移動
         self.context_manager.stop()
-
-        # コメントとラベル更新
-        self.stop_manager.post_stop_notification(
-            self.task,
-            planning_state=planning_state,
-        )
 
     def _check_and_add_new_comments(self) -> None:
         """新規コメントを検出してコンテキストに追加する.

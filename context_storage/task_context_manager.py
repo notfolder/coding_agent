@@ -83,6 +83,12 @@ class TaskContextManager:
         # LLMクライアントをキャッシュ（要約生成で再利用）
         self._llm_client: Any = None
         
+        # 完了時フック関数のリスト
+        self._completion_hooks: list[tuple[str, Any]] = []
+        
+        # 停止時フック関数のリスト（stop()専用）
+        self._stop_hooks: list[tuple[str, Any]] = []
+        
         # Create metadata.json
         self._create_metadata()
         
@@ -282,19 +288,82 @@ class TaskContextManager:
         except Exception as e:
             logger.error("タスク統計の更新に失敗しました: %s", e, exc_info=True)
 
+    def register_completion_hook(self, hook_name: str, hook_func: Any) -> None:
+        """完了時に実行するフック関数を登録.
+        
+        Args:
+            hook_name: フック関数の識別名（ログ用）
+            hook_func: 引数なしで呼び出し可能なフック関数
+        """
+        self._completion_hooks.append((hook_name, hook_func))
+        logger.debug("完了フックを登録しました: %s", hook_name)
+    
+    def register_stop_hook(self, hook_name: str, hook_func: Any) -> None:
+        """停止時に実行するフック関数を登録.
+        
+        Args:
+            hook_name: フック関数の識別名（ログ用）
+            hook_func: 引数なしで呼び出し可能なフック関数
+        """
+        self._stop_hooks.append((hook_name, hook_func))
+        logger.debug("停止フックを登録しました: %s", hook_name)
+
     def complete(self) -> None:
-        """Mark task as completed and move to completed directory."""
-        self._finalize_task("completed")
+        """Mark task as completed and move to completed directory.
+        
+        処理順序:
+        1. 最終要約作成
+        2. 完了フックの実行
+        3. データベース更新
+        4. ディレクトリ移動
+        
+        """
+        # 1. タスク完了時に最終要約を作成
+        self._create_final_summary()
+        
+        # 2. 登録された完了フック関数を実行
+        for hook_name, hook_func in self._completion_hooks:
+            try:
+                logger.info("完了フック実行中: %s", hook_name)
+                hook_func()
+                logger.info("完了フック実行完了: %s", hook_name)
+            except Exception as e:
+                logger.warning("完了フック実行失敗 (%s): %s", hook_name, e, exc_info=True)
+        
+        # 3-4. データベース更新とディレクトリ移動
+        self._finalize_task_db_and_move("completed")
 
     def stop(self) -> None:
-        """Mark task as stopped by user and move to completed directory."""
-        self._finalize_task("stopped")
+        """Mark task as stopped by user and move to completed directory.
+        
+        処理順序:
+        1. 最終要約作成
+        2. 停止専用フックの実行
+        3. データベース更新
+        4. ディレクトリ移動
+        
+        """
+        # 1. タスク停止時に最終要約を作成
+        self._create_final_summary()
+        
+        # 2. 登録された停止フック関数を実行
+        for hook_name, hook_func in self._stop_hooks:
+            try:
+                logger.info("停止フック実行中: %s", hook_name)
+                hook_func()
+                logger.info("停止フック実行完了: %s", hook_name)
+            except Exception as e:
+                logger.warning("停止フック実行失敗 (%s): %s", hook_name, e, exc_info=True)
+        
+        # 3-4. データベース更新とディレクトリ移動
+        self._finalize_task_db_and_move("stopped")
 
-    def _finalize_task(self, status: str) -> None:
-        """Finalize task with given status.
+    def _finalize_task_db_and_move(self, status: str, error_message: str | None = None) -> None:
+        """Finalize task database and directory (called after hooks).
 
         Args:
-            status: Final status ("completed" or "stopped")
+            status: Final status ("completed", "stopped", or "failed")
+            error_message: Error message (only for failed status)
 
         """
         # Update database
@@ -305,15 +374,17 @@ class TaskContextManager:
             
             if self._db_task:
                 self._db_task.status = status
+                if error_message and status == "failed":
+                    self._db_task.error_message = error_message
                 self._db_task.completed_at = datetime.now(timezone.utc)
                 self._db_task = self._db_manager.save_task(self._db_task)
             
-            logger.info("タスクを%sとしてデータベースに記録しました: uuid=%s", status, self.uuid)
+            if error_message:
+                logger.info("タスクを%sとしてデータベースに記録しました: uuid=%s, error=%s", status, self.uuid, error_message)
+            else:
+                logger.info("タスクを%sとしてデータベースに記録しました: uuid=%s", status, self.uuid)
         except Exception as e:
             logger.error("タスク%sのデータベース更新に失敗しました: %s", status, e, exc_info=True)
-        
-        # タスク完了/停止時に最終要約を作成
-        self._create_final_summary()
         
         # Move directory
         target_dir = self.completed_dir / self.uuid
@@ -324,34 +395,30 @@ class TaskContextManager:
     def fail(self, error_message: str) -> None:
         """Mark task as failed and move to completed directory.
 
+        処理順序:
+        1. 最終要約作成
+        2. 完了フックの実行
+        3. データベース更新
+        4. ディレクトリ移動
+
         Args:
             error_message: Error message describing the failure
 
         """
-        # Update database
-        try:
-            # DBTaskを取得（キャッシュがあれば使用）
-            if self._db_task is None:
-                self._db_task = self._db_manager.get_task(self.uuid)
-            
-            if self._db_task:
-                self._db_task.status = "failed"
-                self._db_task.error_message = error_message
-                self._db_task.completed_at = datetime.now(timezone.utc)
-                self._db_task = self._db_manager.save_task(self._db_task)
-            
-            logger.info("タスクを失敗としてデータベースに記録しました: uuid=%s, error=%s", self.uuid, error_message)
-        except Exception as e:
-            logger.error("タスク失敗のデータベース更新に失敗しました: %s", e, exc_info=True)
-        
-        # タスク失敗時にも最終要約を作成
+        # 1. タスク失敗時にも最終要約を作成
         self._create_final_summary()
         
-        # Move directory
-        target_dir = self.completed_dir / self.uuid
-        if self.context_dir.exists():
-            shutil.move(str(self.context_dir), str(target_dir))
-        self.context_dir = target_dir
+        # 2. 登録された完了フック関数を実行
+        for hook_name, hook_func in self._completion_hooks:
+            try:
+                logger.info("完了フック実行中（失敗時）: %s", hook_name)
+                hook_func()
+                logger.info("完了フック実行完了（失敗時）: %s", hook_name)
+            except Exception as e:
+                logger.warning("完了フック実行失敗 (%s): %s", hook_name, e, exc_info=True)
+        
+        # 3-4. データベース更新とディレクトリ移動
+        self._finalize_task_db_and_move("failed", error_message=error_message)
 
     def _create_final_summary(self) -> None:
         """タスク完了/失敗時に最終要約を作成する."""
