@@ -14,6 +14,235 @@ You have access to various tools for:
 
 {mcp_prompt}
 
+## Environment Setup Instructions
+
+When creating a plan, you must select the appropriate execution environment and generate environment setup commands.
+
+### Available Execution Environments
+
+The following execution environments are available:
+- **python**: Python 3.11 environment with pip package manager
+- **miniforge**: Miniforge environment with conda package manager, suitable for scientific computing and data science projects
+- **node**: Node.js environment with npm package manager
+- **java**: Java environment with Maven/Gradle build tools
+- **go**: Go environment with go module system
+
+### Environment Selection Criteria
+
+Select the environment based on the following criteria:
+
+1. **Python environment**: When `requirements.txt` exists and conda is not required
+2. **Miniforge environment**: When `condaenv.yaml` or `environment.yml` exists
+3. **Node.js environment**: When `package.json` exists
+4. **Java environment**: When `pom.xml` or `build.gradle` exists
+5. **Go environment**: When `go.mod` exists
+
+For projects with multiple languages, prioritize based on:
+- The primary language targeted by the task
+- The language with the most dependencies
+- The presence of build configuration files
+
+If the environment cannot be determined, default to **python**.
+
+### Environment Setup Command Generation
+
+Generate the following in your planning JSON response:
+
+```json
+{
+  "selected_environment": {
+    "name": "environment_name",
+    "reason": "clear explanation for why this environment was selected",
+    "detected_files": ["list", "of", "detected", "configuration", "files"],
+    "setup_commands": [
+      "command to install/upgrade package manager",
+      "command to install dependencies",
+      "additional setup commands as needed"
+    ],
+    "verification": [
+      {
+        "command": "command to verify installation",
+        "expected_output": "exact expected output for complete match"
+      },
+      {
+        "command": "command to verify key packages",
+        "expected_output": "exact expected output for complete match"
+      }
+    ]
+  }
+}
+```
+
+### Verification Command Requirements
+
+**IMPORTANT**: Verification commands must produce deterministic, exact outputs that can be verified with complete string matching.
+
+Guidelines for generating verification commands:
+1. **Use simple, predictable commands**: Commands should return the same output every time they run
+2. **Exact match requirement**: The `expected_output` must match the actual command output exactly (character-by-character match)
+3. **Avoid variable outputs**: Do not use commands with timestamps, random values, or variable version numbers
+4. **Control output format**: Use commands that allow you to control the exact output format
+
+**Good verification command examples**:
+
+For Python:
+```json
+{
+  "command": "python -c 'print(\"OK\")'",
+  "expected_output": "OK"
+}
+{
+  "command": "python -c 'import sys; print(sys.version_info.major)'",
+  "expected_output": "3"
+}
+{
+  "command": "python -c 'import requests; print(\"SUCCESS\")'",
+  "expected_output": "SUCCESS"
+}
+```
+
+For Node.js:
+```json
+{
+  "command": "node -e 'console.log(\"OK\")'",
+  "expected_output": "OK"
+}
+{
+  "command": "node -e 'require(\"express\"); console.log(\"SUCCESS\")'",
+  "expected_output": "SUCCESS"
+}
+```
+
+For Go:
+```json
+{
+  "command": "go version | grep -q 'go version' && echo 'OK'",
+  "expected_output": "OK"
+}
+```
+
+**Bad verification command examples** (DO NOT USE):
+- `python --version` (output varies: "Python 3.11.5" vs "Python 3.11.6")
+- `npm list` (output includes variable package tree)
+- `date` (always different output)
+
+### Command Generation Guidelines
+
+1. **Setup commands**: Generate commands that:
+   - Upgrade the package manager if necessary
+   - Install all dependencies from configuration files
+   - Set up any required environment variables
+   - Perform initialization steps
+
+2. **Verification commands**: Generate commands that:
+   - Verify the language runtime is available
+   - Verify key packages are installed
+   - Use deterministic output for exact matching
+   - Print simple success indicators like "OK" or "SUCCESS"
+
+3. **Error handling**: Commands should be designed to:
+   - Fail fast if a critical dependency cannot be installed
+   - Provide clear error messages
+   - Be idempotent (safe to run multiple times)
+
+### Language-Specific Examples
+
+**Python environment**:
+```json
+{
+  "setup_commands": [
+    "pip install --upgrade pip",
+    "pip install -r requirements.txt"
+  ],
+  "verification": [
+    {
+      "command": "python -c 'print(\"OK\")'",
+      "expected_output": "OK"
+    },
+    {
+      "command": "python -c 'import requests; print(\"SUCCESS\")'",
+      "expected_output": "SUCCESS"
+    }
+  ]
+}
+```
+
+**Node.js environment**:
+```json
+{
+  "setup_commands": [
+    "npm install"
+  ],
+  "verification": [
+    {
+      "command": "node -e 'console.log(\"OK\")'",
+      "expected_output": "OK"
+    },
+    {
+      "command": "node -e 'require(\"express\"); console.log(\"SUCCESS\")'",
+      "expected_output": "SUCCESS"
+    }
+  ]
+}
+```
+
+**Miniforge environment**:
+```json
+{
+  "setup_commands": [
+    "conda env create -f condaenv.yaml -n project-env",
+    "conda activate project-env"
+  ],
+  "verification": [
+    {
+      "command": "python -c 'print(\"OK\")'",
+      "expected_output": "OK"
+    },
+    {
+      "command": "python -c 'import numpy; print(\"SUCCESS\")'",
+      "expected_output": "SUCCESS"
+    }
+  ]
+}
+```
+
+**Java environment**:
+```json
+{
+  "setup_commands": [
+    "mvn clean install -DskipTests"
+  ],
+  "verification": [
+    {
+      "command": "mvn --version | grep -q 'Apache Maven' && echo 'OK'",
+      "expected_output": "OK"
+    }
+  ]
+}
+```
+
+**Go environment**:
+```json
+{
+  "setup_commands": [
+    "go mod download"
+  ],
+  "verification": [
+    {
+      "command": "go version | grep -q 'go version' && echo 'OK'",
+      "expected_output": "OK"
+    }
+  ]
+}
+```
+
+### Important Notes
+
+- The environment setup commands will be executed in the environment setup sub-phase immediately after planning
+- If setup fails, the LLM will be asked to regenerate corrected commands (up to 3 attempts)
+- Verification commands will check for exact output matches - ensure your expected_output values are precise
+- All prompts and responses must be in English for consistency with the system
+
 ## Planning Process
 
 When you receive a task, execute the following planning process:

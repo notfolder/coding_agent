@@ -67,6 +67,7 @@ class PrePlanningManager:
         self.collection_results: list[dict[str, Any]] = []
         self.assumptions: list[dict[str, Any]] = []
         self.information_gaps: list[dict[str, Any]] = []
+        self.environment_info: dict[str, Any] = {}
 
         # 現在のサブフェーズ
         self.current_subphase = "understanding"
@@ -90,6 +91,9 @@ class PrePlanningManager:
         # 1. 依頼内容の理解
         self.current_subphase = "understanding"
         self.understanding_result = self.execute_understanding()
+
+        # 1.5. 環境情報の収集
+        self.environment_info = self.collect_environment_info()
 
         # 理解完了通知
         if self.notification_config.get("notify_on_understanding_complete", True):
@@ -293,7 +297,8 @@ class PrePlanningManager:
                 "assumptions": self.assumptions,
                 "information_gaps": self.information_gaps,
                 "recommendations_for_planning": recommendations,
-            }
+            },
+            "environment_info": self.environment_info,
         }
 
     def get_pre_planning_state(self) -> dict[str, Any]:
