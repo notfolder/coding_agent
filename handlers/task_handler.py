@@ -127,7 +127,7 @@ class TaskHandler:
                 # LLMクライアントのツール定義を更新（実行環境ラッパー含む）
                 self._update_llm_client_tools()
                 # Use planning-based task handling
-                # Planning modeでは内部で統計記録を行うのでフックは不要
+                # Planning/Context Storage/Legacyの全モードでLLMクライアントフックを使用
                 self._handle_with_planning(task, self.config, execution_manager)
             else:
                 # Check if context storage is enabled
@@ -135,11 +135,11 @@ class TaskHandler:
                 
                 if context_storage_enabled and task.uuid:
                     # Use file-based context storage
-                    # Context Storage modeでは内部で統計記録を行うのでフックは不要
+                    # Planning/Context Storage/Legacyの全モードでLLMクライアントフックを使用
                     self._handle_with_context_storage(task, self.config)
                 else:
                     # Use legacy in-memory handling
-                    # Legacy modeでは統計記録がないため、フックを設定して記録する
+                    # Planning/Context Storage/Legacyの全モードでLLMクライアントフックを使用
                     self._setup_statistics_hook_for_legacy(task)
                     try:
                         self._handle_legacy(task, self.config)
@@ -148,6 +148,39 @@ class TaskHandler:
         finally:
             # 実行環境のクリーンアップ
             self._cleanup_execution_environment(execution_manager, task)
+
+    def _setup_statistics_hook(self, context_manager: Any, llm_client: Any) -> None:
+        """全モード共通のトークン統計記録フックを設定する.
+        
+        TaskContextManagerとLLMクライアントを受け取り、
+        LLMクライアントのget_response()呼び出し時に自動的に統計を記録するフックを設定します。
+        
+        Args:
+            context_manager: TaskContextManagerインスタンス
+            llm_client: LLMクライアントインスタンス
+        
+        """
+        if not context_manager or not llm_client:
+            return
+        
+        try:
+            # LLMクライアントにフックを設定
+            def statistics_hook(llm_calls: int, tokens: int) -> None:
+                """統計記録フック関数."""
+                context_manager.update_statistics(
+                    llm_calls=llm_calls,
+                    tokens=tokens,
+                )
+            
+            llm_client.set_statistics_hook(statistics_hook)
+            self.logger.debug("トークン統計記録フックを設定しました")
+            
+        except Exception as e:
+            self.logger.warning(
+                "トークン統計記録フックの設定に失敗しました（統計は記録されません）: %s", 
+                e,
+                exc_info=True,
+            )
 
     def _setup_statistics_hook_for_legacy(self, task: Task) -> None:
         """Legacy モード用のトークン統計記録フックを設定する.
@@ -174,15 +207,8 @@ class TaskHandler:
                 user=task.user,
             )
             
-            # LLMクライアントにフックを設定
-            def statistics_hook(llm_calls: int, tokens: int) -> None:
-                """統計記録フック関数."""
-                self._statistics_context_manager.update_statistics(
-                    llm_calls=llm_calls,
-                    tokens=tokens,
-                )
-            
-            self.llm_client.set_statistics_hook(statistics_hook)
+            # 共通フック設定を使用
+            self._setup_statistics_hook(self._statistics_context_manager, self.llm_client)
             self.logger.info("Legacy モード用のトークン統計記録フックを設定しました: uuid=%s", task.uuid)
             
         except Exception as e:
@@ -499,6 +525,9 @@ class TaskHandler:
             # TaskContextManagerにLLMクライアントを設定（ユーザー設定を保持）
             context_manager.set_llm_client(task_llm_client)
             
+            # LLMクライアントに統計記録フックを設定（全モード共通）
+            self._setup_statistics_hook(context_manager, task_llm_client)
+            
             # Create context compressor
             compressor = ContextCompressor(
                 message_store,
@@ -618,6 +647,9 @@ class TaskHandler:
             user=task.user,
             is_resumed=is_resumed,
         )
+        
+        # LLMクライアントに統計記録フックを設定（全モード共通）
+        self._setup_statistics_hook(context_manager, self.llm_client)
         
         try:
             # Get planning configuration
@@ -1292,8 +1324,7 @@ class TaskHandler:
         # 終了条件のチェック
         if data.get("done", False):
             task.comment("タスク完了")
-            # トークン数を記録してから終了
-            context_manager.update_statistics(tokens=tokens)
+            # フックで自動的にトークン数が記録される
             return True
 
         # コメントフィールドの処理
@@ -1423,12 +1454,10 @@ class TaskHandler:
             # Legacy command format
             task.comment(data.get("comment", ""))
             result = self._process_command_field(task, data, error_state)
-            # LLM呼び出しのトークン数を記録
-            context_manager.update_statistics(llm_calls=1, tokens=tokens)
+            # フックで自動的にトークン数が記録される
             return result
 
-        # 通常のレスポンス処理が完了した場合もLLM統計を記録
-        context_manager.update_statistics(llm_calls=1, tokens=tokens)
+        # フックで自動的にトークン数が記録される
         return False
 
     def _load_comment_detection_state(
