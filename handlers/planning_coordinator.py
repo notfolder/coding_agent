@@ -3047,10 +3047,8 @@ Maintain the same JSON format as before for action_plan.actions."""
 
         # タスクからowner/repo (GitHub) または project_id (GitLab) を取得してMCPモードで読み込み
         try:
-            import os
-            
-            # 環境変数からタスクソースを取得
-            task_source = os.environ.get("TASK_SOURCE", "github").lower()
+            # 設定からタスクソースを取得
+            task_source = self.config.get("task_source", "github").lower()
             
             task_key = self.task.get_task_key()
             owner = getattr(task_key, "owner", None)
@@ -3095,18 +3093,10 @@ Maintain the same JSON format as before for action_plan.actions."""
             text-editorのシステムプロンプト文字列(無効な場合は空文字列)
 
         """
-        import os
-
-        # 環境変数による有効/無効チェック
-        env_enabled = os.environ.get("TEXT_EDITOR_MCP_ENABLED", "").lower()
-        if env_enabled:
-            if env_enabled != "true":
-                return ""
-        else:
-            # 設定ファイルによる有効/無効チェック
-            text_editor_config = self.config.get("text_editor_mcp", {})
-            if not text_editor_config.get("enabled", True):
-                return ""
+        # 設定ファイルによる有効/無効チェック
+        text_editor_config = self.config.get("text_editor_mcp", {})
+        if not text_editor_config.get("enabled", True):
+            return ""
 
         # プロンプトテンプレートを読み込む
         prompt_path = Path("system_prompt_text_editor.txt")

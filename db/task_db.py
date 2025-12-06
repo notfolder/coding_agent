@@ -214,31 +214,31 @@ class TaskDBManager:
         """SQLAlchemyエンジンを作成する.
 
         環境変数またはconfig.yamlから接続情報を取得してエンジンを作成します。
-        DATABASE_URLが設定されている場合はそれを使用し、
-        そうでない場合は個別の環境変数から接続URLを構築します。
+        config.database.urlが設定されている場合はそれを使用し、
+        そうでない場合は個別の設定から接続URLを構築します。
 
         Returns:
             Engine: SQLAlchemyエンジン
 
         """
-        # 環境変数が最優先
-        database_url = os.environ.get("DATABASE_URL")
+        # config.yamlから取得
+        db_config = self.config.get("database", {})
+
+        # urlが設定されている場合は優先（環境変数DATABASE_URLで上書き可能）
+        database_url = db_config.get("url")
 
         if not database_url:
-            # config.yamlから取得
-            db_config = self.config.get("database", {})
-
-            host = os.environ.get("DATABASE_HOST") or db_config.get("host", "localhost")
-            port = os.environ.get("DATABASE_PORT") or db_config.get("port", 5432)
-            name = os.environ.get("DATABASE_NAME") or db_config.get("name", "coding_agent")
-            user = os.environ.get("DATABASE_USER") or db_config.get("user", "")
-            password = os.environ.get("DATABASE_PASSWORD") or db_config.get("password", "")
+            # 個別の設定から構築
+            host = db_config.get("host", "localhost")
+            port = db_config.get("port", 5432)
+            name = db_config.get("name", "coding_agent")
+            user = db_config.get("user", "")
+            password = db_config.get("password", "")
 
             # URLを構築
             database_url = f"postgresql://{user}:{password}@{host}:{port}/{name}"
 
         # コネクションプール設定
-        db_config = self.config.get("database", {})
         pool_size = db_config.get("pool_size", 5)
         max_overflow = db_config.get("max_overflow", 10)
 

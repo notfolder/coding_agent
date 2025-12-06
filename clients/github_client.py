@@ -5,10 +5,13 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 class GithubClient:
@@ -18,26 +21,24 @@ class GithubClient:
     クライアントクラスです。Personal Access Tokenによる認証を行います。
     """
 
-    def __init__(self, token: str | None = None, api_url: str | None = None) -> None:
+    def __init__(self, token: str, api_url: str = "https://api.github.com") -> None:
         """GitHubクライアントを初期化する.
 
         Args:
-            token: GitHub Personal Access Token。Noneの場合は環境変数から取得
-            api_url: GitHub APIのベースURL。Noneの場合はデフォルトを使用
+            token: GitHub Personal Access Token（必須）
+            api_url: GitHub APIのベースURL（デフォルト: https://api.github.com）
 
         Raises:
-            ValueError: トークンが設定されていない場合
+            ValueError: トークンがNoneまたは空文字列の場合
 
         """
-        self.token = token or os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
-
-        # APIのベースURLの設定(デフォルト: https://api.github.com)
-        self.api_url = api_url or "https://api.github.com"
-
         # トークンが設定されていない場合はエラー
-        if not self.token:
-            error_msg = "GITHUB_PERSONAL_ACCESS_TOKEN is not set"
+        if not token:
+            error_msg = "GitHub Personal Access Token is required"
             raise ValueError(error_msg)
+        
+        self.token = token
+        self.api_url = api_url
 
         # APIリクエスト用のヘッダーを設定
         self.headers = {
@@ -740,9 +741,16 @@ class GithubClient:
             page_params["per_page"] = per_page
             page_params["page"] = page_number
 
-            response = requests.get(url, headers=self.headers, params=page_params, timeout=30)
-            response.raise_for_status()
-            page_items = response.json()
+            try:
+                response = requests.get(url, headers=self.headers, params=page_params, timeout=30)
+                response.raise_for_status()
+                page_items = response.json()
+            except requests.exceptions.RequestException as e:
+                logger.error(
+                    "GitHub API request failed: url=%s, params=%s, error=%s",
+                    url, page_params, e
+                )
+                raise
 
             if not isinstance(page_items, list) or not page_items:
                 break
@@ -780,9 +788,16 @@ class GithubClient:
             if order:
                 params["order"] = order
 
-            response = requests.get(url, headers=self.headers, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
+            try:
+                response = requests.get(url, headers=self.headers, params=params, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+            except requests.exceptions.RequestException as e:
+                logger.error(
+                    "GitHub Search API request failed: url=%s, params=%s, error=%s",
+                    url, params, e
+                )
+                raise
 
             page_items = data.get("items", [])
             if not page_items:

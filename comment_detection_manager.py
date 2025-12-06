@@ -50,24 +50,16 @@ class CommentDetectionManager:
 
     def _configure(self) -> None:
         """設定からbot_usernameを取得し、機能の有効/無効を決定する."""
-        import os
-
         # タスクタイプを取得
         task_key = self.task.get_task_key().to_dict()
         task_type = task_key.get("type", "")
 
         if task_type.startswith("github"):
-            # GitHub: 環境変数 > 設定ファイル
-            self.bot_username = os.environ.get(
-                "GITHUB_BOT_NAME",
-                self.config.get("github", {}).get("bot_name"),
-            )
+            # GitHub: 設定ファイルから取得
+            self.bot_username = self.config.get("github", {}).get("bot_name")
         elif task_type.startswith("gitlab"):
-            # GitLab: 環境変数 > 設定ファイル
-            self.bot_username = os.environ.get(
-                "GITLAB_BOT_NAME",
-                self.config.get("gitlab", {}).get("bot_name"),
-            )
+            # GitLab: 設定ファイルから取得
+            self.bot_username = self.config.get("gitlab", {}).get("bot_name")
         else:
             self.logger.warning("不明なタスクタイプ: %s", task_type)
             self.bot_username = None

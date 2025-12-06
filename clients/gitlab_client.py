@@ -1,18 +1,33 @@
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
 import requests
 
+logger = logging.getLogger(__name__)
+
 
 class GitlabClient:
-    def __init__(self, token: str | None = None, api_url: str | None = None) -> None:
-        self.token = token or os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN")
-        self.api_url = api_url or os.environ.get("GITLAB_API_URL") or "https://gitlab.com/api/v4"
-        if not self.token:
-            msg = "GITLAB_PERSONAL_ACCESS_TOKEN is not set"
+    def __init__(self, token: str, api_url: str = "https://gitlab.com/api/v4") -> None:
+        """GitLabクライアントを初期化する.
+
+        Args:
+            token: GitLab Personal Access Token（必須）
+            api_url: GitLab APIのベースURL（デフォルト: https://gitlab.com/api/v4）
+
+        Raises:
+            ValueError: トークンがNoneまたは空文字列の場合
+
+        """
+        # トークンが設定されていない場合はエラー
+        if not token:
+            msg = "GitLab Personal Access Token is required"
             raise ValueError(msg)
+        
+        self.token = token
+        self.api_url = api_url
         self.headers = {
             "PRIVATE-TOKEN": self.token,
             "Content-Type": "application/json",
@@ -386,9 +401,16 @@ class GitlabClient:
             page_params["per_page"] = per_page
             page_params["page"] = page
 
-            resp = requests.get(url, headers=self.headers, params=page_params, timeout=30)
-            resp.raise_for_status()
-            payload = resp.json()
+            try:
+                resp = requests.get(url, headers=self.headers, params=page_params, timeout=30)
+                resp.raise_for_status()
+                payload = resp.json()
+            except requests.exceptions.RequestException as e:
+                logger.error(
+                    "GitLab API request failed: url=%s, params=%s, error=%s",
+                    url, page_params, e
+                )
+                raise
 
             page_items: list[dict[str, Any]]
             if isinstance(payload, list):

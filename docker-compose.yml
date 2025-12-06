@@ -191,6 +191,11 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
 
+      # User Config API設定
+      - USE_USER_CONFIG_API=${USE_USER_CONFIG_API:-false}
+      - USER_CONFIG_API_URL=${USER_CONFIG_API_URL:-http://user-config-api:8080}
+      - USER_CONFIG_API_KEY=${USER_CONFIG_API_KEY:-your-secret-api-key}
+
       # ログ設定
       - LOGS=/app/logs/producer.log
       - DEBUG=${DEBUG:-false}
@@ -252,6 +257,11 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+
+      # User Config API設定
+      - USE_USER_CONFIG_API=${USE_USER_CONFIG_API:-false}
+      - USER_CONFIG_API_URL=${USER_CONFIG_API_URL:-http://user-config-api:8080}
+      - USER_CONFIG_API_KEY=${USER_CONFIG_API_KEY:-your-secret-api-key}
 
       # ログ設定
       - LOGS=/app/logs/consumer.log

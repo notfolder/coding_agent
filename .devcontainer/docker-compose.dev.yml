@@ -1,0 +1,66 @@
+version: '3.6'
+services:
+  # 開発用サービス - デバッグ実行用
+  coding-agent-dev:
+    build:
+      context: ../coding_agent
+      dockerfile: Dockerfile
+    container_name: coding-agent-dev
+    command: sleep infinity
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      user-config-api:
+        condition: service_started
+      web:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - coding-agent-network
+    environment:
+      # 必須環境変数
+      - TASK_SOURCE=${TASK_SOURCE:-github}
+      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN}
+      - GITLAB_PERSONAL_ACCESS_TOKEN=${GITLAB_PERSONAL_ACCESS_TOKEN:-}
+      - GITLAB_API_URL=${GITLAB_API_URL:-https://gitlab.com/api/v4}
+      - GITLAB_BOT_NAME=${GITLAB_BOT_NAME:-bot}
+      - GITHUB_BOT_NAME=${GITHUB_BOT_NAME:-bot}
+
+      # RabbitMQ設定
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASSWORD=guest
+
+      # PostgreSQL設定
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=coding_agent
+      - DATABASE_USER=coding_agent
+      - DATABASE_PASSWORD=${POSTGRES_PASSWORD:-coding_agent_password}
+
+      # LLM設定
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+
+      # User Config API設定
+      - USE_USER_CONFIG_API=${USE_USER_CONFIG_API:-false}
+      - USER_CONFIG_API_URL=${USER_CONFIG_API_URL:-http://user-config-api:8080}
+      - USER_CONFIG_API_KEY=${USER_CONFIG_API_KEY:-your-secret-api-key}
+
+      # ログ設定
+      - LOGS=/app/logs/dev.log
+      - DEBUG=true
+
+      # Python設定
+      - PYTHONPATH=/app
+    volumes:
+      - ../coding_agent:/app:cached
+      - /var/run/docker.sock:/var/run/docker.sock
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined

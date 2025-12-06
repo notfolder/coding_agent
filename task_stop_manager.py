@@ -68,18 +68,10 @@ class TaskStopManager:
         task_type = task_key.to_dict().get("type", "")
         
         if task_type.startswith("github"):
-            # Check environment variable first
-            bot_name = os.environ.get("GITHUB_BOT_NAME")
-            if bot_name:
-                return bot_name
-            # Fall back to config
+            # Get from config
             return self.config.get("github", {}).get("bot_name")
         elif task_type.startswith("gitlab"):
-            # Check environment variable first
-            bot_name = os.environ.get("GITLAB_BOT_NAME")
-            if bot_name:
-                return bot_name
-            # Fall back to config
+            # Get from config
             return self.config.get("gitlab", {}).get("bot_name")
         
         return None

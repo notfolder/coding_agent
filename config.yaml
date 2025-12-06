@@ -1,3 +1,6 @@
+# タスクソース設定
+task_source: "gitlab"  # "github" or "gitlab"
+
 mcp_servers:
   - mcp_server_name: "github"
     command:
@@ -41,9 +44,11 @@ database:
   pool_size: 5
   max_overflow: 10
 
-# APIサーバー設定
-api_server:
-  api_key: "your-secret-api-key-here"
+# User Config API設定（旧api_server統合）
+user_config_api:
+  enabled: false  # タスクユーザーごとの設定をAPIから取得するか
+  url: "http://user-config-api:8080"  # User Config APIのURL
+  api_key: "your-secret-api-key-here"  # APIキー
 
 llm:
   provider: "openai"    # "ollama" | "openai"
@@ -248,23 +253,23 @@ context_inheritance:
     reuse_successful_patterns: true
 
 github:
-  owner:     "notfolder"
+  owner: "notfolder"
+  bot_name: "notfolder-bot"  # ボットのユーザー名
   bot_label: "coding agent"
   processing_label: "coding agent processing"
   done_label: "coding agent done"
   paused_label: "coding agent paused"
   stopped_label: "coding agent stopped"
-  # bot_name: "coding-agent-bot"  # ボットのユーザー名（環境変数 GITHUB_BOT_NAME で上書き可能）
   query: 'state:open archived:false sort:updated-desc sort:updated-desc'
 
 gitlab:
-  owner:     "notfolder"
+  owner: "notfolder"
+  bot_name: "notfolder-bot"  # ボットのユーザー名
   bot_label: "coding agent"
   processing_label: "coding agent processing"
   done_label: "coding agent done"
   paused_label: "coding agent paused"
   stopped_label: "coding agent stopped"
-  # bot_name: "coding-agent-bot"  # ボットのユーザー名（環境変数 GITLAB_BOT_NAME で上書き可能）
   project_id: "coding-agent-project"
   query: ''
 

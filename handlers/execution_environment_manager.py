@@ -101,29 +101,21 @@ class ExecutionEnvironmentManager:
             "environments", DEFAULT_ENVIRONMENTS.copy(),
         )
 
-        # デフォルト環境名（環境変数 > config > デフォルト定数の優先順位）
-        self._default_environment = os.environ.get(
-            "EXECUTOR_DEFAULT_ENVIRONMENT",
-            self._executor_config.get("default_environment", DEFAULT_ENVIRONMENT),
+        # デフォルト環境名（config > デフォルト定数）
+        self._default_environment = self._executor_config.get(
+            "default_environment", DEFAULT_ENVIRONMENT,
         )
 
         # Docker設定
         self._docker_config = self._executor_config.get("docker", {})
         self._base_image = self._docker_config.get(
-            "base_image",
-            os.environ.get("EXECUTOR_BASE_IMAGE", "coding-agent-executor:latest"),
+            "base_image", "coding-agent-executor:latest",
         )
 
         # リソース制限設定
         resources = self._docker_config.get("resources", {})
-        self._cpu_limit = resources.get(
-            "cpu_limit",
-            int(os.environ.get("EXECUTOR_CPU_LIMIT", "2")),
-        )
-        self._memory_limit = resources.get(
-            "memory_limit",
-            os.environ.get("EXECUTOR_MEMORY_LIMIT", "4g"),
-        )
+        self._cpu_limit = resources.get("cpu_limit", 2)
+        self._memory_limit = resources.get("memory_limit", "4g")
 
         # クローン設定
         clone_config = self._executor_config.get("clone", {})
@@ -133,10 +125,7 @@ class ExecutionEnvironmentManager:
 
         # 実行設定
         execution_config = self._executor_config.get("execution", {})
-        self._timeout_seconds = execution_config.get(
-            "timeout_seconds",
-            int(os.environ.get("EXECUTOR_TIMEOUT", "1800")),
-        )
+        self._timeout_seconds = execution_config.get("timeout_seconds", 1800)
         self._max_output_size = execution_config.get("max_output_size", 1048576)  # 1MB
 
         # クリーンアップ設定
@@ -191,11 +180,6 @@ class ExecutionEnvironmentManager:
             有効な場合True、無効な場合False
 
         """
-        # 環境変数による有効/無効チェック
-        env_enabled = os.environ.get("COMMAND_EXECUTOR_ENABLED", "").lower()
-        if env_enabled:
-            return env_enabled == "true"
-
         # 設定ファイルによる有効/無効チェック
         return self._executor_config.get("enabled", False)
 
@@ -261,8 +245,9 @@ class ExecutionEnvironmentManager:
             owner = task_key.owner
             repo = task_key.repo
 
-            # 認証トークンの取得
-            token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN", "")
+            # 認証トークンを設定から取得
+            github_config = self.config.get("github", {})
+            token = github_config.get("personal_access_token", "")
 
             if token:
                 clone_url = f"https://x-access-token:{token}@github.com/{owner}/{repo}.git"
@@ -277,9 +262,10 @@ class ExecutionEnvironmentManager:
         if hasattr(task_key, "project_id"):
             project_id = task_key.project_id
 
-            # 認証トークンの取得
-            token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN", "")
-            gitlab_url = os.environ.get("GITLAB_API_URL", "https://gitlab.com/api/v4")
+            # 認証トークンを設定から取得
+            gitlab_config = self.config.get("gitlab", {})
+            token = gitlab_config.get("personal_access_token", "")
+            gitlab_url = gitlab_config.get("api_url", "https://gitlab.com/api/v4")
 
             # APIURLからベースURLを抽出（/api/v4を除去）
             base_url = gitlab_url.replace("/api/v4", "").replace("/api/v3", "")
@@ -483,6 +469,8 @@ class ExecutionEnvironmentManager:
             "--workdir", "/workspace",
             # 非特権モードで実行
             "--security-opt", "no-new-privileges",
+            # coding-agent-networkに接続してwebやrabbitmqにアクセス可能にする
+            "--network", "coding_agent_coding-agent-network",
             image,
         ]
 
@@ -1045,11 +1033,6 @@ class ExecutionEnvironmentManager:
         Returns:
             有効な場合True、無効な場合False
         """
-        # 環境変数による有効/無効チェック
-        env_enabled = os.environ.get("TEXT_EDITOR_MCP_ENABLED", "").lower()
-        if env_enabled:
-            return env_enabled == "true"
-
         # 設定ファイルによる有効/無効チェック
         return self._text_editor_config.get("enabled", True)
 
