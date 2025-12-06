@@ -108,7 +108,7 @@ class ExecutionEnvironmentMCPWrapper:
 
         if self.mcp_server_name == "text":
             # text_editorツールは単一ツール、commandパラメータで動作切替
-            return self.execution_manager.call_text_editor_tool(arguments=args)
+            return self.execution_manager.call_text_editor_tool(tool="text_editor", arguments=args)
 
         msg = f"Unknown MCP server: {self.mcp_server_name}"
         raise ValueError(msg)

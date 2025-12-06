@@ -1090,11 +1090,13 @@ class ExecutionEnvironmentManager:
 
     def call_text_editor_tool(
         self,
+        tool: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
         """text-editorツールを呼び出す.
         
         Args:
+            tool: ツール名（"text_editor"固定）
             arguments: コマンドの引数
             
         Returns:
@@ -1119,7 +1121,7 @@ class ExecutionEnvironmentManager:
         self.logger.info("text_editorツールを呼び出します: %s", cleaned_arguments)
 
         try:
-            result = client.call_tool(cleaned_arguments)
+            result = client.call_tool(tool, cleaned_arguments)
             return {
                 "success": result.success,
                 "content": result.content,

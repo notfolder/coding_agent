@@ -195,11 +195,12 @@ class TextEditorMCPClient:
             self._process = None
             self._initialized = False
 
-    def call_tool(self, arguments: dict[str, Any]) -> TextEditorToolResult:
+    def call_tool(self, tool: str, args: dict[str, Any]) -> TextEditorToolResult:
         """テキストエディタツールを呼び出す.
 
         Args:
-            arguments: ツールの引数
+            tool: ツール名（"text_editor"固定、互換性のため）
+            args: ツールの引数
 
         Returns:
             ツール実行結果
@@ -212,6 +213,9 @@ class TextEditorMCPClient:
             msg = "MCP server not initialized. Call start() first."
             raise RuntimeError(msg)
 
+        # toolパラメータは無視（text_editor固定）
+        arguments = args
+        
         # commandに基づいてdescriptionを生成
         command = arguments.get("command", "")
         description_map = {
@@ -374,10 +378,10 @@ class TextEditorMCPClient:
             ツール実行結果
 
         """
-        args: dict[str, Any] = {"path": path}
+        args: dict[str, Any] = {"command": "view", "path": path}
         if view_range is not None:
             args["view_range"] = view_range
-        return self.call_tool("view", args)
+        return self.call_tool("text_editor", args)
 
     def create(self, path: str, file_text: str) -> TextEditorToolResult:
         """新しいファイルを作成する.
@@ -390,7 +394,7 @@ class TextEditorMCPClient:
             ツール実行結果
 
         """
-        return self.call_tool("create", {"path": path, "file_text": file_text})
+        return self.call_tool("text_editor", {"command": "create", "path": path, "file_text": file_text})
 
     def str_replace(
         self,
@@ -410,8 +414,8 @@ class TextEditorMCPClient:
 
         """
         return self.call_tool(
-            "str_replace",
-            {"path": path, "old_str": old_str, "new_str": new_str},
+            "text_editor",
+            {"command": "str_replace", "path": path, "old_str": old_str, "new_str": new_str},
         )
 
     def insert(
@@ -432,8 +436,8 @@ class TextEditorMCPClient:
 
         """
         return self.call_tool(
-            "insert",
-            {"path": path, "insert_line": insert_line, "new_str": new_str},
+            "text_editor",
+            {"command": "insert", "path": path, "insert_line": insert_line, "new_str": new_str},
         )
 
     def undo_edit(self, path: str) -> TextEditorToolResult:
@@ -446,7 +450,7 @@ class TextEditorMCPClient:
             ツール実行結果
 
         """
-        return self.call_tool("undo_edit", {"path": path})
+        return self.call_tool("text_editor", {"command": "undo_edit", "path": path})
 
     def is_running(self) -> bool:
         """MCPサーバーが実行中かどうかを確認する.
