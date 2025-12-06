@@ -370,6 +370,9 @@ class TaskHandler:
                 context_dir=context_manager.context_dir,
             )
             
+            # TaskContextManagerにLLMクライアントを設定（ユーザー設定を保持）
+            context_manager.set_llm_client(task_llm_client)
+            
             # Create context compressor
             compressor = ContextCompressor(
                 message_store,

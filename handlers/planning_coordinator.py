@@ -128,6 +128,9 @@ class PlanningCoordinator:
                 context_dir=context_manager.context_dir,
             )
 
+        # TaskContextManagerにLLMクライアントを設定（ユーザー設定を保持）
+        self.context_manager.set_llm_client(self.llm_client)
+
         # Load and send planning-specific system prompt
         self._load_planning_system_prompt()
 
