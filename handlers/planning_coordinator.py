@@ -3044,14 +3044,16 @@ Maintain the same JSON format as before for action_plan.actions."""
                 return ""
         else:
             # 環境変数が設定されていない場合は設定ファイルをチェック
-            rules_config = self.config.get("project_agent_rules", {})
+            main_config = self.config.get("main_config", {})
+            rules_config = main_config.get("project_agent_rules", {})
             if not rules_config.get("enabled", True):
                 return ""
 
         # タスクからowner/repo (GitHub) または project_id (GitLab) を取得してMCPモードで読み込み
         try:
             # 設定からタスクソースを取得
-            task_source = self.config.get("task_source", "github").lower()
+            main_config = self.config.get("main_config", {})
+            task_source = main_config.get("task_source", "github").lower()
             
             task_key = self.task.get_task_key()
             owner = getattr(task_key, "owner", None)
@@ -3064,7 +3066,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                     self.logger.warning("GitHub MCPが利用できません")
                     return ""
                 loader = ProjectAgentRulesLoader(
-                    config=self.config,
+                    config=main_config,
                     mcp_client=self.task_source_mcp["github"],
                     owner=owner,
                     repo=repo,
@@ -3077,7 +3079,7 @@ Maintain the same JSON format as before for action_plan.actions."""
                     self.logger.warning("GitLab MCPが利用できません")
                     return ""
                 loader = ProjectAgentRulesLoader(
-                    config=self.config,
+                    config=main_config,
                     mcp_client=self.task_source_mcp["gitlab"],
                     project_id=str(project_id),
                 )
