@@ -95,9 +95,6 @@ class PlanningCoordinator:
         if issue_id:
             self.history_store.issue_id = str(issue_id)
 
-        # Track checklist comment ID for updates
-        self.checklist_comment_id: int | str | None = None
-
         # Initialize ProgressCommentManager for unified progress tracking
         from handlers.progress_comment_manager import ProgressCommentManager
         
@@ -2286,10 +2283,8 @@ Maintain the same JSON format as before for action_plan.actions."""
             # 絵文字を決定
             emoji = "✅" if verification_passed else "⚠️"
 
-            # コメントを構築
-            comment_lines = [
-                f"## 🔍 Verification Result - {emoji}",
-                "",
+            # 詳細を構築
+            details_lines = [
                 f"**Status**: {'Passed' if verification_passed else 'Issues Found'}",
                 f"**Confidence**: {confidence * 100:.0f}%",
                 "",
@@ -2297,47 +2292,47 @@ Maintain the same JSON format as before for action_plan.actions."""
 
             # 検出された問題
             if issues_found:
-                comment_lines.append("### Issues Found")
+                details_lines.append("### Issues Found")
                 for issue in issues_found:
-                    comment_lines.append(f"- {issue}")
-                comment_lines.append("")
+                    details_lines.append(f"- {issue}")
+                details_lines.append("")
 
             # プレースホルダ検出
             placeholder_count = placeholder_info.get("count", 0)
             if placeholder_count > 0:
-                comment_lines.append(f"### Placeholder Detection: {placeholder_count} found")
+                details_lines.append(f"### Placeholder Detection: {placeholder_count} found")
                 locations = placeholder_info.get("locations", [])
                 for loc in locations:
-                    comment_lines.append(f"- {loc}")
-                comment_lines.append("")
+                    details_lines.append(f"- {loc}")
+                details_lines.append("")
 
             # 追加作業
             if additional_actions:
-                comment_lines.append(f"### Additional Work Needed: {len(additional_actions)} actions")
+                details_lines.append(f"### Additional Work Needed: {len(additional_actions)} actions")
                 for action in additional_actions:
                     task_id = action.get("task_id", "unknown")
                     purpose = action.get("purpose", "")
-                    comment_lines.append(f"- **{task_id}**: {purpose}")
-                comment_lines.append("")
+                    details_lines.append(f"- **{task_id}**: {purpose}")
+                details_lines.append("")
 
             # サマリーコメント
             if comment:
-                comment_lines.append("### Summary")
-                comment_lines.append(comment)
-                comment_lines.append("")
+                details_lines.append("### Summary")
+                details_lines.append(comment)
 
-            # タイムスタンプ
-            timestamp = datetime.now().strftime(DATETIME_FORMAT)
-            comment_lines.append(f"*{timestamp}*")
+            details = "\n".join(details_lines)
 
-            comment_content = "\n".join(comment_lines)
+            # ProgressCommentManagerに履歴追加
+            self.progress_manager.add_history_entry(
+                entry_type="verification",
+                title=f"🔍 Verification Result - {emoji}",
+                details=details,
+            )
 
-            # Issue/MRに投稿
-            if hasattr(self.task, "comment"):
-                self.task.comment(comment_content)
-                self.logger.info("Posted verification result to Issue/MR")
-            else:
-                self.logger.warning("Task does not support comment, cannot post verification result")
+            # 最新検証結果を設定（実行状態セクションに表示）
+            self.progress_manager.set_verification_result(verification_result)
+
+            self.logger.info("Posted verification result to progress comment")
 
         except Exception as e:
             self.logger.error("Failed to post verification result: %s", str(e))
@@ -2363,56 +2358,44 @@ Maintain the same JSON format as before for action_plan.actions."""
             action_plan = self.current_plan.get("action_plan", {})
             original_actions = action_plan.get("actions", [])
 
-            # チェックリストを構築
-            checklist_lines = [
-                "## 📋 Execution Plan (Verification Round)",
-                "",
-                "### Original Plan (Completed)",
-            ]
-
+            # チェックリスト項目を構築
+            checklist_items = []
+            
             # 元の計画(すべて完了)
-            for i, action in enumerate(original_actions, 1):
-                task_id = action.get("task_id", f"task_{i}")
+            for i, action in enumerate(original_actions):
+                task_id = action.get("task_id", f"task_{i+1}")
                 purpose = action.get("purpose", "Execute action")
-                checklist_lines.append(f"- [x] **{task_id}**: {purpose}")
-
-            checklist_lines.extend([
-                "",
-                "### Additional Work (From Verification)",
-            ])
+                checklist_items.append({
+                    "id": task_id,
+                    "description": f"{purpose} (Original - Completed)",
+                    "completed": True,
+                })
 
             # 追加作業(未完了)
-            for i, action in enumerate(additional_actions, 1):
-                task_id = action.get("task_id", f"verification_fix_{i}")
+            for i, action in enumerate(additional_actions):
+                task_id = action.get("task_id", f"verification_fix_{i+1}")
                 purpose = action.get("purpose", "Fix issue")
-                checklist_lines.append(f"- [ ] **{task_id}**: {purpose}")
+                checklist_items.append({
+                    "id": task_id,
+                    "description": f"{purpose} (Verification)",
+                    "completed": False,
+                })
 
-            checklist_lines.append("")
-
-            # 進捗情報
+            # ProgressCommentManagerを更新
+            self.progress_manager.update_checklist(checklist_items)
+            
+            # 進捗情報も更新
             total_actions = len(original_actions) + len(additional_actions)
-            completed = len(original_actions)
-            # total_actionsが0の場合は100%(完了)とする
-            progress_pct = int(completed / total_actions * 100) if total_actions else 100
-            checklist_lines.append(
-                f"*Progress: {completed}/{total_actions} ({progress_pct}%) - "
-                f"Verification found {len(additional_actions)} additional items*",
+            self.progress_manager.update_status(
+                action_counter=len(original_actions),
+                total_actions=total_actions,
             )
-
-            checklist_content = "\n".join(checklist_lines)
-
-            # 既存のコメントを更新または新規投稿
-            if self.checklist_comment_id and hasattr(self.task, "update_comment"):
-                self.task.update_comment(self.checklist_comment_id, checklist_content)
-                self.logger.info(
-                    "Updated checklist for additional work (comment_id=%s)",
-                    self.checklist_comment_id,
-                )
-            elif hasattr(self.task, "comment"):
-                result = self.task.comment(checklist_content)
-                if isinstance(result, dict):
-                    self.checklist_comment_id = result.get("id")
-                self.logger.info("Posted new checklist for additional work")
+            
+            self.logger.info(
+                "Updated checklist for additional work: %d original + %d verification items",
+                len(original_actions),
+                len(additional_actions),
+            )
 
         except Exception as e:
             self.logger.error("Failed to update checklist for additional work: %s", str(e))
@@ -2725,21 +2708,26 @@ Maintain the same JSON format as before for action_plan.actions."""
         self.action_counter = planning_state.get("action_counter", 0)
         self.revision_counter = planning_state.get("revision_counter", 0)
 
-        # Restore progress manager's LLM call count
+        # Restore progress manager state
         saved_llm_call_count = planning_state.get("llm_call_count", 0)
         if saved_llm_call_count > 0:
             self.progress_manager.llm_call_count = saved_llm_call_count
 
-        # Restore checklist comment ID if available
-        saved_checklist_id = planning_state.get("checklist_comment_id")
-        if saved_checklist_id is not None:
-            self.checklist_comment_id = saved_checklist_id
-            self.plan_comment_id = saved_checklist_id
+        saved_comment_id = planning_state.get("progress_comment_id")
+        if saved_comment_id is not None:
+            self.progress_manager.comment_id = saved_comment_id
+            self.plan_comment_id = saved_comment_id
 
         # Restore pre-planning result if available
         saved_pre_planning_result = planning_state.get("pre_planning_result")
         if saved_pre_planning_result is not None:
             self.pre_planning_result = saved_pre_planning_result
+            
+            # 依頼内容理解結果を実行状態に反映
+            pre_planning = saved_pre_planning_result.get("pre_planning_result", {})
+            understanding_result = pre_planning.get("understanding_result")
+            if understanding_result:
+                self.progress_manager.set_understanding_result(understanding_result)
 
         # Restore selected environment if available
         saved_selected_environment = planning_state.get("selected_environment")
@@ -2758,12 +2746,12 @@ Maintain the same JSON format as before for action_plan.actions."""
 
         self.logger.info(
             "Planning状態を復元しました: phase=%s, action_counter=%d, revision_counter=%d, "
-            "llm_call_count=%d, checklist_id=%s, selected_environment=%s, default_env_prepared=%s",
+            "llm_call_count=%d, progress_comment_id=%s, selected_environment=%s, default_env_prepared=%s",
             self.current_phase,
             self.action_counter,
             self.revision_counter,
             self.progress_manager.llm_call_count,
-            self.checklist_comment_id,
+            self.progress_manager.comment_id,
             self.selected_environment,
             self.default_environment_prepared,
         )
@@ -2793,7 +2781,7 @@ Maintain the same JSON format as before for action_plan.actions."""
             "action_counter": self.action_counter,
             "revision_counter": self.revision_counter,
             "llm_call_count": self.progress_manager.llm_call_count,
-            "checklist_comment_id": self.plan_comment_id,
+            "progress_comment_id": self.progress_manager.comment_id,
             "total_actions": total_actions,
             "pre_planning_result": self.pre_planning_result,
             "selected_environment": self.selected_environment,

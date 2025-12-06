@@ -971,6 +971,9 @@ class PrePlanningManager:
         if not self.understanding_result or not self.progress_manager:
             return
 
+        # 実行状態セクションに依頼内容理解を設定
+        self.progress_manager.set_understanding_result(self.understanding_result)
+
         request_understanding = self.understanding_result.get(
             "request_understanding", {}
         )

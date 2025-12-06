@@ -49,6 +49,8 @@ class ProgressCommentManager:
         self.total_actions: int = 0
         self.llm_call_count: int = 0
         self.llm_comment: str | None = None
+        self.latest_understanding: dict[str, Any] | None = None
+        self.latest_verification: dict[str, Any] | None = None
         self.history_entries: list[dict[str, Any]] = []
         self.checklist_items: list[dict[str, Any]] = []
 
@@ -169,6 +171,47 @@ class ProgressCommentManager:
         self.last_update_time = datetime.now()
         self._update_comment()
 
+    def set_understanding_result(self, understanding_result: dict[str, Any]) -> None:
+        """最新の依頼内容理解結果を設定.
+        
+        Pre-planningフェーズのUnderstanding完了時に呼び出され、
+        実行状態セクションの「依頼内容理解」に反映される。
+        
+        Args:
+            understanding_result: 理解結果の辞書
+                - request_understanding: dict
+                    - task_type: str
+                    - primary_goal: str
+                    - understanding_confidence: float
+        """
+        if not self.enabled or self.comment_id is None:
+            return
+
+        self.latest_understanding = understanding_result
+        self.last_update_time = datetime.now()
+        self._update_comment()
+
+    def set_verification_result(self, verification_result: dict[str, Any]) -> None:
+        """最新の検証結果を設定.
+        
+        Verificationフェーズ完了時に呼び出され、
+        実行状態セクションの「最新検証結果」に反映される。
+        
+        Args:
+            verification_result: 検証結果の辞書
+                - verification_passed: bool
+                - completion_confidence: float
+                - comment: str (optional)
+                - issues_found: list (optional)
+                - additional_actions: list (optional)
+        """
+        if not self.enabled or self.comment_id is None:
+            return
+
+        self.latest_verification = verification_result
+        self.last_update_time = datetime.now()
+        self._update_comment()
+
     def update_checklist(
         self,
         checklist_items: list[dict[str, Any]],
@@ -247,6 +290,79 @@ class ProgressCommentManager:
 
         return "\n\n".join(sections)
 
+    def _format_understanding_detail(self) -> list[str]:
+        """依頼内容理解の詳細を複数行で生成.
+        
+        Returns:
+            理解結果の詳細表示行のリスト
+        """
+        if not self.latest_understanding:
+            return []
+        
+        request_understanding = self.latest_understanding.get("request_understanding", {})
+        task_type = request_understanding.get("task_type", "不明")
+        primary_goal = request_understanding.get("primary_goal", "")
+        confidence = request_understanding.get("understanding_confidence", 0.0)
+        deliverables = request_understanding.get("expected_deliverables", [])
+        
+        lines = [
+            "- **依頼内容理解**:",
+            f"  - タスク種別: {task_type}",
+            f"  - 理解の確信度: {confidence * 100:.0f}%",
+        ]
+        
+        if primary_goal:
+            lines.append(f"  - 主目的: {primary_goal}")
+        
+        if deliverables:
+            lines.append("  - 成果物:")
+            for deliverable in deliverables[:3]:  # 最大3件まで表示
+                lines.append(f"    - {deliverable}")
+            if len(deliverables) > 3:
+                lines.append(f"    - ... 他{len(deliverables) - 3}件")
+        
+        return lines
+
+    def _format_verification_detail(self) -> list[str]:
+        """最新検証結果の詳細を複数行で生成.
+        
+        Returns:
+            検証結果の詳細表示行のリスト
+        """
+        if not self.latest_verification:
+            return []
+        
+        verification_passed = self.latest_verification.get("verification_passed", False)
+        confidence = self.latest_verification.get("completion_confidence", 0)
+        comment = self.latest_verification.get("comment", "")
+        issues_found = self.latest_verification.get("issues_found", [])
+        additional_actions = self.latest_verification.get("additional_actions", [])
+        
+        # 絵文字とステータス
+        emoji = "✅" if verification_passed else "⚠️"
+        status = "Passed" if verification_passed else "Issues Found"
+        
+        lines = [
+            "- **最新検証結果**:",
+            f"  - ステータス: {emoji} {status}",
+            f"  - 確信度: {confidence * 100:.0f}%",
+        ]
+        
+        if comment:
+            lines.append(f"  - コメント: {comment}")
+        
+        if issues_found:
+            lines.append(f"  - 問題数: {len(issues_found)}件")
+            for issue in issues_found[:2]:  # 最大2件まで表示
+                lines.append(f"    - {issue}")
+            if len(issues_found) > 2:
+                lines.append(f"    - ... 他{len(issues_found) - 2}件")
+        
+        if additional_actions:
+            lines.append(f"  - 追加作業: {len(additional_actions)}件")
+        
+        return lines
+
     def _format_status_section(self) -> str:
         """実行状態セクションのMarkdown生成.
         
@@ -284,6 +400,16 @@ class ProgressCommentManager:
         if self.last_update_time:
             update_str = self.last_update_time.strftime("%Y-%m-%d %H:%M:%S")
             lines.append(f"- **最終更新**: {update_str}")
+
+        # 依頼内容理解（複数行、省略なし）
+        if self.latest_understanding:
+            understanding_lines = self._format_understanding_detail()
+            lines.extend(understanding_lines)
+
+        # 最新検証結果（複数行、省略なし）
+        if self.latest_verification:
+            verification_lines = self._format_verification_detail()
+            lines.extend(verification_lines)
 
         return "\n".join(lines)
 
