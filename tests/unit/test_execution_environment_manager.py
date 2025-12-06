@@ -424,7 +424,18 @@ class TestGetCloneUrl(unittest.TestCase):
         mock_task.source_branch = "feature-branch"
         
         with patch.dict("os.environ", {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_token123"}):
-            url, branch = self.manager._get_clone_url(mock_task)
+            # 環境変数をconfigに反映（main.pyの_override_github_config相当）
+            import os
+            config = {"command_executor": {"enabled": True}}
+            token = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
+            if token:
+                if "github" not in config:
+                    config["github"] = {}
+                config["github"]["personal_access_token"] = token
+            
+            # 新しいconfigでマネージャーを作成
+            manager = ExecutionEnvironmentManager(config)
+            url, branch = manager._get_clone_url(mock_task)
         
         assert "x-access-token:ghp_token123@" in url
         assert "github.com/testuser/testrepo.git" in url
@@ -446,7 +457,23 @@ class TestGetCloneUrl(unittest.TestCase):
             "GITLAB_PERSONAL_ACCESS_TOKEN": "",
             "GITLAB_API_URL": "https://gitlab.example.com/api/v4",
         }):
-            url, branch = self.manager._get_clone_url(mock_task)
+            # 環境変数をconfigに反映（main.pyの_override_gitlab_config相当）
+            import os
+            config = {"command_executor": {"enabled": True}}
+            
+            token = os.environ.get("GITLAB_PERSONAL_ACCESS_TOKEN")
+            api_url = os.environ.get("GITLAB_API_URL")
+            
+            if "gitlab" not in config:
+                config["gitlab"] = {}
+            if token:
+                config["gitlab"]["personal_access_token"] = token
+            if api_url:
+                config["gitlab"]["api_url"] = api_url
+            
+            # 新しいconfigでマネージャーを作成
+            manager = ExecutionEnvironmentManager(config)
+            url, branch = manager._get_clone_url(mock_task)
         
         assert "gitlab.example.com" in url
         assert "group/project.git" in url
