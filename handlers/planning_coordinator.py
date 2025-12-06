@@ -282,10 +282,13 @@ class PlanningCoordinator:
 
             # Step 0: Execute pre-planning phase (計画前情報収集フェーズ)
             if self.pre_planning_manager is not None:
+                self.progress_manager.set_active_phase("pre_planning")
                 self.pre_planning_result = self._execute_pre_planning_phase()
                 self._post_phase_comment("pre_planning", "completed", "計画前情報収集が完了しました")
+                self.progress_manager.mark_phase_completed("pre_planning")
 
             # Post planning start comment
+            self.progress_manager.set_active_phase("planning")
             self._post_phase_comment("planning", "started", "Beginning task analysis and planning...")
 
             # Step 1: Check for existing plan
@@ -303,6 +306,7 @@ class PlanningCoordinator:
                         )
                     self.current_phase = "execution"
                     self._post_phase_comment("planning", "completed", "Loaded existing plan from history.")
+                    self.progress_manager.mark_phase_completed("planning")
             else:
                 # Step 2: Execute planning phase
                 self.logger.info("No existing plan, executing planning phase...")
@@ -313,6 +317,7 @@ class PlanningCoordinator:
                     self._post_plan_as_checklist(self.current_plan)
                     self.current_phase = "execution"
                     self._post_phase_comment("planning", "completed", "Created execution plan with action items.")
+                    self.progress_manager.mark_phase_completed("planning")
                 else:
                     self.logger.error("Planning phase failed")
                     self._post_phase_comment("planning", "failed", "Could not generate a valid execution plan.")
@@ -371,6 +376,7 @@ class PlanningCoordinator:
                 return False
 
             # Post execution start
+            self.progress_manager.set_active_phase("execution")
             self._post_phase_comment("execution", "started", "Beginning execution of planned actions...")
 
             # Step 3: Execution loop
@@ -490,6 +496,7 @@ class PlanningCoordinator:
                     # Check for new comments before reflection
                     self._check_and_add_new_comments()
 
+                    self.progress_manager.set_active_phase("reflection")
                     self._post_phase_comment("reflection", "started", f"Analyzing results after {self.action_counter} actions...")
                     self.current_phase = "reflection"
                     reflection = self._execute_reflection_phase(result)
@@ -540,6 +547,7 @@ class PlanningCoordinator:
 
                     # Reset to execution phase
                     self.current_phase = "execution"
+                    self.progress_manager.set_active_phase("execution")
 
                 # Check for completion
                 if result.get("done"):
@@ -550,6 +558,7 @@ class PlanningCoordinator:
             verification_config = self.config.get("verification", {})
             if verification_config.get("enabled", True):
                 self.logger.info("All planned actions executed, starting verification phase")
+                self.progress_manager.set_active_phase("verification")
                 self._post_phase_comment("verification", "started", "Verifying task completion...")
 
                 max_verification_rounds = verification_config.get("max_rounds", 2)
@@ -599,6 +608,7 @@ class PlanningCoordinator:
                     if verification_result.get("verification_passed"):
                         self.logger.info("Verification passed!")
                         self._post_phase_comment("verification", "completed", "All requirements verified ✅")
+                        self.progress_manager.mark_phase_completed("verification")
                         break
 
                     additional_actions = verification_result.get("additional_actions", [])
@@ -623,6 +633,7 @@ class PlanningCoordinator:
                     self._update_checklist_for_additional_work(verification_result, additional_actions)
 
                     # 追加アクションを実行
+                    self.progress_manager.set_active_phase("execution")
                     self._post_phase_comment(
                         "execution",
                         "started",
@@ -717,8 +728,11 @@ class PlanningCoordinator:
             # Mark all tasks complete
             self._mark_checklist_complete()
             self._post_phase_comment("execution", "completed", "All planned actions have been executed successfully.")
+            self.progress_manager.mark_phase_completed("execution")
 
             # Finalize progress comment with success
+            self.progress_manager.set_active_phase("complete")
+            self.progress_manager.mark_phase_completed("complete")
             self.progress_manager.finalize(
                 final_status="completed",
                 summary="タスクが正常に完了しました",

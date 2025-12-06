@@ -19,6 +19,26 @@ class ProgressCommentManager:
     - コメントIDの管理
     """
 
+    # フェーズの順序定義
+    PHASE_ORDER = [
+        "pre_planning",
+        "planning",
+        "execution",
+        "reflection",
+        "verification",
+        "complete"
+    ]
+
+    # フェーズ表示名のマッピング
+    PHASE_DISPLAY_NAMES = {
+        "pre_planning": "Pre Planning",
+        "planning": "Planning",
+        "execution": "Execution",
+        "reflection": "Reflection",
+        "verification": "Verification",
+        "complete": "Complete"
+    }
+
     def __init__(
         self,
         task: Any,
@@ -53,6 +73,10 @@ class ProgressCommentManager:
         self.latest_verification: dict[str, Any] | None = None
         self.history_entries: list[dict[str, Any]] = []
         self.checklist_items: list[dict[str, Any]] = []
+        
+        # フェーズ進捗管理
+        self.completed_phases: set[str] = set()  # 完了したフェーズのセット
+        self.active_phase: str | None = None     # 現在アクティブなフェーズ
 
     def create_initial_comment(self, task_info: str = "") -> int | str | None:
         """タスク開始時の初期コメントを作成.
@@ -232,6 +256,32 @@ class ProgressCommentManager:
         self.last_update_time = datetime.now()
         self._update_comment()
 
+    def set_active_phase(self, phase: str) -> None:
+        """アクティブフェーズを設定.
+        
+        Args:
+            phase: フェーズ名（"pre_planning", "planning", "execution"等）
+        """
+        if not self.enabled or self.comment_id is None:
+            return
+        
+        self.active_phase = phase
+        self.last_update_time = datetime.now()
+        self._update_comment()
+
+    def mark_phase_completed(self, phase: str) -> None:
+        """フェーズを完了としてマーク.
+        
+        Args:
+            phase: 完了したフェーズ名
+        """
+        if not self.enabled or self.comment_id is None:
+            return
+        
+        self.completed_phases.add(phase)
+        self.last_update_time = datetime.now()
+        self._update_comment()
+
     def finalize(
         self,
         final_status: str,
@@ -366,6 +416,29 @@ class ProgressCommentManager:
         
         return lines
 
+    def _format_phase_progress(self) -> str:
+        """フェーズ進捗を1行の文字列で生成.
+        
+        Returns:
+            フェーズ進捗の文字列（例: "✅ Planning → ▶️ Execution → Reflection"）
+        """
+        phase_parts = []
+        for phase in self.PHASE_ORDER:
+            display_name = self.PHASE_DISPLAY_NAMES.get(phase, phase)
+            
+            # active_phaseを優先的にチェック（完了済みでも現在実行中なら▶️を表示）
+            if phase == self.active_phase:
+                # 現在実行中
+                phase_parts.append(f"▶️ {display_name}")
+            elif phase in self.completed_phases:
+                # 完了済み
+                phase_parts.append(f"✅ {display_name}")
+            else:
+                # 未実施
+                phase_parts.append(display_name)
+        
+        return " → ".join(phase_parts)
+
     def _format_status_section(self) -> str:
         """実行状態セクションのMarkdown生成.
         
@@ -376,6 +449,7 @@ class ProgressCommentManager:
 
         # フェーズとステータス
         lines.append(f"- **現在フェーズ**: {self.current_phase}")
+        lines.append(f"- **フェーズ進捗**: {self._format_phase_progress()}")
         lines.append(f"- **ステータス**: {self.current_status}")
 
         # LLMコメント（複数行、省略なし）
