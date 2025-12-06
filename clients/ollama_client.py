@@ -177,6 +177,8 @@ class OllamaClient(LLMClient):
             
             # 統計記録フックを呼び出し
             self._invoke_statistics_hook(total_tokens)
+            
+            return reply, [], total_tokens
 
         except Exception as e:
             # Log error
@@ -186,9 +188,6 @@ class OllamaClient(LLMClient):
                 context={"model": self.model, "endpoint": self.endpoint},
             )
             raise
-
-        else:
-            return reply, [], total_tokens
 
         finally:
             # Clean up request.json

@@ -110,10 +110,6 @@ class TaskHandler:
             # 変換に失敗した場合は通常処理に進む（エラーはログに記録済み）
             self.logger.warning("Issue→MR/PR変換に失敗しました。通常処理を継続します。")
 
-        # トークン統計記録フックを設定（全モード共通）
-        # UUIDがある場合のみ統計記録を有効化
-        self._setup_statistics_hook(task)
-
         # 計画機能の有効可否を先に判定する
         planning_config = self.config.get("planning", {})
         planning_enabled = planning_config.get("enabled", True)
@@ -131,6 +127,7 @@ class TaskHandler:
                 # LLMクライアントのツール定義を更新（実行環境ラッパー含む）
                 self._update_llm_client_tools()
                 # Use planning-based task handling
+                # Planning modeでは内部で統計記録を行うのでフックは不要
                 self._handle_with_planning(task, self.config, execution_manager)
             else:
                 # Check if context storage is enabled
@@ -138,36 +135,38 @@ class TaskHandler:
                 
                 if context_storage_enabled and task.uuid:
                     # Use file-based context storage
+                    # Context Storage modeでは内部で統計記録を行うのでフックは不要
                     self._handle_with_context_storage(task, self.config)
                 else:
                     # Use legacy in-memory handling
-                    self._handle_legacy(task, self.config)
+                    # Legacy modeでは統計記録がないため、フックを設定して記録する
+                    self._setup_statistics_hook_for_legacy(task)
+                    try:
+                        self._handle_legacy(task, self.config)
+                    finally:
+                        self._clear_statistics_hook()
         finally:
             # 実行環境のクリーンアップ
             self._cleanup_execution_environment(execution_manager, task)
-            
-            # 統計記録フックをクリア
-            self._clear_statistics_hook()
 
-    def _setup_statistics_hook(self, task: Task) -> None:
-        """トークン統計記録フックを設定する.
+    def _setup_statistics_hook_for_legacy(self, task: Task) -> None:
+        """Legacy モード用のトークン統計記録フックを設定する.
         
-        タスクにUUIDがある場合、TaskContextManagerを作成（または取得）し、
-        LLMクライアントに統計記録フックを設定します。
+        Legacy モードではTaskContextManagerを使用しないため、
+        ここで作成してLLMクライアントにフックを設定します。
         
         Args:
             task: タスクオブジェクト
         
         """
         if not task.uuid:
-            self.logger.info("タスクにUUIDがないため、トークン統計記録は無効です")
+            self.logger.info("タスクにUUIDがないため、Legacy モードでのトークン統計記録は無効です")
             return
         
         try:
             from context_storage import TaskContextManager
             
-            # TaskContextManagerを作成してインスタンス変数に保持
-            # （planning/context_storageモードでは既に作成されているが、legacyモード用に保険）
+            # Legacy モード用のTaskContextManagerを作成
             self._statistics_context_manager = TaskContextManager(
                 task_key=task.get_task_key(),
                 task_uuid=task.uuid,
@@ -184,11 +183,11 @@ class TaskHandler:
                 )
             
             self.llm_client.set_statistics_hook(statistics_hook)
-            self.logger.info("トークン統計記録フックを設定しました: uuid=%s", task.uuid)
+            self.logger.info("Legacy モード用のトークン統計記録フックを設定しました: uuid=%s", task.uuid)
             
         except Exception as e:
             self.logger.warning(
-                "トークン統計記録フックの設定に失敗しました（統計は記録されません）: %s", 
+                "Legacy モード用のトークン統計記録フックの設定に失敗しました（統計は記録されません）: %s", 
                 e,
                 exc_info=True,
             )
@@ -198,6 +197,16 @@ class TaskHandler:
         """トークン統計記録フックをクリアする."""
         if hasattr(self, 'llm_client') and self.llm_client:
             self.llm_client.set_statistics_hook(None)
+        
+        # TaskContextManagerのクリーンアップ（Legacy モード用）
+        if hasattr(self, '_statistics_context_manager') and self._statistics_context_manager:
+            try:
+                # タスク完了としてマーク
+                self._statistics_context_manager.complete()
+            except Exception as e:
+                self.logger.warning("Legacy モード用TaskContextManagerのクリーンアップに失敗: %s", e)
+            finally:
+                self._statistics_context_manager = None
 
     def _init_execution_environment(
         self,
