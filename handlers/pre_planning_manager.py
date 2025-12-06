@@ -16,9 +16,6 @@ if TYPE_CHECKING:
     from clients.mcp_tool_client import MCPToolClient
     from handlers.task import Task
 
-# 日付フォーマット定数
-DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
-
 # 文字列切り詰め制限定数
 SUMMARY_TRUNCATION_LIMIT = 500  # 収集データのサマリー切り詰め文字数
 TEXT_TRUNCATION_LIMIT = 100  # 通知用テキスト切り詰め文字数
@@ -39,6 +36,7 @@ class PrePlanningManager:
         llm_client: LLMClient,
         mcp_clients: dict[str, MCPToolClient],
         task: Task,
+        progress_manager: Any | None = None,
     ) -> None:
         """PrePlanningManagerを初期化する.
 
@@ -47,6 +45,7 @@ class PrePlanningManager:
             llm_client: LLMクライアントインスタンス
             mcp_clients: MCPツールクライアントの辞書
             task: 処理対象のタスクオブジェクト
+            progress_manager: 進捗コメントマネージャ（オプション）
 
         """
         self.config = config
@@ -54,6 +53,7 @@ class PrePlanningManager:
         self.mcp_clients = mcp_clients
         self.task = task
         self.logger = logging.getLogger(__name__)
+        self.progress_manager = progress_manager
 
         # 設定の読み込み
         self.understanding_config = config.get("understanding", {})
@@ -950,18 +950,16 @@ class PrePlanningManager:
 
     def _post_start_notification(self) -> None:
         """開始通知を投稿する."""
-        timestamp = datetime.now().strftime(DATETIME_FORMAT)
-        comment = f"""## 🔍 タスク分析を開始します
-
-タスク内容を理解し、計画に必要な情報を収集しています...
-
-*開始時刻: {timestamp}*"""
-
-        self._post_comment(comment)
+        if self.progress_manager:
+            self.progress_manager.add_history_entry(
+                entry_type="phase",
+                title="🔍 Pre Planning Phase - ▶️ Started",
+                details="タスク内容を理解し、計画に必要な情報を収集しています...",
+            )
 
     def _post_understanding_complete_notification(self) -> None:
         """理解完了通知を投稿する."""
-        if not self.understanding_result:
+        if not self.understanding_result or not self.progress_manager:
             return
 
         request_understanding = self.understanding_result.get(
@@ -982,9 +980,7 @@ class PrePlanningManager:
         in_scope_str = ", ".join(in_scope) if in_scope else "全体"
         out_scope_str = ", ".join(out_of_scope) if out_of_scope else "なし"
 
-        comment = f"""## 📋 タスク内容の理解が完了しました
-
-**タスク種別**: {task_type}
+        details = f"""**タスク種別**: {task_type}
 
 **主な目標**:
 {primary_goal}
@@ -998,11 +994,16 @@ class PrePlanningManager:
 
 *理解の確信度: {confidence:.0%}*"""
 
-        self._post_comment(comment)
+        self.progress_manager.add_history_entry(
+            entry_type="phase",
+            title="📋 Request Understanding - ✅ Completed",
+            details=details,
+        )
 
     def _post_collection_complete_notification(self) -> None:
         """収集完了通知を投稿する."""
-        timestamp = datetime.now().strftime(DATETIME_FORMAT)
+        if not self.progress_manager:
+            return
 
         # 収集結果をまとめる
         collected_items = []
@@ -1025,7 +1026,7 @@ class PrePlanningManager:
                     assumed_items.append(f"❌ {info_id} (収集失敗)")
 
         collected_str = (
-            "\n".join(collected_items) if collected_items else "- なし"
+            "\n".join(collected_items) if collected_items else "なし"
         )
         assumed_str = "\n".join(assumed_items) if assumed_items else ""
 
@@ -1044,17 +1045,19 @@ class PrePlanningManager:
 以下の情報は収集できなかったため、推測で補完しました：
 {chr(10).join(assumption_details)}"""
 
-        comment = f"""## 📚 情報収集が完了しました
+        details = f"""**収集完了**: {len(collected_items)}件
+**推測適用**: {len(assumed_items)}件
 
-**収集した情報**:
 {collected_str}
 {assumed_str}{assumptions_section}
 
-計画フェーズに移行します...
+計画フェーズに移行します..."""
 
-*完了時刻: {timestamp}*"""
-
-        self._post_comment(comment)
+        self.progress_manager.add_history_entry(
+            entry_type="phase",
+            title="📦 Information Collection - ✅ Completed",
+            details=details,
+        )
 
     def _post_assumption_notification(self, assumption: dict[str, Any]) -> None:
         """推測通知を投稿する.
@@ -1063,32 +1066,22 @@ class PrePlanningManager:
             assumption: 推測結果
 
         """
+        if not self.progress_manager:
+            return
+
         info_id = assumption.get("info_id", "unknown")
         value = assumption.get("assumed_value", "")
         reasoning = assumption.get("reasoning", "")
         confidence = assumption.get("confidence", 0.0)
 
-        comment = f"""## ⚠️ 情報を推測しました
-
-**項目**: {info_id}
+        details = f"""**項目**: {info_id}
 **推測値**: {value}
 **理由**: {reasoning}
 **確信度**: {confidence:.0%}"""
 
-        self._post_comment(comment)
+        self.progress_manager.add_history_entry(
+            entry_type="assumption",
+            title="⚠️ Information Assumed",
+            details=details,
+        )
 
-    def _post_comment(self, comment: str) -> None:
-        """コメントを投稿する.
-
-        Args:
-            comment: コメント本文
-
-        """
-        try:
-            if hasattr(self.task, "comment"):
-                self.task.comment(comment)
-                self.logger.info("コメントを投稿しました")
-            else:
-                self.logger.warning("タスクがcommentメソッドをサポートしていません")
-        except Exception as e:
-            self.logger.warning("コメントの投稿に失敗しました: %s", e)

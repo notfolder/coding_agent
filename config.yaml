@@ -89,11 +89,15 @@ planning:
   # 選択肢: "detailed", "moderate", "minimal"
   decomposition_level: "moderate"
 
-  # LLM呼び出し時のIssueコメント設定
-  # LLM呼び出しの度にIssue/MRにコメントを投稿する機能
-  llm_call_comments:
+  # タスク進捗コメント機能
+  # タスク実行中に1つの進捗コメントを更新し続けることで、
+  # Issue/MRのコメント数を削減し、可読性を向上させる
+  progress_comment:
     # 機能の有効/無効（デフォルト: true）
     enabled: true
+    
+    # 履歴エントリの最大保持数（古いものから削除）
+    max_history_entries: 100
 
   # 計画前情報収集フェーズ設定
   # 計画を立てる前に依頼内容を理解し、必要な情報を収集するフェーズ
