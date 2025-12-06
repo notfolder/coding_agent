@@ -27,7 +27,7 @@ MAX_TRANSFER_COMMENTS = 50
 MAX_BRANCH_NAME_LENGTH = 50
 
 # 予約されたブランチ名（使用禁止）
-RESERVED_BRANCH_NAMES = frozenset({"main", "master", "develop", "release", "hotfix"})
+RESERVED_BRANCH_NAMES = frozenset({"main", "master", "develop", "release", "feature", "hotfix"})
 
 # ブランチ名生成のリトライ回数
 MAX_BRANCH_NAME_RETRIES = 5
@@ -39,8 +39,8 @@ class ConversionResult:
 
     Attributes:
         success: 変換が成功したかどうか
-        mr_number: 作成されたMR/PR番号
-        mr_url: MR/PRのURL
+        mr_number: 作成されたマージリクエスト/プルリクエスト番号
+        mr_url: マージリクエスト/プルリクエストのURL
         branch_name: 作成されたブランチ名
         error_message: エラーメッセージ（失敗時）
 
@@ -60,28 +60,57 @@ class BranchNameGenerator:
     """
 
     # ブランチ名生成用のシステムプロンプト
-    SYSTEM_PROMPT = """You are a branch name generator for Git repositories.
-Your task is to analyze GitHub/GitLab issue content and generate an appropriate branch name.
+    SYSTEM_PROMPT = """You are a branch name and base branch selector for Git repositories.
+Your task is to analyze GitHub/GitLab issue content and generate:
+1. An appropriate branch name for the feature/fix
+2. The most appropriate base branch to merge into
 
-Branch naming rules:
+Branch naming rules (Git-flow compliant):
 1. Use one of these prefixes based on issue type:
-   - feature/ : for new features
-   - fix/ : for bug fixes
-   - docs/ : for documentation
-   - refactor/ : for refactoring
-   - test/ : for tests
-   - task/ : for other tasks
+   - feature/ : for new features (merges to develop)
+   - fix/ : for bug fixes (merges to develop)
+   - hotfix/ : for critical production fixes (merges to master/main)
+   - release/ : for release preparation (merges from develop to master)
+   - docs/ : for documentation updates
+   - refactor/ : for code refactoring
+   - test/ : for test additions/updates
+   - task/ : for other tasks or chores
 2. MUST include bot name and issue number in format: {prefix}{bot_name}-{issue_number}-{description}
 3. Use only lowercase letters, numbers, and hyphens
 4. Maximum length is 50 characters
 5. Do not use spaces or special characters
+6. Choose prefix based on urgency and target:
+   - Use hotfix/ for critical production issues requiring immediate fix
+   - Use feature/ for new functionality
+   - Use fix/ for non-critical bug fixes
+   - Use release/ when preparing a new release
 
-Output format: JSON with "branch_name" and "reasoning" fields.
+Base branch selection criteria (Git-flow):
+1. For new features (feature/ prefix): select "develop" branch
+2. For bug fixes (fix/ prefix): select "develop" branch for normal fixes
+3. For hotfixes (hotfix/ prefix): select "master" or "main" (production branch)
+4. For release preparation (release/ prefix): select "develop" branch
+5. For documentation (docs/ prefix): select "develop" or "main" based on urgency
+6. For refactoring/tests (refactor/, test/ prefix): select "develop" branch
+7. Priority order when selecting base branch:
+   - If hotfix: master > main
+   - If feature/fix/refactor/test: develop > main > master
+   - If release exists: newest release/* branch > develop
+8. Default to "develop" if exists, otherwise "main"
+
+Output format: JSON with "branch_name", "base_branch", and "reasoning" fields.
 
 Examples:
 {
   "branch_name": "feature/codingagent-123-add-user-authentication",
-  "reasoning": "Issue #123 requests adding user authentication feature. Using feature/ prefix with bot name and issue number as required."
+  "base_branch": "develop",
+  "reasoning": "Issue #123 requests adding user authentication feature. Using feature/ prefix with bot name and issue number. Targeting develop branch as this is a new feature that should be integrated before release."
+}
+
+{
+  "branch_name": "fix/codingagent-456-login-error",
+  "base_branch": "main",
+  "reasoning": "Issue #456 reports a login bug. Using fix/ prefix. Targeting main branch as this is a critical bug fix for production."
 }"""
 
     def __init__(
@@ -104,15 +133,17 @@ Examples:
         self,
         issue_info: dict[str, Any],
         existing_branches: list[str] | None = None,
-    ) -> str:
-        """Issue情報からブランチ名を生成する.
+        available_branches: list[str] | None = None,
+    ) -> tuple[str, str]:
+        """Issue情報からブランチ名とベースブランチを生成する.
 
         Args:
             issue_info: Issue情報（number, title, body, labels等）
             existing_branches: 既存のブランチ名リスト（重複チェック用）
+            available_branches: 利用可能なブランチリスト（ベースブランチ選択用）
 
         Returns:
-            生成されたブランチ名
+            (ブランチ名, ベースブランチ名)のタプル
 
         Raises:
             ValueError: 有効なブランチ名を生成できない場合
@@ -120,25 +151,31 @@ Examples:
         """
         if existing_branches is None:
             existing_branches = []
+        if available_branches is None:
+            available_branches = ["main", "develop"]  # デフォルト候補
 
         # Bot名を取得（設定から、またはデフォルト値）
         bot_name = self._get_bot_name()
 
         # LLMへのメッセージを構築
-        message = self._build_message(issue_info, bot_name, existing_branches)
+        message = self._build_message(issue_info, bot_name, existing_branches, available_branches)
 
         # LLMに問い合わせ
         try:
-            branch_name = self._request_branch_name(message)
+            branch_name, base_branch = self._request_branch_info(message)
         except Exception as e:
-            self.logger.warning("LLMによるブランチ名生成に失敗: %s", e)
+            self.logger.warning("LLMによる生成に失敗: %s", e)
             # フォールバック: デフォルトのブランチ名を生成
             branch_name = self._generate_fallback_name(bot_name, issue_info.get("number", 0))
+            base_branch = "main"
 
         # ブランチ名の検証と修正
         validated_name = self._validate_and_fix(branch_name, bot_name, issue_info, existing_branches)
+        
+        # ベースブランチの検証
+        validated_base = self._validate_base_branch(base_branch, available_branches)
 
-        return validated_name
+        return validated_name, validated_base
 
     def _get_bot_name(self) -> str:
         """ボット名を取得する."""
@@ -157,25 +194,33 @@ Examples:
         issue_info: dict[str, Any],
         bot_name: str,
         existing_branches: list[str],
+        available_branches: list[str],
     ) -> str:
         """LLMへのメッセージを構築する."""
         labels_str = ", ".join(issue_info.get("labels", [])) or "None"
         existing_str = ", ".join(existing_branches[:20]) if existing_branches else "None"
+        available_str = ", ".join(available_branches) if available_branches else "main, develop"
 
-        return f"""Generate a branch name for the following issue:
+        return f"""Generate a branch name and select base branch for this issue:
 
-Bot Name: {bot_name}
-Issue Number: {issue_info.get("number", "Unknown")}
-Issue Title: {issue_info.get("title", "")}
-Issue Body: {issue_info.get("body", "")[:500]}
-Labels: {labels_str}
-Repository: {issue_info.get("repository", "Unknown")}
-Existing Branches: {existing_str}
+**Issue #{issue_info.get("number", "Unknown")}**
+**Title**: {issue_info.get("title", "")}
 
-Please generate an appropriate branch name following the naming rules."""
+**Description**:
+{issue_info.get("body", "")[:500]}
 
-    def _request_branch_name(self, message: str) -> str:
-        """LLMにブランチ名生成をリクエストする."""
+**Labels**: {labels_str}
+
+**Bot name to use**: {bot_name}
+**Issue number to use**: {issue_info.get("number", "Unknown")}
+
+**Existing branches** (avoid duplicates): {existing_str}
+**Available base branches**: {available_str}
+
+Please respond with JSON containing branch_name, base_branch, and reasoning."""
+
+    def _request_branch_info(self, message: str) -> tuple[str, str]:
+        """LLMにブランチ名とベースブランチを問い合わせる."""
         # システムプロンプトを送信
         self.llm_client.send_system_prompt(self.SYSTEM_PROMPT)
         self.llm_client.send_user_message(message)
@@ -190,17 +235,24 @@ Please generate an appropriate branch name following the naming rules."""
             if json_match:
                 data = json.loads(json_match.group())
                 branch_name = data.get("branch_name", "")
+                base_branch = data.get("base_branch", "main")
+                reasoning = data.get("reasoning", "")
+                
                 if branch_name:
-                    return branch_name
+                    self.logger.info(
+                        "LLM選択: branch=%s, base=%s, reasoning=%s",
+                        branch_name, base_branch, reasoning,
+                    )
+                    return branch_name, base_branch
         except json.JSONDecodeError:
             self.logger.warning("LLMレスポンスのJSONパースに失敗")
 
-        # JSONでない場合、直接ブランチ名を抽出
+        # JSONでない場合、直接ブランチ名を抽出（ベースはデフォルト）
         lines = response.strip().split("\n")
         for line in lines:
             line = line.strip()
             if "/" in line and not line.startswith("#"):
-                return line
+                return line, "main"
 
         error_msg = "LLMから有効なブランチ名を取得できませんでした"
         raise ValueError(error_msg)
@@ -251,6 +303,28 @@ Please generate an appropriate branch name following the naming rules."""
 
         return branch_name
 
+    def _validate_base_branch(self, base_branch: str, available_branches: list[str]) -> str:
+        """ベースブランチを検証する."""
+        # 利用可能なブランチに存在するか確認
+        if base_branch in available_branches:
+            return base_branch
+        
+        # 存在しない場合は候補から選択
+        if "develop" in available_branches:
+            self.logger.warning("ベースブランチ %s が存在しないためdevelopを使用", base_branch)
+            return "develop"
+        if "main" in available_branches:
+            self.logger.warning("ベースブランチ %s が存在しないためmainを使用", base_branch)
+            return "main"
+        if "master" in available_branches:
+            self.logger.warning("ベースブランチ %s が存在しないためmasterを使用", base_branch)
+            return "master"
+        
+        # どれも無い場合は最初の候補またはデフォルト
+        fallback = available_branches[0] if available_branches else "main"
+        self.logger.warning("ベースブランチ %s が存在しないため %s を使用", base_branch, fallback)
+        return fallback
+
     def _sanitize_for_branch(self, text: str) -> str:
         """テキストをブランチ名として使用可能な形式に変換する."""
         # 小文字に変換
@@ -273,7 +347,7 @@ Please generate an appropriate branch name following the naming rules."""
 
 
 class ContentTransferManager:
-    """Issue の内容とコメントを MR/PR に転記するクラス."""
+    """Issue の内容とコメントをマージリクエスト/プルリクエストに転記するクラス."""
 
     def __init__(
         self,
@@ -293,14 +367,14 @@ class ContentTransferManager:
         issue_info: dict[str, Any],
         comments: list[dict[str, Any]],
     ) -> str:
-        """MR/PRの本文を生成する.
+        """マージリクエスト/プルリクエストの本文を生成する.
 
         Args:
             issue_info: Issue情報
             comments: コメントリスト
 
         Returns:
-            フォーマットされたMR/PR本文
+            フォーマットされたマージリクエスト/プルリクエスト本文
 
         """
         # Issue情報セクション
@@ -368,7 +442,7 @@ class ContentTransferManager:
     def _format_auto_section(self, issue_number: int) -> str:
         """自動生成情報セクションをフォーマットする."""
         return f"""## 🤖 自動生成情報
-このMR/PRは Issue #{issue_number} から自動生成されました。"""
+このマージリクエスト/プルリクエストは Issue #{issue_number} から自動生成されました。"""
 
     def _is_bot_comment(self, author: str) -> bool:
         """コメントがボットによるものかどうかを判定する."""
@@ -391,7 +465,7 @@ class ContentTransferManager:
 
 
 class IssueToMRConverter:
-    """Issue から MR/PR への変換を制御するメインクラス."""
+    """Issue からマージリクエスト/プルリクエストへの変換を制御するメインクラス."""
 
     def __init__(
         self,
@@ -429,12 +503,12 @@ class IssueToMRConverter:
         self.content_manager = ContentTransferManager(config)
 
     def is_enabled(self) -> bool:
-        """Issue→MR/PR変換機能が有効かどうかを確認する."""
+        """Issue→マージリクエスト/プルリクエスト変換機能が有効かどうかを確認する."""
         # 設定ファイルによる有効/無効チェック
         return self._conversion_config.get("enabled", True)
 
     def convert(self) -> ConversionResult:
-        """IssueをMR/PRに変換する.
+        """Issueをマージリクエスト/プルリクエストに変換する.
 
         Returns:
             変換結果
@@ -446,16 +520,24 @@ class IssueToMRConverter:
                 error_message="Issue to MR conversion is disabled",
             )
 
-        self.logger.info("Issue #%s をMR/PRに変換を開始します", self._get_issue_number())
+        self.logger.info("Issue #%s をマージリクエスト/プルリクエストに変換を開始します", self._get_issue_number())
 
         try:
             # 1. Issue情報を収集
             issue_info = self._collect_issue_info()
 
-            # 2. ブランチ名を生成
+            # 2. ブランチ名とベースブランチを生成
             existing_branches = self._get_existing_branches()
-            branch_name = self.branch_generator.generate(issue_info, existing_branches)
-            self.logger.info("ブランチ名を生成しました: %s", branch_name)
+            available_branches = self._get_existing_branches()  # 既存ブランチ=利用可能ブランチ
+            branch_name, base_branch = self.branch_generator.generate(
+                issue_info,
+                existing_branches,
+                available_branches,
+            )
+            self.logger.info("ブランチ名とベースブランチを生成しました: %s <- %s", branch_name, base_branch)
+            
+            # ベースブランチをインスタンス変数に保存（_create_mr_prで使用）
+            self._base_branch = base_branch
 
             # 3. ブランチを作成
             if not self._create_branch(branch_name):
@@ -472,7 +554,7 @@ class IssueToMRConverter:
                     error_message="Failed to create initial commit",
                 )
 
-            # 5. MR/PRを作成
+            # 5. マージリクエスト/プルリクエストを作成
             mr_result = self._create_mr_pr(branch_name, issue_info)
             if not mr_result:
                 self._cleanup_branch(branch_name)
@@ -484,7 +566,7 @@ class IssueToMRConverter:
             mr_number = mr_result.get("number") or mr_result.get("iid")
             mr_url = mr_result.get("html_url") or mr_result.get("web_url")
 
-            # 6. コメントを転記（Issue内のコメントをMR/PR本文に含める）
+            # 6. コメントを転記（Issue内のコメントをマージリクエスト/プルリクエスト本文に含める）
             comments = self._get_issue_comments()
             mr_body = self.content_manager.format_mr_body(issue_info, comments)
             self._update_mr_body(mr_result, mr_body)
@@ -493,12 +575,12 @@ class IssueToMRConverter:
             self._setup_auto_task(mr_result)
 
             # 8. 元Issueに作成報告
-            self._notify_source_issue(mr_number, branch_name, mr_url)
+            self._notify_source_issue(mr_number, branch_name, mr_url, base_branch)
 
             # 9. 元Issueのラベルを更新
             self._update_source_issue_labels()
 
-            self.logger.info("Issue #%s をMR/PR #%s に変換しました", self._get_issue_number(), mr_number)
+            self.logger.info("Issue #%s をマージリクエスト/プルリクエスト #%s に変換しました", self._get_issue_number(), mr_number)
 
             return ConversionResult(
                 success=True,
@@ -508,7 +590,7 @@ class IssueToMRConverter:
             )
 
         except Exception as e:
-            self.logger.exception("Issue→MR/PR変換でエラーが発生しました")
+            self.logger.exception("Issue→マージリクエスト/プルリクエスト変換でエラーが発生しました")
             return ConversionResult(
                 success=False,
                 error_message=str(e),
@@ -632,11 +714,15 @@ class IssueToMRConverter:
             return False
 
     def _create_mr_pr(self, branch_name: str, issue_info: dict[str, Any]) -> dict[str, Any] | None:
-        """MR/PRを作成する."""
+        """マージリクエスト/プルリクエストを作成する."""
         try:
+            # ベースブランチを取得（convertで設定済み、なければデフォルト）
+            base_branch = getattr(self, "_base_branch", "main")
+            
             title = f"{issue_info.get('title', '')}"
             issue_number = issue_info.get("number", 0)
-            body = f"この MR/PR は Issue #{issue_number} から自動生成されました。"
+            mr_pr_type = "マージリクエスト" if self.platform == "gitlab" else "プルリクエスト"
+            body = f"この{mr_pr_type}は Issue #{issue_number} から自動生成されました。\n\nベースブランチ: `{base_branch}`"
 
             if self.platform == "github":
                 # GitHubの場合はGithubClientを使用
@@ -647,7 +733,7 @@ class IssueToMRConverter:
                     title=title,
                     body=body,
                     head=branch_name,
-                    base="main",
+                    base=base_branch,
                     draft=self._conversion_config.get("auto_draft", True),
                 )
                 return result
@@ -657,17 +743,17 @@ class IssueToMRConverter:
                 result = self.gitlab_client.create_merge_request(
                     project_id=task_key.project_id,
                     source_branch=branch_name,
-                    target_branch="main",
+                    target_branch=base_branch,
                     title=title,
                     description=body,
                 )
                 return result
         except Exception as e:
-            self.logger.warning("MR/PRの作成に失敗: %s", e)
+            self.logger.warning("マージリクエスト/プルリクエストの作成に失敗: %s", e)
             return None
 
     def _update_mr_body(self, mr_result: dict[str, Any], body: str) -> None:
-        """MR/PRの本文を更新する."""
+        """マージリクエスト/プルリクエストの本文を更新する."""
         try:
             if self.platform == "github":
                 # GitHubの場合はGithubClientを使用
@@ -689,7 +775,7 @@ class IssueToMRConverter:
                     description=body,
                 )
         except Exception as e:
-            self.logger.warning("MR/PR本文の更新に失敗: %s", e)
+            self.logger.warning("マージリクエスト/プルリクエスト本文の更新に失敗: %s", e)
 
     def _get_issue_comments(self) -> list[dict[str, Any]]:
         """Issueのコメントを取得する."""
@@ -700,7 +786,7 @@ class IssueToMRConverter:
             return []
 
     def _setup_auto_task(self, mr_result: dict[str, Any]) -> None:
-        """MR/PRに自動タスク化の設定を行う."""
+        """マージリクエスト/プルリクエストに自動タスク化の設定を行う."""
         try:
             if self.platform == "github":
                 # GitHubの場合はGithubClientを使用
@@ -762,17 +848,19 @@ class IssueToMRConverter:
         except Exception as e:
             self.logger.warning("自動タスク設定に失敗: %s", e)
 
-    def _notify_source_issue(self, mr_number: int, branch_name: str, mr_url: str | None) -> None:
+    def _notify_source_issue(self, mr_number: int, branch_name: str, mr_url: str | None, base_branch: str) -> None:
         """元Issueに作成報告をコメントする."""
-        comment_body = f"""## 🚀 MR/PR を作成しました
+        mr_pr_type = "マージリクエスト" if self.platform == "gitlab" else "プルリクエスト"
+        comment_body = f"""## 🚀 {mr_pr_type}を作成しました
 
-この Issue の内容に基づいて、以下の MR/PR を作成しました：
+この Issue の内容に基づいて、以下の{mr_pr_type}を作成しました：
 
-- **MR/PR**: #{mr_number}
-- **ブランチ**: `{branch_name}`
+- **{mr_pr_type}**: #{mr_number}
+- **作業用ブランチ**: `{branch_name}`
+- **ベースブランチ**: `{base_branch}`
 - **リンク**: {mr_url or "N/A"}
 
-以降の処理は MR/PR 上で進めます。"""
+以降の処理は{mr_pr_type}上で進めます。"""
 
         try:
             self.task.comment(comment_body)
