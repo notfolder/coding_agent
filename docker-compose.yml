@@ -330,6 +330,75 @@ services:
     image: coding-agent-executor-go:latest
     command: ["echo", "Build only"]
 
+  # === Playwright対応実行環境イメージ ===
+  # ブラウザテスト機能付き実行環境イメージ
+  # ビルドコマンド: docker compose --profile executor-build build
+
+  # Python + Playwright実行環境イメージ
+  executor-python-playwright:
+    profiles:
+      - executor-build
+    build:
+      context: ./docker/executor-python-playwright
+      dockerfile: Dockerfile
+      args:
+        BOT_NAME: ${BOT_NAME:-bot}
+        BOT_EMAIL: ${BOT_EMAIL:-}
+    image: coding-agent-executor-python-playwright:latest
+    command: ["echo", "Build only"]
+
+  # Node.js + Playwright実行環境イメージ
+  executor-node-playwright:
+    profiles:
+      - executor-build
+    build:
+      context: ./docker/executor-node-playwright
+      dockerfile: Dockerfile
+      args:
+        BOT_NAME: ${BOT_NAME:-bot}
+        BOT_EMAIL: ${BOT_EMAIL:-}
+    image: coding-agent-executor-node-playwright:latest
+    command: ["echo", "Build only"]
+
+  # Miniforge（conda）+ Playwright実行環境イメージ
+  executor-miniforge-playwright:
+    profiles:
+      - executor-build
+    build:
+      context: ./docker/executor-miniforge-playwright
+      dockerfile: Dockerfile
+      args:
+        BOT_NAME: ${BOT_NAME:-bot}
+        BOT_EMAIL: ${BOT_EMAIL:-}
+    image: coding-agent-executor-miniforge-playwright:latest
+    command: ["echo", "Build only"]
+
+  # Java + Playwright実行環境イメージ
+  executor-java-playwright:
+    profiles:
+      - executor-build
+    build:
+      context: ./docker/executor-java-playwright
+      dockerfile: Dockerfile
+      args:
+        BOT_NAME: ${BOT_NAME:-bot}
+        BOT_EMAIL: ${BOT_EMAIL:-}
+    image: coding-agent-executor-java-playwright:latest
+    command: ["echo", "Build only"]
+
+  # Go + Playwright実行環境イメージ
+  executor-go-playwright:
+    profiles:
+      - executor-build
+    build:
+      context: ./docker/executor-go-playwright
+      dockerfile: Dockerfile
+      args:
+        BOT_NAME: ${BOT_NAME:-bot}
+        BOT_EMAIL: ${BOT_EMAIL:-}
+    image: coding-agent-executor-go-playwright:latest
+    command: ["echo", "Build only"]
+
 volumes:
   rabbitmq_data:
   postgres_data:

@@ -26,6 +26,12 @@ DEFAULT_ENVIRONMENTS: dict[str, str] = {
     "node": "coding-agent-executor-node:latest",
     "java": "coding-agent-executor-java:latest",
     "go": "coding-agent-executor-go:latest",
+    # Playwright対応環境
+    "python-playwright": "coding-agent-executor-python-playwright:latest",
+    "node-playwright": "coding-agent-executor-node-playwright:latest",
+    "miniforge-playwright": "coding-agent-executor-miniforge-playwright:latest",
+    "java-playwright": "coding-agent-executor-java-playwright:latest",
+    "go-playwright": "coding-agent-executor-go-playwright:latest",
 }
 
 # デフォルト環境名（フォールバック用定数）
@@ -145,6 +151,13 @@ class ExecutionEnvironmentManager:
 
         # アクティブなtext-editor MCPクライアントの追跡
         self._text_editor_clients: dict[str, Any] = {}
+
+        # Playwright MCP設定を取得
+        self._playwright_config = config.get("playwright_mcp", {})
+        self._playwright_enabled = self._is_playwright_enabled()
+
+        # アクティブなPlaywright MCPクライアントの追跡
+        self._playwright_clients: dict[str, Any] = {}
 
     def get_available_environments(self) -> dict[str, str]:
         """利用可能な環境のリストを取得する.
@@ -390,6 +403,14 @@ class ExecutionEnvironmentManager:
                 self._start_text_editor_mcp(container_id, task_uuid)
             except Exception as e:
                 self.logger.warning("text-editor MCPの起動に失敗しました: %s", e)
+                # MCPの起動失敗はワーニングとして記録し、処理は続行
+
+        # Playwright MCPサーバーを起動(Playwright環境の場合)
+        if self._playwright_enabled and self.is_playwright_environment(selected_env):
+            try:
+                self._start_playwright_mcp(container_id, task_uuid)
+            except Exception as e:
+                self.logger.warning("Playwright MCPの起動に失敗しました: %s", e)
                 # MCPの起動失敗はワーニングとして記録し、処理は続行
 
         # アクティブコンテナに登録
@@ -688,6 +709,9 @@ class ExecutionEnvironmentManager:
 
         # text-editor MCPサーバーを停止(有効な場合)
         self._stop_text_editor_mcp(task_uuid)
+
+        # Playwright MCPサーバーを停止(有効な場合)
+        self._stop_playwright_mcp(task_uuid)
 
         try:
             self._remove_container(task_uuid)
@@ -1216,6 +1240,168 @@ class ExecutionEnvironmentManager:
             return []
 
         functions = self.get_text_editor_functions()
+        return [
+            {
+                "type": "function",
+                "function": func,
+            }
+            for func in functions
+        ]
+
+    # ==== Playwright MCP関連メソッド ====
+
+    def _is_playwright_enabled(self) -> bool:
+        """Playwright MCP機能が有効かどうかを確認する.
+        
+        Returns:
+            有効な場合True、無効な場合False
+        """
+        return self._playwright_config.get("enabled", True)
+
+    def is_playwright_enabled(self) -> bool:
+        """Playwright MCP機能が有効かどうかを確認する（外部から呼び出し可能）.
+        
+        Returns:
+            有効な場合True、無効な場合False
+        """
+        return self._playwright_enabled
+
+    def is_playwright_environment(self, env_name: str) -> bool:
+        """環境名がPlaywright対応かをチェックする.
+        
+        Args:
+            env_name: 環境名
+            
+        Returns:
+            Playwright対応環境の場合True
+        """
+        return "-playwright" in env_name
+
+    def _start_playwright_mcp(self, container_id: str, task_uuid: str) -> None:
+        """Playwright MCPサーバーを起動する.
+        
+        Args:
+            container_id: DockerコンテナID
+            task_uuid: タスクのUUID
+            
+        Raises:
+            RuntimeError: サーバー起動に失敗した場合
+        """
+        if not self._playwright_enabled:
+            return
+
+        from clients.playwright_mcp_client import PlaywrightMCPClient
+
+        try:
+            self.logger.info("Playwright MCPサーバーを起動します: %s", task_uuid)
+            
+            client = PlaywrightMCPClient(
+                container_id=container_id,
+                workspace_path="/workspace/project",
+                timeout_seconds=30,
+            )
+            client.start()
+            
+            self._playwright_clients[task_uuid] = client
+            self.logger.info("Playwright MCPサーバーが起動しました: %s", task_uuid)
+            
+        except Exception as e:
+            self.logger.exception("Playwright MCPサーバーの起動に失敗しました")
+            msg = f"Failed to start Playwright MCP server: {e}"
+            raise RuntimeError(msg) from e
+
+    def _stop_playwright_mcp(self, task_uuid: str) -> None:
+        """Playwright MCPサーバーを停止する.
+        
+        Args:
+            task_uuid: タスクのUUID
+        """
+        client = self._playwright_clients.pop(task_uuid, None)
+        if client:
+            try:
+                client.stop()
+                self.logger.info("Playwright MCPサーバーを停止しました: %s", task_uuid)
+            except Exception as e:
+                self.logger.warning("Playwright MCPサーバー停止中にエラー発生: %s", e)
+
+    def call_playwright_tool(
+        self,
+        task_uuid: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Playwrightツールを呼び出す.
+        
+        Args:
+            task_uuid: タスクのUUID
+            tool_name: ツール名（playwright_navigate等）
+            arguments: ツールの引数
+            
+        Returns:
+            ツール実行結果
+        """
+        client = self._playwright_clients.get(task_uuid)
+        if not client:
+            msg = f"Playwright MCP client not found for task: {task_uuid}"
+            self.logger.error(msg)
+            return {"error": msg}
+
+        self.logger.info("Playwrightツールを呼び出します: %s, args: %s", tool_name, arguments)
+        
+        try:
+            result = client.call_tool(tool_name, arguments)
+            
+            if result.success:
+                return {"success": True, "content": result.content}
+            else:
+                return {"success": False, "error": result.error}
+                
+        except Exception as e:
+            self.logger.exception("Playwrightツール呼び出し中にエラー発生: %s", e)
+            return {"success": False, "error": str(e)}
+
+    def get_playwright_client(self, task_uuid: str) -> Any | None:
+        """Playwright MCP Clientを取得する.
+        
+        Args:
+            task_uuid: タスクのUUID
+            
+        Returns:
+            Playwright MCP Client、存在しない場合None
+        """
+        return self._playwright_clients.get(task_uuid)
+
+    def get_playwright_functions(self) -> list[dict[str, Any]]:
+        """PlaywrightツールのFunction calling用関数定義を取得する.
+        
+        Returns:
+            関数定義のリスト
+        """
+        if not self._playwright_enabled:
+            return []
+
+        # Playwright MCPクライアントから関数定義を取得
+        # 実際のクライアントインスタンスがなくても定義は取得可能
+        from clients.playwright_mcp_client import PlaywrightMCPClient
+
+        # 一時インスタンスを作成して関数定義を取得
+        # container_idは定義取得には不要なのでダミー値を使用
+        temp_client = PlaywrightMCPClient(
+            container_id="dummy",
+            workspace_path="/workspace/project",
+        )
+        return temp_client.get_function_calling_functions()
+
+    def get_playwright_tools(self) -> list[dict[str, Any]]:
+        """PlaywrightツールのFunction calling用ツール定義を取得する(OpenAI形式).
+        
+        Returns:
+            ツール定義のリスト
+        """
+        if not self._playwright_enabled:
+            return []
+
+        functions = self.get_playwright_functions()
         return [
             {
                 "type": "function",

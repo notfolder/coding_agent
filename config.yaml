@@ -411,6 +411,12 @@ command_executor:
     node: "coding-agent-executor-node:latest"
     java: "coding-agent-executor-java:latest"
     go: "coding-agent-executor-go:latest"
+    # Playwright対応環境（ブラウザテスト機能付き）
+    python-playwright: "coding-agent-executor-python-playwright:latest"
+    node-playwright: "coding-agent-executor-node-playwright:latest"
+    miniforge-playwright: "coding-agent-executor-miniforge-playwright:latest"
+    java-playwright: "coding-agent-executor-java-playwright:latest"
+    go-playwright: "coding-agent-executor-go-playwright:latest"
   
   # デフォルト環境（環境選択に失敗した場合）
   default_environment: "python"
@@ -497,3 +503,35 @@ text_editor_mcp:
       - "npx"
       - "-y"
       - "mcp-server-text-editor"
+
+# Playwright MCP Server連携設定
+playwright_mcp:
+  # 機能の有効/無効（デフォルト: true）
+  # 環境変数 PLAYWRIGHT_MCP_ENABLED で上書き可能
+  enabled: true
+  
+  # MCP Server設定
+  mcp_server:
+    # サーバー名
+    name: "playwright"
+    # コマンド（コンテナ内で実行）
+    command:
+      - "npx"
+      - "@executeautomation/playwright-mcp-server"
+    # サーバー起動待機時間（秒）
+    startup_wait_seconds: 5
+  
+  # Playwright設定
+  playwright:
+    # デフォルトブラウザ
+    browser: "chromium"  # chromium, firefox, webkit
+    # headlessモード
+    headless: true
+    # デフォルトビューポートサイズ
+    viewport:
+      width: 1280
+      height: 720
+    # スクリーンショット保存先
+    screenshot_dir: "/workspace/project/screenshots"
+    # タイムアウト設定（ミリ秒）
+    timeout: 30000
