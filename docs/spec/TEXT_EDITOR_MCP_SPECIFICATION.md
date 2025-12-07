@@ -880,28 +880,12 @@ gitの認証情報はCommand Executor MCP仕様と同様に一時的に使用さ
 
 ---
 
-## 14. 移行・互換性
-
-### 14.1 後方互換性
-
-- 既存の設定ファイルとの互換性を維持
-- `text_editor_mcp.enabled: false`で従来動作に戻せる
-- GitHub/GitLab MCPを使用する既存ワークフローは設定変更で継続可能
-
-### 14.2 移行手順
-
-1. Docker実行環境イメージを再ビルド
-2. config.yamlに`text_editor_mcp`設定を追加（デフォルトで有効）
-3. システムプロンプトファイルの配置
-
----
-
-## 15. 関連ドキュメント
+## 14. 関連ドキュメント
 
 - [Command Executor MCP Server連携仕様](COMMAND_EXECUTOR_MCP_SPECIFICATION.md)
 - [複数言語対応実行環境仕様](MULTI_LANGUAGE_ENVIRONMENT_SPECIFICATION.md)
 - [プランニングプロセス仕様](PLANNING_SPECIFICATION.md)
-- [基本仕様](spec.md)
+- [基本仕様](SPEC.md)
 
 ---
 
