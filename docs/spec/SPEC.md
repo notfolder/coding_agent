@@ -299,8 +299,8 @@ HTTP 5xxエラーなどの一時的なエラーに対しては3回リトライ�
 
 ## 14. 関連ドキュメント
 
-- [クラス設計](class_spec.md)
-- [コンテキストファイル化仕様](context_file_spec.md)
+- [クラス設計](CLASS_SPEC.md)
+- [コンテキストファイル化仕様](CONTEXT_FILE_SPEC.md)
 - [計画実行モード仕様](PLANNING_SPECIFICATION.md)
 - [一時停止・再開機能仕様](PAUSE_RESUME_SPECIFICATION.md)
 
