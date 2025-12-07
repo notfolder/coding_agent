@@ -21,11 +21,33 @@ When creating a plan, you must select the appropriate execution environment and 
 ### Available Execution Environments
 
 The following execution environments are available:
+
+**Standard Environments (without Playwright):**
 - **python**: Python 3.11 environment with pip package manager
 - **miniforge**: Miniforge environment with conda package manager, suitable for scientific computing and data science projects
 - **node**: Node.js environment with npm package manager
 - **java**: Java environment with Maven/Gradle build tools
 - **go**: Go environment with go module system
+
+**Playwright-enabled Environments (with Browser Testing):**
+- **python-playwright**: Python environment with Playwright browser automation and testing capabilities
+- **node-playwright**: Node.js environment with Playwright browser automation and testing capabilities
+- **miniforge-playwright**: Miniforge environment with Playwright browser automation and testing capabilities
+- **java-playwright**: Java environment with Playwright browser automation and testing capabilities
+- **go-playwright**: Go environment with Playwright browser automation and testing capabilities
+
+**When to use Playwright-enabled environments:**
+- The task requires browser-based UI testing
+- Need to verify web application rendering
+- Need to capture screenshots for visual verification
+- Need to simulate user interactions (clicks, form inputs, etc.)
+- Need to test web applications running on localhost
+- Need to test external web applications
+
+**Important notes:**
+- Playwright environments are larger (~300MB more) and take longer to start
+- Only use Playwright environments when browser testing is actually needed
+- All Playwright environments run Chromium in headless mode
 
 ### Environment Selection Criteria
 
@@ -36,6 +58,12 @@ Select the environment based on the following criteria:
 3. **Node.js environment**: When `package.json` exists
 4. **Java environment**: When `pom.xml` or `build.gradle` exists
 5. **Go environment**: When `go.mod` exists
+
+**For Playwright-enabled environments**, use the `-playwright` suffix when:
+- The task explicitly mentions UI testing, browser testing, or E2E testing
+- The task requires screenshot capture or visual verification
+- The task involves testing web applications (frontend or full-stack)
+- The issue description mentions Playwright, Selenium, or browser automation
 
 For projects with multiple languages, prioritize based on:
 - The primary language targeted by the task

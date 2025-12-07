@@ -99,3 +99,98 @@ The following commands are available for execution:
 2. **After code changes**: Run tests to verify the correctness of changes
 3. **Before creating pull request**: Run linters to verify code quality
 4. **If dependencies are missing**: Install them using the appropriate package manager for the environment
+
+## Playwright Browser Testing (Available in Playwright-enabled environments only)
+
+If your selected execution environment includes "playwright" in its name (e.g., python-playwright, node-playwright), you have access to browser automation tools through Playwright.
+
+**Important:** Playwright tools are only available when you selected a Playwright-enabled environment during planning. If you need browser testing but selected a standard environment, you cannot access Playwright tools in the current session.
+
+### Available Playwright Tools
+
+Use the following tool names when calling Playwright tools:
+
+- `playwright_navigate`: Navigate to a URL
+- `playwright_screenshot`: Take a screenshot of the current page
+- `playwright_click`: Click an element
+- `playwright_fill`: Fill a form input field
+- `playwright_select`: Select from a dropdown
+- `playwright_hover`: Hover over an element
+- `playwright_evaluate`: Execute JavaScript in the page context
+- `playwright_get_content`: Get the HTML content of the page
+- `playwright_get_console_logs`: Get browser console logs
+
+### Testing Local Web Applications
+
+When testing web applications running in the execution environment:
+
+1. Start your web application using command-executor (e.g., `npm run dev`, `python manage.py runserver`)
+2. Note the port number the application is running on (e.g., 3000, 8000)
+3. Use Playwright to navigate to `http://localhost:{port}`
+4. Perform your tests (clicks, screenshots, verifications)
+
+**Example workflow:**
+```
+1. Execute: npm run dev (starts app on localhost:3000)
+2. Wait a few seconds for the app to start (observe output for "ready" message)
+3. Navigate: playwright_navigate with {"url": "http://localhost:3000"}
+4. Take screenshot: playwright_screenshot with {"name": "homepage"}
+5. Perform tests: playwright_click, playwright_fill, etc.
+```
+
+### Testing External URLs
+
+You can also test external URLs or staging environments:
+
+```
+playwright_navigate with {"url": "https://example.com"}
+```
+
+### Screenshot Management
+
+Screenshots are saved to `/workspace/project/screenshots/` with the name you provide.
+After taking screenshots, you can:
+- View them using the file system
+- Include them in test reports
+- Compare them for visual regression testing
+
+### Common Playwright Workflows
+
+**Form Testing:**
+1. Navigate to page with form
+2. Fill input fields with `playwright_fill`
+3. Click submit button with `playwright_click`
+4. Verify redirect or success message
+
+**Visual Verification:**
+1. Navigate to page
+2. Take screenshot with specific viewport size
+3. Compare with expected output
+
+**Console Log Debugging:**
+1. Navigate to page
+2. Perform actions that might trigger JavaScript errors
+3. Get console logs with `playwright_get_console_logs`
+4. Check for errors or warnings
+
+### Best Practices
+
+1. **Wait for Application Startup**: After starting a dev server, wait 5-10 seconds before navigating
+2. **Use Specific Selectors**: Prefer ID selectors (`#submit-button`) or data attributes (`[data-testid="login"]`)
+3. **Handle Errors Gracefully**: If navigation fails, check if the app is running with command-executor
+4. **Take Screenshots at Key Points**: Capture both success and error states for documentation
+5. **Verify Port Numbers**: Always check the actual port from startup logs
+
+### Troubleshooting
+
+**Problem:** "Cannot navigate to URL"
+- **Solution:** Verify the web app is running, check port number from logs
+
+**Problem:** "Selector not found"
+- **Solution:** Take screenshot to see actual page, inspect HTML with `playwright_get_content`
+
+**Problem:** "Timeout waiting for element"
+- **Solution:** Check if page loaded correctly, verify the selector is correct
+
+**Problem:** "Playwright tools not available"
+- **Solution:** You're in a standard environment. Playwright is only available in Playwright-enabled environments (e.g., node-playwright)

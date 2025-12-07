@@ -1197,6 +1197,9 @@ class PlanningCoordinator:
             # 選択環境が未設定の場合、デフォルト環境を設定
             if self.selected_environment is None:
                 self.selected_environment = default_environment
+            
+            # Playwright環境の場合、PlaywrightツールをMCPクライアントに追加
+            self._update_mcp_clients_for_environment(container_info.environment_name)
                 
         except Exception as error:
             # デフォルト環境準備失敗は警告のみで処理継続
@@ -1328,6 +1331,10 @@ class PlanningCoordinator:
                     container_info.container_id,
                     container_info.environment_name,
                 )
+                
+                # Playwright環境の場合、PlaywrightツールをMCPクライアントに追加
+                self._update_mcp_clients_for_environment(container_info.environment_name)
+                
                 return True
             else:
                 # 環境が不一致の場合は再作成
@@ -1370,12 +1377,57 @@ class PlanningCoordinator:
             self.task.comment(
                 f"選択された実行環境({container_info.environment_name})を起動しました。"
             )
+            
+            # Playwright環境の場合、PlaywrightツールをMCPクライアントに追加
+            self._update_mcp_clients_for_environment(container_info.environment_name)
+            
             return True
         except Exception as error:
             error_msg = f"実行環境の準備に失敗しました: {error}"
             self.logger.exception(error_msg)
             self.task.comment(f"⚠️ {error_msg}")
             return False
+
+    def _update_mcp_clients_for_environment(self, environment_name: str) -> None:
+        """環境名に基づいてMCPクライアントを動的に追加する.
+        
+        Playwright環境の場合、Playwrightツールをmcp_clientsに追加します。
+        
+        Args:
+            environment_name: 準備された実行環境の名前
+        """
+        if self.execution_manager is None:
+            return
+        
+        # Playwright環境の場合
+        if self.execution_manager.is_playwright_environment(environment_name):
+            # Playwright MCPツールが有効かチェック
+            if not self.execution_manager.is_playwright_enabled():
+                self.logger.info("Playwright MCP機能が無効なため、ツールを追加しません")
+                return
+            
+            # 既にplaywrightクライアントが登録されている場合はスキップ
+            if "playwright" in self.mcp_clients:
+                self.logger.debug("Playwright MCPクライアントは既に登録済みです")
+                return
+            
+            from handlers.execution_environment_mcp_wrapper import ExecutionEnvironmentMCPWrapper
+            
+            # PlaywrightツールをMCPクライアントとして追加
+            playwright_wrapper = ExecutionEnvironmentMCPWrapper(
+                execution_manager=self.execution_manager,
+                mcp_server_name="playwright",
+            )
+            self.mcp_clients["playwright"] = playwright_wrapper
+            
+            self.logger.info(
+                "Playwright環境を検出: Playwrightツールをmcp_clientsに追加しました"
+            )
+            
+            # タスクにコメント
+            self.task.comment(
+                "🎭 Playwright環境が有効になりました。ブラウザ自動化ツールが利用可能です。"
+            )
 
     def _execute_action(self) -> dict[str, Any] | None:
         """Execute the next action from the plan.

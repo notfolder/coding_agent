@@ -31,7 +31,7 @@ class ExecutionEnvironmentMCPWrapper:
 
         Args:
             execution_manager: ラップ対象のExecutionEnvironmentManagerインスタンス
-            mcp_server_name: MCPサーバー名("command-executor" or "text")
+            mcp_server_name: MCPサーバー名("command-executor", "text", "playwright")
 
         """
         self.execution_manager = execution_manager
@@ -43,7 +43,7 @@ class ExecutionEnvironmentMCPWrapper:
         """ツール呼び出しをExecutionEnvironmentManagerにルーティングする.
 
         Args:
-            tool: ツール名(execute_commandまたはtext_editor)
+            tool: ツール名(execute_command, text_editor, playwright_*)
             args: ツール引数
 
         Returns:
@@ -110,6 +110,18 @@ class ExecutionEnvironmentMCPWrapper:
             # text_editorツールは単一ツール、commandパラメータで動作切替
             return self.execution_manager.call_text_editor_tool(tool="text_editor", arguments=args)
 
+        if self.mcp_server_name == "playwright":
+            # playwright_*ツールを処理
+            if tool.startswith("playwright_"):
+                task_uuid = self.execution_manager._current_task.uuid
+                return self.execution_manager.call_playwright_tool(
+                    task_uuid=task_uuid,
+                    tool_name=tool,
+                    arguments=args,
+                )
+            msg = f"Unknown playwright tool: {tool}"
+            raise ValueError(msg)
+
         msg = f"Unknown MCP server: {self.mcp_server_name}"
         raise ValueError(msg)
 
@@ -124,6 +136,8 @@ class ExecutionEnvironmentMCPWrapper:
             return self.execution_manager.get_function_calling_functions()
         if self.mcp_server_name == "text":
             return self.execution_manager.get_text_editor_functions()
+        if self.mcp_server_name == "playwright":
+            return self.execution_manager.get_playwright_functions()
         return []
 
     def get_function_calling_tools(self) -> list[dict[str, Any]]:
@@ -137,6 +151,8 @@ class ExecutionEnvironmentMCPWrapper:
             return self.execution_manager.get_function_calling_tools()
         if self.mcp_server_name == "text":
             return self.execution_manager.get_text_editor_tools()
+        if self.mcp_server_name == "playwright":
+            return self.execution_manager.get_playwright_tools()
         return []
 
     @property
@@ -151,6 +167,8 @@ class ExecutionEnvironmentMCPWrapper:
             return self._generate_command_executor_system_prompt()
         if self.mcp_server_name == "text":
             return self._generate_text_editor_system_prompt()
+        if self.mcp_server_name == "playwright":
+            return self._generate_playwright_system_prompt()
         return ""
 
     def _generate_command_executor_system_prompt(self) -> str:
@@ -180,6 +198,26 @@ class ExecutionEnvironmentMCPWrapper:
 プロジェクトワークスペース内のファイル表示・作成・編集が可能です。
 
 * `text_editor` → { "command": enum["view","create","str_replace","insert","undo_edit"], "path": string, ... } --- ファイル操作ツール"""
+
+    def _generate_playwright_system_prompt(self) -> str:
+        """playwright用のシステムプロンプトを生成する.
+
+        Returns:
+            Playwright機能説明を含むプロンプト文字列
+
+        """
+        return """### playwright mcp tools
+ブラウザ自動化とWebアプリケーションのテストを実行できます。
+
+* `playwright_navigate` → { "url": string } --- URLに移動
+* `playwright_screenshot` → { "name": string, "width"?: int, "height"?: int } --- スクリーンショット撮影
+* `playwright_click` → { "selector": string } --- 要素をクリック
+* `playwright_fill` → { "selector": string, "value": string } --- フォームに入力
+* `playwright_select` → { "selector": string, "value": string } --- セレクトボックスから選択
+* `playwright_hover` → { "selector": string } --- 要素にホバー
+* `playwright_evaluate` → { "script": string } --- JavaScriptを実行
+* `playwright_get_content` → {} --- ページのHTMLを取得
+* `playwright_get_console_logs` → {} --- コンソールログを取得"""
 
     def call_initialize(self) -> None:
         """初期化処理.
