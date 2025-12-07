@@ -532,6 +532,6 @@ playwright_mcp:
       width: 1280
       height: 720
     # スクリーンショット保存先
-    screenshot_dir: "/workspace/project/screenshots"
+    screenshot_dir: "/workspace/screenshots"
     # タイムアウト設定（ミリ秒）
     timeout: 30000

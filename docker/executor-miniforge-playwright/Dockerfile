@@ -37,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 \
     libpango-1.0-0 \
     libcairo2 \
-    libasound2 \
+    libasound2t64 \
     libatspi2.0-0 \
     # フォント
     fonts-liberation \
@@ -69,7 +69,7 @@ WORKDIR /workspace
 RUN mkdir -p /workspace/project
 
 # スクリーンショット保存用ディレクトリを作成
-RUN mkdir -p /workspace/project/screenshots
+RUN mkdir -p /workspace/screenshots
 
 # Playwrightデータディレクトリを作成
 RUN mkdir -p /workspace/.playwright

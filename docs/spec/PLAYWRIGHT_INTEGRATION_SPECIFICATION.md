@@ -552,7 +552,7 @@ playwright_mcp:
       width: 1280
       height: 720
     # スクリーンショット保存先
-    screenshot_dir: "/workspace/project/screenshots"
+    screenshot_dir: "/workspace/screenshots"
     # タイムアウト設定（ミリ秒）
     timeout: 30000
 ```
@@ -742,7 +742,7 @@ playwright_navigate to https://example.com
 
 ### Screenshot Management
 
-Screenshots are saved to `/workspace/project/screenshots/` with timestamps.
+Screenshots are saved to `/workspace/screenshots/` with timestamps.
 After taking screenshots, you can:
 - View them using command-executor file operations
 - Include them in test reports
@@ -1005,8 +1005,8 @@ playwright_mcp:
 
 #### 11.3.1 保存先の制限
 
-スクリーンショットは`/workspace/project/screenshots/`配下に保存：
-- プロジェクトディレクトリ内に限定
+スクリーンショットは`/workspace/screenshots/`配下に保存：
+- workspaceディレクトリ内に限定（プロジェクトディレクトリとは分離）
 - ファイル名にタイムスタンプを含めて衝突を防止
 
 #### 11.3.2 サイズ制限

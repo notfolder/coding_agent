@@ -336,8 +336,8 @@ services:
 
   # Python + Playwright実行環境イメージ
   executor-python-playwright:
-    profiles:
-      - executor-build
+    # profiles:
+    #   - executor-build
     build:
       context: ./docker/executor-python-playwright
       dockerfile: Dockerfile
@@ -349,8 +349,8 @@ services:
 
   # Node.js + Playwright実行環境イメージ
   executor-node-playwright:
-    profiles:
-      - executor-build
+    # profiles:
+    #   - executor-build
     build:
       context: ./docker/executor-node-playwright
       dockerfile: Dockerfile
@@ -362,8 +362,8 @@ services:
 
   # Miniforge（conda）+ Playwright実行環境イメージ
   executor-miniforge-playwright:
-    profiles:
-      - executor-build
+    # profiles:
+    #   - executor-build
     build:
       context: ./docker/executor-miniforge-playwright
       dockerfile: Dockerfile
@@ -375,8 +375,8 @@ services:
 
   # Java + Playwright実行環境イメージ
   executor-java-playwright:
-    profiles:
-      - executor-build
+    # profiles:
+    #   - executor-build
     build:
       context: ./docker/executor-java-playwright
       dockerfile: Dockerfile
@@ -388,8 +388,8 @@ services:
 
   # Go + Playwright実行環境イメージ
   executor-go-playwright:
-    profiles:
-      - executor-build
+    # profiles:
+    #   - executor-build
     build:
       context: ./docker/executor-go-playwright
       dockerfile: Dockerfile

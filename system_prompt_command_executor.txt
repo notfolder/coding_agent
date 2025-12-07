@@ -148,7 +148,7 @@ playwright_navigate with {"url": "https://example.com"}
 
 ### Screenshot Management
 
-Screenshots are saved to `/workspace/project/screenshots/` with the name you provide.
+Screenshots are saved to `/workspace/screenshots/` with the name you provide.
 After taking screenshots, you can:
 - View them using the file system
 - Include them in test reports
