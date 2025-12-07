@@ -446,203 +446,80 @@ Playwright MCP Serverが提供する主要ツール（@executeautomation/playwri
 
 TextEditorMCPClientと同様の構造で実装します。
 
-**クラス構造:**
+**起動コマンド:**
 
-```python
-class PlaywrightMCPClient:
-    """Playwright MCP Serverとの通信を管理するクラス."""
-    
-    def __init__(
-        self,
-        container_id: str,
-        workspace_path: str = "/workspace/project",
-        timeout_seconds: int = 30,
-    ) -> None:
-        """初期化."""
-        self.container_id = container_id
-        self.workspace_path = workspace_path
-        self.timeout_seconds = timeout_seconds
-        self._process: subprocess.Popen | None = None
-        self._initialized = False
-    
-    def start(self) -> None:
-        """MCPサーバープロセスを起動する.
-        
-        コンテナ内でdocker execを使用してMCPサーバーを起動し、
-        stdio通信を確立します。
-        """
-        cmd = [
-            "docker",
-            "exec",
-            "-i",
-            "-w",
-            self.workspace_path,
-            self.container_id,
-            "npx",
-            "@executeautomation/playwright-mcp-server",
-        ]
-        
-        self._process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
-        
-        self._initialize_server()
-        self._initialized = True
-    
-    def stop(self) -> None:
-        """MCPサーバープロセスを停止する."""
-        if self._process:
-            self._process.terminate()
-            self._process.wait(timeout=5)
-            self._process = None
-    
-    def call_tool(self, tool_name: str, arguments: dict) -> dict:
-        """Playwrightツールを呼び出す.
-        
-        Args:
-            tool_name: ツール名（playwright_navigate等）
-            arguments: ツール引数
-            
-        Returns:
-            ツール実行結果
-        """
-        request = {
-            "jsonrpc": "2.0",
-            "id": self._get_next_request_id(),
-            "method": "tools/call",
-            "params": {
-                "name": tool_name,
-                "arguments": arguments,
-            },
-        }
-        return self._send_request(request)
-    
-    def _initialize_server(self) -> None:
-        """MCPサーバーを初期化する."""
-        init_request = {
-            "jsonrpc": "2.0",
-            "id": self._get_next_request_id(),
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {
-                    "name": "coding-agent-playwright",
-                    "version": "1.0.0",
-                },
-            },
-        }
-        self._send_request(init_request)
-    
-    def _send_request(self, request: dict) -> dict:
-        """JSON-RPCリクエストを送信し、レスポンスを受信する."""
-        # stdinにリクエストを書き込み
-        self._process.stdin.write(json.dumps(request) + "\n")
-        self._process.stdin.flush()
-        
-        # stdoutからレスポンスを読み込み
-        response_line = self._process.stdout.readline()
-        return json.loads(response_line)
+```bash
+docker exec -i -w /workspace/project <container_id> npx @executeautomation/playwright-mcp-server
 ```
 
 **主要メソッド:**
+
 - `start()`: MCPサーバープロセスを起動
+  - 上記のdocker execコマンドをsubprocess.Popenで実行
+  - stdin/stdout/stderrをパイプで接続
+  - MCPサーバーの初期化リクエストを送信
+  - 初期化完了を確認
+
 - `stop()`: MCPサーバープロセスを停止
+  - プロセスを終了
+  - タイムアウト付きで終了を待機
+
 - `call_tool(tool_name, arguments)`: ツールを呼び出し
+  - JSON-RPC 2.0形式でリクエストを構築
+  - stdinにリクエストを書き込み
+  - stdoutからレスポンスを読み込み
+  - 結果を返却
+
 - `_initialize_server()`: MCPサーバーを初期化
+  - initializeメソッドをJSON-RPCで呼び出し
+  - プロトコルバージョンとクライアント情報を送信
+  - サーバーの準備完了を確認
+
 - `_send_request(request)`: JSON-RPCリクエストを送信
+  - リクエストをJSON形式にシリアライズ
+  - stdinに書き込んでフラッシュ
+  - stdoutから1行読み込み
+  - レスポンスをデシリアライズして返却
 
 #### 5.4.2 ExecutionEnvironmentManagerとの連携
 
 ExecutionEnvironmentManagerにPlaywright MCP Clientのインスタンス管理機能を追加します。
 
 **追加メソッド:**
-- `_start_playwright_mcp(container_id: str, task_uuid: str) -> None`: Playwright MCPサーバーを起動
-- `_stop_playwright_mcp(task_uuid: str) -> None`: Playwright MCPサーバーを停止
-- `get_playwright_client(task_uuid: str) -> PlaywrightMCPClient | None`: Playwright MCP Clientを取得
-- `is_playwright_environment(env_name: str) -> bool`: 環境名がPlaywright対応かをチェック
 
-**起動処理の実装:**
+- `_start_playwright_mcp(container_id, task_uuid)`: Playwright MCPサーバーを起動
+  - PlaywrightMCPClientをインポート
+  - クライアントインスタンスを生成（コンテナID、作業パス、タイムアウトを指定）
+  - `client.start()`でMCPサーバープロセスを起動
+  - クライアントを`_playwright_processes`辞書に保存
+  - エラー時はRuntimeErrorを発生
 
-```python
-def _start_playwright_mcp(self, container_id: str, task_uuid: str) -> None:
-    """コンテナ内でPlaywright MCPサーバーを起動する.
-    
-    Args:
-        container_id: DockerコンテナID
-        task_uuid: タスクのUUID
-        
-    Raises:
-        RuntimeError: MCPサーバーの起動に失敗した場合
-    """
-    from clients.playwright_mcp_client import PlaywrightMCPClient
-    
-    self.logger.info("Playwright MCPサーバーを起動します: %s", task_uuid)
-    
-    try:
-        client = PlaywrightMCPClient(
-            container_id=container_id,
-            workspace_path="/workspace/project",
-            timeout_seconds=self._executor_config.get("execution", {}).get("timeout_seconds", 1800),
-        )
-        
-        # MCPサーバーを起動
-        client.start()
-        
-        # クライアントを保持
-        self._playwright_processes[task_uuid] = client
-        
-        self.logger.info("Playwright MCPサーバーが起動しました: %s", task_uuid)
-        
-    except Exception as e:
-        self.logger.exception("Playwright MCPサーバーの起動に失敗しました")
-        raise RuntimeError(f"Failed to start Playwright MCP server: {e}") from e
+- `_stop_playwright_mcp(task_uuid)`: Playwright MCPサーバーを停止
+  - `_playwright_processes`からクライアントを取得
+  - `client.stop()`でプロセスを終了
+  - 辞書からクライアントを削除
 
-def is_playwright_environment(self, env_name: str) -> bool:
-    """環境名がPlaywright対応かをチェックする.
-    
-    Args:
-        env_name: 環境名
-        
-    Returns:
-        Playwright環境の場合True
-    """
-    return "-playwright" in env_name
-```
+- `get_playwright_client(task_uuid)`: Playwright MCP Clientを取得
+  - `_playwright_processes`辞書から該当クライアントを返却
+  - 存在しない場合はNoneを返却
 
-**prepare()メソッドでの起動:**
+- `is_playwright_environment(env_name)`: 環境名がPlaywright対応かをチェック
+  - 環境名に`-playwright`が含まれるかを判定
+  - 含まれる場合Trueを返却
 
-```python
-def prepare(self, task: Task, environment_name: str) -> ContainerInfo:
-    """実行環境を準備する."""
-    # コンテナ起動
-    container_id = self._create_container(task, environment_name)
-    
-    # プロジェクトクローン
-    self._clone_project(container_id, task)
-    
-    # text-editor MCP起動（全環境）
-    self._start_text_editor_mcp(container_id, task.uuid)
-    
-    # Playwright環境の場合のみPlaywright MCP起動
-    if self.is_playwright_environment(environment_name):
-        self._start_playwright_mcp(container_id, task.uuid)
-    
-    return container_info
-```
+**prepare()メソッドでの起動フロー:**
 
-**動作フロー:**
-1. `prepare()`メソッドでコンテナを起動
-2. 環境名に`-playwright`が含まれるかチェック
-3. Playwright環境の場合、`_start_playwright_mcp()`を実行
-4. PlaywrightMCPClientを初期化してMCPサーバーを起動
-5. クライアントインスタンスを`_playwright_processes`辞書に保持
-6. PlanningCoordinatorがPlaywrightツールを使用可能に
+1. コンテナを作成
+2. プロジェクトをクローン
+3. text-editor MCPサーバーを起動（全環境共通）
+4. `is_playwright_environment()`で環境名をチェック
+5. Playwright環境の場合のみ`_start_playwright_mcp()`を実行
+6. コンテナ情報を返却
+
+**動作:**
+- Playwright環境が選択された場合のみMCPサーバーを起動
+- 起動したクライアントはタスクUUIDをキーに管理
+- PlanningCoordinatorはクライアントを取得してPlaywrightツールを使用
 
 ### 5.5 config.yamlへの設定追加
 
