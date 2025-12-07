@@ -157,60 +157,10 @@ RUN npm install -g @executeautomation/playwright-mcp-server
 ```
 /workspace/
 ├── project/           # プロジェクトファイル
-├── .playwright/       # Playwrightデータディレクトリ
-└── mcp-servers/       # MCPサーバー関連
-    └── playwright/    # Playwright MCP Server作業ディレクトリ
+└── .playwright/       # Playwrightデータディレクトリ
 ```
 
-#### 3.1.3 環境変数設定
-
-```dockerfile
-# Playwright設定
-ENV PLAYWRIGHT_BROWSERS_PATH=/workspace/.playwright
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
-
-# Display設定（headless用）
-ENV DISPLAY=:99
-```
-
-#### 3.1.4 起動スクリプト
-
-コンテナ起動時にPlaywright MCP Serverを自動起動するスクリプトを配置します。
-
-`/workspace/start-mcp-servers.sh`:
-```bash
-#!/bin/bash
-# Playwright MCP Serverを起動
-nohup npx @executeautomation/playwright-mcp-server > /workspace/mcp-servers/playwright/server.log 2>&1 &
-echo $! > /workspace/mcp-servers/playwright/server.pid
-
-# Text Editor MCP Serverも起動（既存機能）
-nohup npx -y mcp-server-text-editor > /workspace/mcp-servers/text-editor/server.log 2>&1 &
-echo $! > /workspace/mcp-servers/text-editor/server.pid
-```
-
-**ENTRYPOINT変更:**
-```dockerfile
-COPY start-mcp-servers.sh /workspace/start-mcp-servers.sh
-RUN chmod +x /workspace/start-mcp-servers.sh
-
-ENTRYPOINT ["/bin/bash", "-c", "/workspace/start-mcp-servers.sh && sleep infinity"]
-```
-
-### 3.2 イメージサイズ対策
-
-Chromiumブラウザは約200-300MBのサイズがあるため、イメージサイズが大幅に増加します。
-
-**対策:**
-1. **選択的導入**: 通常版とPlaywright版を分離し、計画時に選択可能にする
-2. **レイヤーキャッシュ最適化**: Dockerfileの記述順序を最適化し、ビルド時間を短縮
-3. **ブラウザのみインストール**: Chromiumのみをインストール（Firefox、WebKitは除外）
-
-**サイズ比較（推定）:**
-- 通常版Python環境: 約500MB
-- Playwright版Python環境: 約800-900MB
-
-### 3.3 Dockerfileディレクトリ構成
+### 3.2 Dockerfileディレクトリ構成
 
 ```
 docker/
@@ -227,14 +177,14 @@ docker/
 ├── executor-miniforge-playwright/
 │   └── Dockerfile                    # Playwright版
 ├── executor-java/
-│   └── Dockerfile                    # 通常版（Playwrightなし）
-└── executor-go/
-    └── Dockerfile                    # 通常版（Playwrightなし）
+│   └── Dockerfile                    # 通常版
+├── executor-java-playwright/
+│   └── Dockerfile                    # Playwright版
+├── executor-go/
+│   └── Dockerfile                    # 通常版
+└── executor-go-playwright/
+    └── Dockerfile                    # Playwright版
 ```
-
-**注記:**
-- JavaとGo環境はPlaywright対応を初期バージョンでは提供しない
-- 必要に応じて将来追加可能な設計とする
 
 ---
 
@@ -273,17 +223,6 @@ docker/
 3. スクリーンショット撮影や要素検証を実行
 ```
 
-#### 4.1.3 Docker間通信（将来拡張）
-
-将来的に、別のDockerコンテナで起動したWebアプリケーションをテストする場合。
-
-**アクセス方法:**
-- 同じ`coding-agent-network`に接続
-- コンテナ名またはIPアドレスでアクセス
-- 例: `http://webapp-container:3000`
-
-**現時点では対応範囲外とする。**
-
 ### 4.2 セキュリティ考慮事項
 
 #### 4.2.1 外部アクセス制限
@@ -319,9 +258,24 @@ command_executor:
 
 ## 5. MCP統合設計
 
-### 5.1 Playwright MCP Server通信方式
+### 5.1 動的なMCP追加
 
-#### 5.1.1 stdio通信の実装
+**重要**: Playwright MCP Serverは、計画フェーズでPlaywright対応環境が選択された場合にのみ、実行フェーズでLLMのfunction callingとシステムプロンプトに追加されます。
+
+**動作フロー:**
+1. 計画フェーズでLLMが環境を選択（例: `node-playwright`）
+2. 選択された環境名に`-playwright`が含まれるかをチェック
+3. Playwright環境の場合のみ、以下を実行：
+   - Playwright MCP Clientを初期化
+   - LLMのfunction calling定義にPlaywrightツールを追加
+   - システムプロンプトにPlaywright機能の説明を追加
+4. 通常環境の場合は、Playwright関連の機能は一切追加されない
+
+この設計により、不要な環境でPlaywrightツールが表示されることを防ぎ、LLMの混乱を避けます。
+
+### 5.2 Playwright MCP Server通信方式
+
+#### 5.2.1 stdio通信の実装
 
 実行環境Docker内で起動したPlaywright MCP Serverとstdio（標準入出力）で通信します。
 
@@ -345,7 +299,7 @@ sequenceDiagram
     PC-->>LLM: 結果返却
 ```
 
-#### 5.1.2 通信プロトコル
+#### 5.2.2 通信プロトコル
 
 Playwright MCP ServerはJSON-RPC 2.0プロトコルを使用します。
 
@@ -380,7 +334,7 @@ Playwright MCP ServerはJSON-RPC 2.0プロトコルを使用します。
 }
 ```
 
-### 5.2 Playwright MCPツール一覧
+### 5.3 Playwright MCPツール一覧
 
 Playwright MCP Serverが提供する主要ツール（@executeautomation/playwright-mcp-server）:
 
@@ -396,9 +350,9 @@ Playwright MCP Serverが提供する主要ツール（@executeautomation/playwri
 | playwright_get_content | ページのHTMLを取得 | - |
 | playwright_get_console_logs | コンソールログを取得 | - |
 
-### 5.3 MCPクライアント実装
+### 5.4 MCPクライアント実装
 
-#### 5.3.1 PlaywrightMCPClient クラス
+#### 5.4.1 PlaywrightMCPClient クラス
 
 既存のMCPクライアント（TextEditorMCPClient等）と同様の構造で実装します。
 
@@ -408,15 +362,22 @@ Playwright MCP Serverが提供する主要ツール（@executeautomation/playwri
 - `_send_json_rpc(method: str, params: dict) -> dict`: JSON-RPC通信
 - `list_tools() -> list`: 利用可能なツールリストを取得
 
-#### 5.3.2 ExecutionEnvironmentManagerとの連携
+#### 5.4.2 ExecutionEnvironmentManagerとの連携
 
 ExecutionEnvironmentManagerにPlaywright MCP Clientのインスタンス管理機能を追加します。
 
 **追加メソッド:**
 - `get_playwright_client() -> PlaywrightMCPClient | None`: Playwright MCP Clientを取得
 - `_setup_playwright_mcp() -> bool`: Playwright MCP Serverの起動確認とクライアント初期化
+- `is_playwright_environment(env_name: str) -> bool`: 環境名がPlaywright対応かをチェック
 
-### 5.4 config.yamlへの設定追加
+**動作:**
+1. `prepare()`メソッドで環境名をチェック
+2. Playwright環境の場合のみ`_setup_playwright_mcp()`を実行
+3. Playwright MCP Clientを初期化してコンテナ情報に保持
+4. PlanningCoordinatorはコンテナ情報からPlaywright対応状況を判断
+
+### 5.5 config.yamlへの設定追加
 
 ```yaml
 # Playwright MCP Server連携設定
@@ -477,6 +438,8 @@ DEFAULT_ENVIRONMENTS: dict[str, str] = {
     "python-playwright": "coding-agent-executor-python-playwright:latest",
     "node-playwright": "coding-agent-executor-node-playwright:latest",
     "miniforge-playwright": "coding-agent-executor-miniforge-playwright:latest",
+    "java-playwright": "coding-agent-executor-java-playwright:latest",
+    "go-playwright": "coding-agent-executor-go-playwright:latest",
 }
 ```
 
@@ -496,6 +459,8 @@ command_executor:
     python-playwright: "coding-agent-executor-python-playwright:latest"
     node-playwright: "coding-agent-executor-node-playwright:latest"
     miniforge-playwright: "coding-agent-executor-miniforge-playwright:latest"
+    java-playwright: "coding-agent-executor-java-playwright:latest"
+    go-playwright: "coding-agent-executor-go-playwright:latest"
   
   default_environment: "python"
 ```
@@ -528,6 +493,8 @@ You must select an appropriate execution environment for this task. The followin
 | python-playwright | coding-agent-executor-python-playwright:latest | Python web apps requiring UI testing |
 | node-playwright | coding-agent-executor-node-playwright:latest | JavaScript/TypeScript web apps requiring UI testing |
 | miniforge-playwright | coding-agent-executor-miniforge-playwright:latest | Data science web dashboards requiring UI testing |
+| java-playwright | coding-agent-executor-java-playwright:latest | Java/Kotlin web apps requiring UI testing |
+| go-playwright | coding-agent-executor-go-playwright:latest | Go web apps requiring UI testing |
 
 **When to use Playwright-enabled environments:**
 - The task requires browser-based UI testing
@@ -906,42 +873,9 @@ playwright_mcp:
 
 ---
 
-## 12. 実装優先順位
+## 12. テストシナリオ
 
-### 12.1 Phase 1: 基本実装
-
-**目標:** Playwright基本機能の提供
-
-1. Python-Playwright環境イメージの作成
-2. Node-Playwright環境イメージの作成
-3. Playwright MCP Server起動スクリプトの実装
-4. PlaywrightMCPClientクラスの実装
-5. 計画プロンプトへの環境リスト追加
-6. システムプロンプトへのPlaywright機能説明追加
-
-### 12.2 Phase 2: 拡張機能
-
-**目標:** より高度な使い方のサポート
-
-1. Miniforge-Playwright環境の追加
-2. スクリーンショット自動管理機能
-3. ブラウザコンソールログの自動収集
-4. ビジュアルリグレッションテスト支援
-
-### 12.3 Phase 3: 最適化
-
-**目標:** パフォーマンスと安定性の向上
-
-1. イメージサイズの最適化
-2. ブラウザ起動時間の短縮
-3. エラーハンドリングの強化
-4. ドキュメントとサンプルの充実
-
----
-
-## 13. テストシナリオ
-
-### 13.1 基本動作確認
+### 12.1 基本動作確認
 
 #### 13.1.1 環境起動テスト
 
@@ -1002,11 +936,11 @@ playwright_mcp:
 
 ---
 
-## 14. URLアクセス設計の詳細
+## 13. URLアクセス設計の詳細
 
-### 14.1 URL指定方針
+### 13.1 URL指定方針
 
-#### 14.1.1 localhost Webアプリケーション
+#### 13.1.1 localhost Webアプリケーション
 
 **推奨URL形式:**
 - `http://localhost:{port}`
@@ -1028,7 +962,7 @@ Example:
 2. Test: playwright_navigate to http://localhost:3000
 ```
 
-#### 14.1.2 外部公開URL
+#### 13.1.2 外部公開URL
 
 **推奨URL形式:**
 - `https://example.com`
@@ -1043,54 +977,11 @@ Example:
 - ホワイトリストモードの使用を推奨
 - プロダクション環境へのアクセスは慎重に
 
-#### 14.1.3 Docker間通信（将来対応）
-
-**想定URL形式:**
-- `http://{container_name}:{port}`
-- `http://{service_name}:{port}`（docker-compose使用時）
-
-**現時点では対応範囲外:**
-- 複雑なネットワーク設定が必要
-- ユースケースが限定的
-- 将来必要になった際に追加検討
-
-### 14.2 ポート番号の管理
-
-#### 14.2.1 LLMによる自動検出
-
-LLMがアプリケーション起動ログからポート番号を自動検出することを推奨。
-
-**例:**
-```
-Execute: npm run dev
-Output: 
-  vite v4.0.0 dev server running at:
-  > Local: http://localhost:5173/
-  
-LLM detects: Port 5173
-LLM action: playwright_navigate to http://localhost:5173
-```
-
-#### 14.2.2 一般的なポート番号の参考情報
-
-プロンプトに以下の情報を含める：
-
-| フレームワーク/ツール | デフォルトポート |
-|---------------------|-----------------|
-| Vite (React/Vue) | 5173 |
-| Create React App | 3000 |
-| Next.js | 3000 |
-| Vue CLI | 8080 |
-| Angular CLI | 4200 |
-| Django | 8000 |
-| Flask | 5000 |
-| Express | 3000 |
-
 ---
 
-## 15. プロンプト設計詳細
+## 14. プロンプト設計詳細
 
-### 15.1 Planning用プロンプトの追加内容
+### 14.1 Planning用プロンプトの追加内容
 
 `system_prompt_planning.txt`に追加する環境選択ガイド（全文）：
 
@@ -1099,7 +990,7 @@ LLM action: playwright_navigate to http://localhost:5173
 
 ### When to Choose Playwright-enabled Environments
 
-Select a Playwright-enabled environment (python-playwright, node-playwright, miniforge-playwright) when the task requires:
+Select a Playwright-enabled environment (python-playwright, node-playwright, miniforge-playwright, java-playwright, go-playwright) when the task requires:
 
 1. **Browser-based UI Testing**
    - Automated testing of web application user interfaces
@@ -1156,7 +1047,7 @@ Use standard environments when:
 → 具体的な必要性がない場合は標準環境を選択すべき
 ```
 
-### 15.2 Command Executor用プロンプトの追加内容
+### 14.2 Command Executor用プロンプトの追加内容
 
 `system_prompt_command_executor.txt`に追加するPlaywright使用ガイド（全文）：
 
@@ -1307,7 +1198,7 @@ Example combined workflow:
 
 ---
 
-## 16. 関連ドキュメント
+## 15. 関連ドキュメント
 
 - [複数言語対応実行環境仕様](MULTI_LANGUAGE_ENVIRONMENT_SPECIFICATION.md)
 - [Command Executor MCP Server連携仕様](COMMAND_EXECUTOR_MCP_SPECIFICATION.md)
@@ -1316,9 +1207,9 @@ Example combined workflow:
 
 ---
 
-## 17. 補足事項
+## 16. 補足事項
 
-### 17.1 Playwright MCP Serverの選定理由
+### 16.1 Playwright MCP Serverの選定理由
 
 複数のPlaywright MCP Server実装が存在しますが、本仕様では`@executeautomation/playwright-mcp-server`を採用します。
 
@@ -1332,7 +1223,7 @@ Example combined workflow:
 - `@modelcontextprotocol/server-playwright`: 公式実装だが機能が限定的
 - カスタム実装: プロジェクト固有の要件に応じて将来検討可能
 
-### 17.2 ブラウザの選択
+### 16.2 ブラウザの選択
 
 初期実装ではChromiumのみをサポートします。
 
@@ -1346,9 +1237,9 @@ Example combined workflow:
 - 必要に応じてFirefoxやWebKitのサポートを追加可能
 - config.yamlで選択可能にする設計
 
-### 17.3 既存機能との関係
+### 16.3 既存機能との関係
 
-#### 17.3.1 Text Editor MCPとの統合
+#### 16.3.1 Text Editor MCPとの統合
 
 Text Editor MCPとPlaywright MCPは独立して動作しますが、組み合わせて使用することで効果的なワークフローが実現できます。
 
@@ -1358,7 +1249,7 @@ Text Editor MCPとPlaywright MCPは独立して動作しますが、組み合わ
 3. Playwrightでブラウザテストを実行
 4. 結果をText Editorでレポートファイルに記録
 
-#### 17.3.2 Command Executorとの関係
+#### 16.3.2 Command Executorとの関係
 
 Command ExecutorとPlaywrightは補完関係にあります。
 
@@ -1367,9 +1258,9 @@ Command ExecutorとPlaywrightは補完関係にあります。
 
 両方を組み合わせることで、完全なE2Eテストワークフローが実現できます。
 
-### 17.4 パフォーマンス最適化
+### 16.4 パフォーマンス最適化
 
-#### 17.4.1 イメージビルドの最適化
+#### 16.4.1 イメージビルドの最適化
 
 Dockerfileのレイヤーキャッシュを活用してビルド時間を短縮：
 
@@ -1377,7 +1268,7 @@ Dockerfileのレイヤーキャッシュを活用してビルド時間を短縮�
 2. アプリケーションコードを最後にコピー
 3. マルチステージビルドの活用（将来検討）
 
-#### 17.4.2 ブラウザ起動の高速化
+#### 16.4.2 ブラウザ起動の高速化
 
 - `--disable-dev-shm-usage`: 共有メモリの代わりに/tmpを使用
 - `--disable-gpu`: GPU機能を無効化（headlessでは不要）
