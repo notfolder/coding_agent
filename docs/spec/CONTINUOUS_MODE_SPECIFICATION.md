@@ -1,37 +1,38 @@
-# Docker Compose 継続動作モード仕様書
+# Docker Compose 継続動作モード 詳細設計書
 
 ## 1. 概要
 
 ### 1.1 目的
 
-現在のcoding_agentは、cronによる定期実行でproducerとconsumerを動作させています。本仕様では、docker-composeを使用して、producerとconsumerをそれぞれ独立したコンテナとして継続的に動作させるモードを設計します。
+Docker Composeを使用して、ProducerとConsumerをそれぞれ独立したコンテナとして継続的に動作させるモードを提供します。これにより、cronベースの定期実行と比較して、リアルタイムに近いタスク処理が可能になります。
 
-### 1.2 背景
+### 1.2 主要機能
 
-- cronベースの実行では、実行間隔の間に発生したタスクの処理に遅延が生じる
-- docker-composeによる継続動作により、リアルタイムに近いタスク処理が可能になる
-- コンテナ化により、スケーラビリティと運用管理が向上する
+- **Producer継続動作**: タスク取得とキュー投入を設定間隔で継続実行
+- **Consumer継続動作**: キューからのタスク取得と処理を継続実行
+- **Gracefulシャットダウン**: 停止シグナルによる安全な終了
+- **ヘルスチェック**: サービスの稼働状態監視
+- **スケーラビリティ**: Consumer複数インスタンスによる並列処理
 
-### 1.3 要求事項
+### 1.3 既存機能との互換性
 
-- producerは設定ファイルで指定された時間（分単位）待機してからループ実行する
-- consumerはsleep無しで、処理が終了次第すぐに次のタスクを取得してループ実行する
-- 両モードとも、gracefulな停止をサポートする
-- 既存のcron実行との互換性を維持する
+- cronベースの実行との完全な互換性を維持
+- `--continuous`オプションなしでは従来通りの単発実行
+- 既存の一時停止・再開機能と連携
 
 ---
 
-## 2. アーキテクチャ
+## 2. システムアーキテクチャ
 
-### 2.1 システム構成図
+### 2.1 全体構成図
 
 ```mermaid
 flowchart TD
     subgraph Docker Compose
         Producer[coding-agent-producer]
-        Consumer1[coding-agent-consumer]
-        Consumer2[coding-agent-consumer 2]
-        ConsumerN[coding-agent-consumer N]
+        Consumer1[coding-agent-consumer-1]
+        Consumer2[coding-agent-consumer-2]
+        ConsumerN[coding-agent-consumer-N]
         RabbitMQ[RabbitMQ]
         UserConfigAPI[user-config-api]
     end
@@ -53,174 +54,609 @@ flowchart TD
 
 ### 2.2 サービス構成
 
-- **coding-agent-producer**: タスク取得とキュー投入を継続実行
-- **coding-agent-consumer**: タスク処理を継続実行（複数インスタンス可）
-- **rabbitmq**: メッセージキュー
-- **user-config-api**: ユーザー設定API
+| サービス | 説明 | スケール |
+|---------|------|---------|
+| coding-agent-producer | タスク取得とキュー投入を継続実行 | 1インスタンス（ファイルロックで制御） |
+| coding-agent-consumer | タスク処理を継続実行 | 複数インスタンス可能 |
+| rabbitmq | メッセージキュー | 1インスタンス |
+| user-config-api | ユーザー設定API | 1インスタンス |
 
 ---
 
-## 3. コマンドラインオプション
+## 3. 関数詳細
 
-### 3.1 新規オプション
+### 3.1 update_healthcheck_file()
 
-main.pyに--continuousオプションを追加します。
+**ファイル**: `main.py`
 
-- **--continuous**: 継続動作モードを有効化
-- **--mode producer --continuous**: producerを継続動作させる
-- **--mode consumer --continuous**: consumerを継続動作させる
+**処理内容**:
+ヘルスチェックファイルを更新します。継続動作モードのサービス監視に使用されます。
 
-### 3.2 動作の違い
+**詳細処理**:
+1. ヘルスチェックディレクトリを作成（存在しない場合）
+2. サービス名に基づくファイル名を生成（`{service_name}.health`）
+3. 現在時刻（UTC、ISO形式）をファイルに書き込み
 
-- **--continuousなし**: 現行通り、処理完了後に終了
-- **--continuousあり**: 処理完了後も終了せず、ループを継続
+**パラメータ**:
+- `healthcheck_dir`: ヘルスチェックディレクトリのPath
+- `service_name`: サービス名（"producer" または "consumer"）
+
+**戻り値**: なし
+
+**使用例**:
+```python
+update_healthcheck_file(Path("healthcheck"), "producer")
+# healthcheck/producer.health に "2024-12-07T03:00:00+00:00" を書き込み
+```
+
+### 3.2 wait_with_signal_check()
+
+**ファイル**: `main.py`
+
+**処理内容**:
+停止シグナルをチェックしながら指定時間待機します。Producer継続動作モードで使用されます。
+
+**詳細処理**:
+1. 経過時間カウンターを0で初期化
+2. 経過時間が指定時間未満の間ループ:
+   - PauseResumeManagerで停止シグナルをチェック
+   - シグナル検出時:
+     - 情報ログを出力
+     - `False`を返して終了
+   - 1秒スリープ
+   - 経過時間を1秒増加
+3. 待機完了時は`True`を返す
+
+**パラメータ**:
+- `wait_seconds`: 待機時間（秒）
+- `pause_manager`: PauseResumeManagerインスタンス
+- `logger`: ロガー
+
+**戻り値**:
+- `True`: 待機完了（シグナル未検出）
+- `False`: 停止シグナル検出
+
+**特徴**:
+- 1秒単位でシグナルチェックを行うため、最大1秒の遅延で停止可能
+- 長時間待機中でも即座に停止シグナルに反応
+
+### 3.3 run_producer_continuous()
+
+**ファイル**: `main.py`
+
+**処理内容**:
+Producer継続動作モードを実行します。タスク取得を継続的に実行し、指定間隔で待機します。
+
+**詳細処理**:
+
+#### 初期化フェーズ
+1. 継続動作モード設定を取得:
+   - `interval_minutes`: タスク取得間隔（デフォルト: 1分）
+   - `delay_first_run`: 初回実行遅延フラグ（デフォルト: False）
+   - 間隔を秒数に変換
+2. ヘルスチェック設定を取得:
+   - `healthcheck_dir`: ヘルスチェックディレクトリ（デフォルト: "healthcheck"）
+   - `healthcheck_interval`: 更新間隔（デフォルト: 60秒）
+3. PauseResumeManagerを初期化
+4. ExecutionEnvironmentManagerを初期化（コンテナクリーンアップ用）
+5. クリーンアップ設定を取得:
+   - `interval_hours`: クリーンアップ間隔（デフォルト: 24時間）
+6. 起動ログを出力
+7. ループカウンターとヘルスチェックタイマーを初期化
+
+#### 初回実行遅延（オプション）
+1. `delay_first_run`がTrueの場合:
+   - 遅延ログを出力
+   - `wait_with_signal_check()`で待機
+   - シグナル検出時は終了
+
+#### 起動時クリーンアップ
+1. ExecutionEnvironmentManagerが有効な場合:
+   - 残存コンテナをクリーンアップ
+   - 削除件数をログ出力
+   - エラー時は例外ログを出力して継続
+
+#### メインループ
+1. ファイルロックパスを作成
+2. 無限ループ開始:
+
+**ループ内処理**:
+1. ループカウンターを増加
+2. ヘルスチェック:
+   - 前回更新からの経過時間をチェック
+   - 間隔経過時、ヘルスチェックファイルを更新
+3. 定期クリーンアップ:
+   - ExecutionEnvironmentManager有効かつ間隔経過時
+   - 残存コンテナをクリーンアップ
+   - 削除件数をログ出力
+4. 停止シグナルチェック:
+   - シグナル検出時、ループを抜ける
+5. タスク取得開始ログを出力
+6. タスク取得処理（ファイルロック付き）:
+   - `FileLock`でロックを取得
+   - `produce_tasks()`を呼び出し
+   - エラー時は例外ログを出力して継続
+7. 待機ログを出力
+8. 指定時間待機:
+   - `wait_with_signal_check()`で待機
+   - シグナル検出時、ループを抜ける
+
+#### 終了処理
+1. 終了ログを出力
+
+**パラメータ**:
+- `config`: アプリケーション設定辞書
+- `mcp_clients`: MCPクライアントの辞書
+- `task_source`: タスクソース
+- `task_queue`: タスクキューオブジェクト
+- `logger`: ロガー
+
+**戻り値**: なし
+
+**使用される設定**:
+```yaml
+continuous:
+  producer:
+    interval_minutes: 1
+    delay_first_run: false
+  healthcheck:
+    dir: "healthcheck"
+    update_interval_seconds: 60
+
+command_executor:
+  cleanup:
+    interval_hours: 24
+```
+
+### 3.4 run_consumer_continuous()
+
+**ファイル**: `main.py`
+
+**処理内容**:
+Consumer継続動作モードを実行します。キューからタスクを継続的に取得して処理します。
+
+**詳細処理**:
+
+#### 初期化フェーズ
+1. task_configから設定を取得:
+   - `config`: アプリケーション設定
+   - `mcp_clients`: MCPクライアント
+   - `task_source`: タスクソース
+2. 継続動作モード設定を取得:
+   - `queue_timeout`: キュー取得タイムアウト（デフォルト: 30秒）
+   - `min_interval`: タスク処理間の最小待機時間（デフォルト: 0秒）
+3. ヘルスチェック設定を取得:
+   - `healthcheck_dir`: ヘルスチェックディレクトリ
+   - `healthcheck_interval`: 更新間隔
+4. PauseResumeManagerを初期化
+5. TaskGetterを初期化（ファクトリーパターン）
+6. 起動ログを出力
+7. ループカウンターとヘルスチェックタイマーを初期化
+
+#### メインループ
+無限ループで以下を繰り返し:
+
+**ループ内処理**:
+1. ヘルスチェック:
+   - 前回更新からの経過時間をチェック
+   - 間隔経過時、ヘルスチェックファイルを更新
+2. 停止シグナルチェック:
+   - シグナル検出時、ループを抜ける
+3. ループカウンターを増加
+4. タスク取得試行ログを出力（デバッグレベル）
+5. キューからタスク取得:
+   - `task_queue.get_with_signal_check()`を呼び出し
+   - タイムアウト、シグナルチェッカー、ポーリング間隔を指定
+   - 戻り値がNoneの場合:
+     - シグナルチェック→検出時はループを抜ける
+     - タイムアウトの場合は継続
+6. TaskKeyからTaskインスタンスを生成:
+   - `task_getter.from_task_key()`を呼び出し
+   - Noneの場合、エラーログを出力して継続
+7. タスクにUUID、ユーザー情報を設定
+8. タスクの再開フラグを設定
+9. タスク状態確認（再開タスクは除く）:
+   - `task.check()`でprocessing_labelの確認
+   - 未付与の場合、スキップログを出力して継続
+   - 再開タスクの場合、再開ログを出力
+10. タスク処理実行:
+    - `handler.handle(task)`を呼び出し
+    - エラー時:
+      - 例外ログを出力
+      - タスクにエラーコメントを追加
+11. 最小待機時間:
+    - `min_interval`が0より大きい場合、スリープ
+
+#### 終了処理
+1. 終了ログを出力
+
+**パラメータ**:
+- `task_queue`: タスクキューオブジェクト
+- `handler`: タスク処理ハンドラー
+- `logger`: ロガー
+- `task_config`: タスク設定情報（config, mcp_clients, task_sourceを含む）
+
+**戻り値**: なし
+
+**使用される設定**:
+```yaml
+continuous:
+  consumer:
+    queue_timeout_seconds: 30
+    min_interval_seconds: 0
+  healthcheck:
+    dir: "healthcheck"
+    update_interval_seconds: 60
+```
+
+**特徴**:
+- sleep無し動作（キュータイムアウトで制御）
+- 複数インスタンスの同時実行をサポート
+- RabbitMQによる排他制御（ファイルロック不要）
 
 ---
 
-## 4. Producer継続動作モード
+## 4. 処理フロー図
 
-### 4.1 動作フロー図
+### 4.1 Producer継続動作フロー
 
 ```mermaid
 flowchart TD
-    A[起動] --> B[初期化処理]
-    B --> C[メインループ開始]
-    C --> D[タスク取得・キュー追加処理]
-    D --> E[指定時間待機]
-    E --> F{停止シグナル?}
-    F -->|Yes| G[クリーンアップ]
-    F -->|No| D
-    G --> H[終了]
+    A[起動] --> B[設定読み込み]
+    B --> C[初期化処理]
+    C --> D{初回実行遅延?}
+    D -->|Yes| E[wait_with_signal_check]
+    E --> F{シグナル検出?}
+    F -->|Yes| Z[終了]
+    F -->|No| G
+    D -->|No| G[起動時クリーンアップ]
+    
+    G --> H[メインループ開始]
+    H --> I[ループカウンター増加]
+    I --> J{ヘルスチェック時刻?}
+    J -->|Yes| K[ヘルスチェック更新]
+    K --> L
+    J -->|No| L{クリーンアップ時刻?}
+    
+    L -->|Yes| M[残存コンテナ削除]
+    M --> N
+    L -->|No| N{停止シグナル?}
+    
+    N -->|Yes| Z
+    N -->|No| O[タスク取得ログ]
+    
+    O --> P[FileLockで排他制御]
+    P --> Q[produce_tasks実行]
+    Q --> R[待機ログ]
+    R --> S[wait_with_signal_check]
+    S --> T{シグナル検出?}
+    T -->|Yes| Z
+    T -->|No| H
+    
+    style A fill:#e1f5ff
+    style Z fill:#ffe1e1
+    style Q fill:#ffffcc
 ```
 
-### 4.2 待機時間の設定
-
-config.yamlのcontinuous.producer.interval_minutesで待機時間（分）を設定します。デフォルト値は1分です。
-
-### 4.3 待機処理の実装方針
-
-1. 指定分数を秒数に変換
-2. 1秒単位でsleepしながら停止シグナルをチェック
-3. 停止シグナル検出時は即座にループを終了
-4. 待機時間経過後、次のタスク取得処理を実行
-
----
-
-## 5. Consumer継続動作モード
-
-### 5.1 動作フロー図
+### 4.2 Consumer継続動作フロー
 
 ```mermaid
 flowchart TD
-    A[起動] --> B[初期化処理]
-    B --> C[メインループ開始]
-    C --> D{停止シグナル?}
-    D -->|Yes| E[クリーンアップ]
-    D -->|No| F[キューからタスク取得]
-    F --> G{タスクあり?}
-    G -->|Yes| H[タスク処理実行]
-    G -->|No/タイムアウト| C
-    H --> C
-    E --> I[終了]
+    A[起動] --> B[設定読み込み]
+    B --> C[初期化処理]
+    C --> D[TaskGetter作成]
+    D --> E[メインループ開始]
+    
+    E --> F{ヘルスチェック時刻?}
+    F -->|Yes| G[ヘルスチェック更新]
+    G --> H
+    F -->|No| H{停止シグナル?}
+    
+    H -->|Yes| Z[終了]
+    H -->|No| I[ループカウンター増加]
+    
+    I --> J[キューからタスク取得<br/>タイムアウト付き]
+    J --> K{タスク取得成功?}
+    
+    K -->|No/Timeout| L{停止シグナル?}
+    L -->|Yes| Z
+    L -->|No| E
+    
+    K -->|Yes| M[TaskKeyからTask生成]
+    M --> N{Task生成成功?}
+    N -->|No| O[エラーログ]
+    O --> E
+    
+    N -->|Yes| P[UUID/User設定]
+    P --> Q{再開タスク?}
+    
+    Q -->|No| R[task.check実行]
+    R --> S{Label付与済み?}
+    S -->|No| T[スキップログ]
+    T --> E
+    
+    Q -->|Yes| U[再開ログ]
+    S -->|Yes| U
+    U --> V[handler.handle実行]
+    
+    V --> W{エラー発生?}
+    W -->|Yes| X[エラーコメント追加]
+    X --> Y
+    W -->|No| Y{最小待機時間?}
+    
+    Y -->|Yes| AA[sleep]
+    AA --> E
+    Y -->|No| E
+    
+    style A fill:#e1f5ff
+    style Z fill:#ffe1e1
+    style V fill:#ffffcc
 ```
 
-### 5.2 キュー取得のタイムアウト設定
+### 4.3 wait_with_signal_check処理フロー
 
-config.yamlのcontinuous.consumer.queue_timeout_secondsでキュー取得タイムアウト（秒）を設定します。デフォルト値は30秒です。
-
-### 5.3 sleepなし動作の実装方針
-
-1. キューからのタスク取得時にタイムアウトを設定
-2. タスクが存在する場合は即座に処理を開始
-3. タイムアウト時はシグナルチェック後、再度キュー取得を試行
-4. タスク処理完了後、sleepせずに次のタスク取得へ
+```mermaid
+flowchart TD
+    A[開始] --> B[elapsed = 0]
+    B --> C{elapsed < wait_seconds?}
+    C -->|No| D[return True]
+    
+    C -->|Yes| E[停止シグナルチェック]
+    E --> F{シグナル検出?}
+    F -->|Yes| G[ログ出力]
+    G --> H[return False]
+    
+    F -->|No| I[sleep 1秒]
+    I --> J[elapsed += 1]
+    J --> C
+    
+    style A fill:#e1f5ff
+    style D fill:#ccffcc
+    style H fill:#ffe1e1
+```
 
 ---
 
-## 6. Gracefulシャットダウン
+## 5. コマンドラインオプション
 
-### 6.1 停止シグナル
+### 5.1 main()関数での引数解析
 
-停止ファイル（contexts/pause_signal）の存在をチェックし、ファイルが存在する場合はgracefulシャットダウンを開始します。このファイルは既存の一時停止機能でも使用されており、継続動作モードでは一時停止ではなくプロセス終了として動作します。
+**オプション一覧**:
 
-### 6.2 シャットダウン時の動作
+| オプション | 選択肢 | 説明 |
+|----------|--------|------|
+| `--mode` | producer, consumer | producer: タスク取得のみ, consumer: キュー実行のみ |
+| `--continuous` | フラグ | 継続動作モードを有効化（docker-compose用） |
+
+### 5.2 動作の違い
+
+#### --continuousなし（従来の動作）
+- Producer: タスク取得→キュー投入→終了
+- Consumer: キュー取得→処理→終了
+
+#### --continuousあり（継続動作モード）
+- Producer: タスク取得→キュー投入→待機→ループ
+- Consumer: キュー取得→処理→ループ（待機なし）
+
+### 5.3 使用例
+
+```bash
+# Producer継続動作モード
+python main.py --mode producer --continuous
+
+# Consumer継続動作モード
+python main.py --mode consumer --continuous
+
+# 従来の単発実行（Producer）
+python main.py --mode producer
+
+# 従来の単発実行（Consumer）
+python main.py --mode consumer
+```
+
+---
+
+## 6. 設定ファイル
+
+### 6.1 config.yaml設定項目
+
+```yaml
+continuous:
+  # Producer設定
+  producer:
+    interval_minutes: 1          # タスク取得間隔（分）
+    delay_first_run: false       # 起動時の初回実行を遅延
+
+  # Consumer設定
+  consumer:
+    queue_timeout_seconds: 30    # キュー取得タイムアウト（秒）
+    min_interval_seconds: 0      # タスク処理間の最小待機時間（秒）
+
+  # ヘルスチェック設定
+  healthcheck:
+    dir: "healthcheck"                    # ヘルスチェックディレクトリ
+    update_interval_seconds: 60           # 更新間隔（秒）
+
+# Command Executor設定（Producer用）
+command_executor:
+  cleanup:
+    interval_hours: 24           # 残存コンテナクリーンアップ間隔（時間）
+```
+
+### 6.2 設定項目の詳細
+
+#### Producer設定
+
+**interval_minutes**:
+- タスク取得処理の実行間隔
+- デフォルト: 1分
+- 推奨値: 1-10分
+
+**delay_first_run**:
+- 起動直後の初回実行を遅延するかどうか
+- デフォルト: false
+- 用途: 他のサービス起動待ち
+
+#### Consumer設定
+
+**queue_timeout_seconds**:
+- RabbitMQからのタスク取得タイムアウト
+- デフォルト: 30秒
+- タイムアウト後は停止シグナルをチェックして継続
+
+**min_interval_seconds**:
+- タスク処理間の最小待機時間
+- デフォルト: 0秒（待機なし）
+- 用途: レート制限、API負荷軽減
+
+#### ヘルスチェック設定
+
+**dir**:
+- ヘルスチェックファイル配置ディレクトリ
+- デフォルト: "healthcheck"
+
+**update_interval_seconds**:
+- ヘルスチェックファイルの更新間隔
+- デフォルト: 60秒
+
+---
+
+## 7. Docker Compose設定
+
+### 7.1 サービス定義例
+
+```yaml
+services:
+  coding-agent-producer:
+    build: .
+    command: python main.py --mode producer --continuous
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      user-config-api:
+        condition: service_started
+    restart: unless-stopped
+    stop_grace_period: 300s
+    volumes:
+      - ./contexts:/app/contexts
+      - ./healthcheck:/app/healthcheck
+
+  coding-agent-consumer:
+    build: .
+    command: python main.py --mode consumer --continuous
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      user-config-api:
+        condition: service_started
+    restart: unless-stopped
+    stop_grace_period: 300s
+    volumes:
+      - ./contexts:/app/contexts
+      - ./healthcheck:/app/healthcheck
+```
+
+### 7.2 Consumerのスケールアウト
+
+```bash
+# 3つのConsumerインスタンスを起動
+docker-compose up -d --scale coding-agent-consumer=3
+```
+
+---
+
+## 8. Gracefulシャットダウン
+
+### 8.1 停止シグナル
+
+**ファイル**: `contexts/pause_signal`
+
+- ファイルの存在をチェック
+- ファイルが存在する場合、gracefulシャットダウンを開始
+- 既存の一時停止機能と共用（継続動作モードでは終了）
+
+### 8.2 シャットダウンフロー
 
 #### Producerの場合
 
-1. 現在のタスク取得処理を完了
-2. 取得したタスクをキューに追加
-3. ログに停止メッセージを出力
-4. プロセスを終了
+```mermaid
+sequenceDiagram
+    participant User
+    participant System
+    participant Producer
+    participant RabbitMQ
+    
+    User->>System: touch contexts/pause_signal
+    loop メインループ
+        Producer->>Producer: ヘルスチェック
+        Producer->>System: シグナルチェック
+        System-->>Producer: シグナル検出
+        Producer->>Producer: ログ出力
+        Producer->>Producer: break
+    end
+    Producer->>Producer: 終了ログ
+    Producer->>System: プロセス終了
+```
 
 #### Consumerの場合
 
-1. 現在処理中のタスクを完了させる
-2. タスク完了後、新しいタスクを取得しない
-3. ログに停止メッセージを出力
-4. プロセスを終了
+```mermaid
+sequenceDiagram
+    participant User
+    participant System
+    participant Consumer
+    participant RabbitMQ
+    participant Task
+    
+    User->>System: touch contexts/pause_signal
+    Consumer->>Task: 処理中のタスク実行
+    Task-->>Consumer: 処理完了
+    Consumer->>System: シグナルチェック
+    System-->>Consumer: シグナル検出
+    Consumer->>Consumer: ログ出力
+    Consumer->>Consumer: break
+    Consumer->>System: プロセス終了
+```
 
----
+### 8.3 stop_grace_period
 
-## 7. 設定ファイル
-
-### 7.1 config.yamlへの追加
-
-continuousセクションで以下を設定します：
-
-- **enabled**: 継続動作モードの有効化（デフォルト: false）
-
-#### producer設定
-
-- **interval_minutes**: タスク取得間隔（分、デフォルト: 1）
-- **delay_first_run**: 起動時の初回実行を遅延させるか（デフォルト: false）
-
-#### consumer設定
-
-- **queue_timeout_seconds**: キュー取得タイムアウト（秒、デフォルト: 30）
-- **min_interval_seconds**: タスク処理間の最小待機時間（秒、デフォルト: 0）
-
----
-
-## 8. Docker Compose設定
-
-### 8.1 サービス定義
-
-docker-compose.ymlに以下のサービスを追加します：
-
-#### coding-agent-producer
-
-- **イメージ**: プロジェクトのDockerfile
-- **コマンド**: python main.py --mode producer --continuous
-- **依存関係**: rabbitmq、user-config-api、web（GitLab CE、healthyになるまで待機）
-- **再起動ポリシー**: unless-stopped
-- **停止猶予時間**: 300秒
-
-#### coding-agent-consumer
-
-- **イメージ**: プロジェクトのDockerfile
-- **コマンド**: python main.py --mode consumer --continuous
-- **依存関係**: rabbitmq、user-config-api、web（GitLab CE、healthyになるまで待機）
-- **再起動ポリシー**: unless-stopped
-- **停止猶予時間**: 300秒（タスク処理完了を待つため）
-
-### 8.2 Consumerのスケールアウト
-
-複数のConsumerを起動する場合は、docker-composeコマンドで--scaleオプションを使用するか、docker-compose.override.ymlでreplicasを設定します。
+Docker Composeの`stop_grace_period: 300s`設定により:
+- シグナル送信後、最大300秒待機
+- 300秒以内に終了しない場合、強制終了
+- タスク処理完了を待つため、十分な時間を確保
 
 ---
 
 ## 9. ヘルスチェック
 
-### 9.1 実装方針
+### 9.1 ヘルスチェックファイル
 
-1. 定期的にヘルスチェックファイルを更新
-2. ヘルスチェックファイルの最終更新時刻を確認
-3. 一定時間以上更新がない場合、コンテナを異常と判定
+**ファイル名**:
+- Producer: `healthcheck/producer.health`
+- Consumer: `healthcheck/consumer.health`
 
-### 9.2 ヘルスチェックファイル
+**内容**: ISO形式のUTCタイムスタンプ
+```
+2024-12-07T03:00:00+00:00
+```
 
-- **Producer**: /app/healthcheck/producer.health
-- **Consumer**: /app/healthcheck/consumer.health
+### 9.2 更新タイミング
+
+- メインループの各イテレーション開始時
+- 前回更新から`update_interval_seconds`経過時のみ更新
+- デフォルト: 60秒間隔
+
+### 9.3 監視方法
+
+Docker Composeのヘルスチェック定義例:
+```yaml
+healthcheck:
+  test: ["CMD", "sh", "-c", "test $(( $(date +%s) - $(date -d $(cat /app/healthcheck/producer.health) +%s) )) -lt 120"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+```
 
 ---
 
@@ -228,22 +664,35 @@ docker-compose.ymlに以下のサービスを追加します：
 
 ### 10.1 cronベース実行との互換性
 
-- --continuousオプションなしの場合、現行通りの動作を維持
-- 設定ファイルのcontinuous.enabledがtrueでも、--continuousオプションがない場合は単発実行
-- 既存のcron設定をそのまま使用可能
+| 項目 | cronベース | 継続動作モード |
+|-----|-----------|--------------|
+| 起動方法 | cron定期実行 | docker-compose |
+| 終了条件 | 処理完了後 | 停止シグナル |
+| 設定互換性 | 完全互換 | 完全互換 |
+| コマンド | --mode producer/consumer | --mode producer/consumer --continuous |
 
 ### 10.2 一時停止・リジューム機能との連携
 
-- 継続動作モードでも、contexts/pause_signalによる停止制御は有効
-- シグナル検出時の動作：
-  - Producer: タスク取得後、キュー追加前にシグナルチェックし、検出時はプロセスを終了
-  - Consumer: タスク処理完了後、次のタスク取得前にシグナルチェックし、検出時はプロセスを終了
+**pause_signal動作の違い**:
+
+| モード | pause_signal検出時の動作 |
+|-------|----------------------|
+| 単発実行 | タスク一時停止→状態保存→プロセス終了 |
+| 継続動作 | ログ出力→プロセス終了（一時停止なし） |
+
+**理由**: 継続動作モードではdocker-composeが再起動を管理するため、一時停止機能は不要
 
 ### 10.3 ファイルロック機能
 
-- Producerモードでは、既存のFileLock機能を継続して使用
+**Producer**:
+- ファイルロックを継続使用
 - 複数Producerの同時実行を防止
-- Consumerは複数インスタンスの同時実行を許可（RabbitMQによる排他制御）
+- ロックファイル: `/tmp/produce_tasks.lock`
+
+**Consumer**:
+- ファイルロック不要
+- RabbitMQが排他制御を提供
+- 複数インスタンスの同時実行を推奨
 
 ---
 
@@ -251,32 +700,107 @@ docker-compose.ymlに以下のサービスを追加します：
 
 ### 11.1 起動方法
 
-#### docker-composeでの起動
+#### 全サービス起動
+```bash
+docker-compose up -d
+```
 
-全サービス起動、Producer/Consumerのみ起動、Consumerのスケールアウトが可能です。
+#### Producer/Consumerのみ起動
+```bash
+docker-compose up -d coding-agent-producer coding-agent-consumer
+```
 
-#### 手動起動（デバッグ用）
-
-main.pyを直接実行する場合は--mode producer --continuousまたは--mode consumer --continuousを指定します。
+#### Consumerのスケールアウト
+```bash
+docker-compose up -d --scale coding-agent-consumer=5
+```
 
 ### 11.2 停止方法
 
-docker-composeで停止するか、停止ファイルを作成することで停止できます。
+#### 停止ファイル作成による停止（推奨）
+```bash
+touch contexts/pause_signal
+# サービスがgracefulに終了するまで待機
+docker-compose down
+```
+
+#### 強制停止
+```bash
+docker-compose down
+# または
+docker-compose stop
+```
 
 ### 11.3 ログ確認
 
-docker-compose logsコマンドまたはログファイル（logs/producer.log、logs/consumer.log）で確認できます。
+#### リアルタイム監視
+```bash
+docker-compose logs -f coding-agent-producer
+docker-compose logs -f coding-agent-consumer
+```
+
+#### ログファイル
+- `logs/producer.log`
+- `logs/consumer.log`
+
+### 11.4 トラブルシューティング
+
+#### サービスが起動しない
+1. ログを確認: `docker-compose logs`
+2. 設定ファイルを確認: `config.yaml`
+3. 環境変数を確認: `.env`
+
+#### タスクが処理されない
+1. Producerログでタスク取得を確認
+2. RabbitMQ管理画面でキュー状態を確認
+3. Consumerログでタスク処理を確認
+
+#### ヘルスチェック失敗
+1. ヘルスチェックファイルの存在確認
+2. ファイルのタイムスタンプ確認
+3. サービスログでエラー確認
 
 ---
 
-## 12. 関連ドキュメント
+## 12. まとめ
 
-- [基本仕様](spec.md)
-- [一時停止・再開機能仕様](PAUSE_RESUME_SPECIFICATION.md)
-- [コンテキストファイル化仕様](context_file_spec.md)
+### 12.1 主要な特徴
+
+- **リアルタイム処理**: cronと比較して遅延が大幅に削減
+- **スケーラビリティ**: Consumer複数インスタンスで並列処理
+- **Gracefulシャットダウン**: 停止シグナルによる安全な終了
+- **既存互換性**: cronベース実行との完全な互換性
+- **監視機能**: ヘルスチェックによる稼働状態監視
+
+### 12.2 推奨設定
+
+**小規模環境**:
+- Producer: 1インスタンス
+- Consumer: 2-3インスタンス
+- interval_minutes: 1-2分
+
+**大規模環境**:
+- Producer: 1インスタンス
+- Consumer: 5-10インスタンス
+- interval_minutes: 1分
+- min_interval_seconds: 1-2秒（レート制限）
+
+### 12.3 制約事項
+
+- Producerは常に1インスタンス（ファイルロックで制御）
+- 停止シグナルは最大1秒の遅延で反応
+- ヘルスチェックは最大60秒間隔で更新
 
 ---
 
-**文書バージョン:** 2.0  
-**最終更新日:** 2024-11-28  
-**ステータス:** 実装済み
+## 13. 関連ドキュメント
+
+- [MAIN_SPEC.md](../MAIN_SPEC.md) - main.pyの詳細設計
+- [PAUSE_RESUME_SPECIFICATION.md](PAUSE_RESUME_SPECIFICATION.md) - 一時停止・再開機能
+- [CONTEXT_FILE_SPEC.md](CONTEXT_FILE_SPEC.md) - コンテキストファイル化仕様
+
+---
+
+**文書バージョン:** 3.0  
+**最終更新日:** 2024-12-07  
+**ステータス:** 実装済み・設計書
