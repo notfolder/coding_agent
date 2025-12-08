@@ -1,6 +1,6 @@
-# Go + Playwright実行環境イメージ
-# Goプロジェクト + Playwright用のDockerイメージ
-FROM golang:1.22-bookworm
+# Java + Playwright実行環境イメージ
+# Java/Kotlinプロジェクト + Playwright用のDockerイメージ
+FROM eclipse-temurin:21-jdk-jammy
 
 # Gitユーザー設定用の引数
 ARG BOT_NAME=bot
@@ -54,8 +54,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Playwright本体とブラウザのインストール
-RUN npm install -g playwright@1.49.0 && \
+# Playwright Test本体とブラウザのインストール
+# @playwright/testをインストールすることでplaywrightパッケージも自動的にインストールされる
+RUN npm install -g @playwright/test@1.49.0 && \
     npx playwright install chromium --with-deps
 
 # Playwright MCP Serverのインストール
@@ -72,6 +73,9 @@ RUN mkdir -p /workspace/screenshots
 
 # Playwrightデータディレクトリを作成
 RUN mkdir -p /workspace/.playwright
+
+# Playwright E2E configuration file
+COPY playwright-e2e.config.ts /workspace/playwright-e2e.config.ts
 
 # コンテナを永続実行するためのENTRYPOINT
 ENTRYPOINT ["sleep", "infinity"]

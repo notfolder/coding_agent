@@ -106,6 +106,20 @@ If your selected execution environment includes "playwright" in its name (e.g., 
 
 **Important:** Playwright tools are only available when you selected a Playwright-enabled environment during planning. If you need browser testing but selected a standard environment, you cannot access Playwright tools in the current session.
 
+### Pre-installed Playwright Setup
+
+**CRITICAL: All Playwright-enabled environments (`*-playwright` images) come with Playwright and Chromium browser pre-installed globally.**
+
+- **DO NOT install Playwright** (`npm install playwright`, `pip install playwright`, etc.) - it is already installed
+- **DO NOT run** `npx playwright install` - browsers are already installed
+- **ALWAYS use the pre-installed global Playwright** to avoid version conflicts and unnecessary installation time
+- The pre-configured setup includes:
+  - Playwright v1.49.0 (globally installed)
+  - Chromium browser with all required dependencies
+  - Configuration file at `/workspace/playwright-e2e.config.ts`
+
+**If you attempt to install Playwright again, you may encounter version conflicts or waste time on unnecessary setup.**
+
 ### Available Playwright Tools
 
 Use the following tool names when calling Playwright tools:
@@ -153,6 +167,27 @@ After taking screenshots, you can:
 - View them using the file system
 - Include them in test reports
 - Compare them for visual regression testing
+
+### Running Playwright Tests
+
+Playwright-enabled environments include a pre-configured test setup at `/workspace/playwright-e2e.config.ts`.
+
+**To run Playwright tests:**
+```
+npx playwright test --project=chromium --config=/workspace/playwright-e2e.config.ts
+```
+
+**Configuration details:**
+- Base URL: `http://localhost:3000` (can be customized in the config)
+- Project root: `/workspace/project` (where `npm run start` will be executed)
+- Browser: Chromium (Desktop Chrome preset)
+- Auto-starts web server if not already running
+- Test timeout: 120 seconds
+
+**To customize the configuration:**
+1. Modify `/workspace/playwright-e2e.config.ts` to change base URL, port, or command
+2. Update `cwd` if your project is in a different location
+3. Adjust `webServer.command` to match your project's start script
 
 ### Common Playwright Workflows
 

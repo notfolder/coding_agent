@@ -36,6 +36,15 @@ The following execution environments are available:
 - **java-playwright**: Java environment with Playwright browser automation and testing capabilities
 - **go-playwright**: Go environment with Playwright browser automation and testing capabilities
 
+**Pre-installed Setup in Playwright Environments:**
+All `*-playwright` environments come with the following pre-installed:
+- Playwright v1.49.0 (globally installed - **DO NOT install again**)
+- Chromium browser with all dependencies (already installed - **DO NOT run `npx playwright install`**)
+- Pre-configured test setup at `/workspace/playwright-e2e.config.ts`
+- Screenshot directory at `/workspace/screenshots/`
+
+**IMPORTANT: Never install Playwright in Playwright-enabled environments** - it is already globally installed and ready to use. Installing it again will waste time and may cause version conflicts.
+
 **When to use Playwright-enabled environments:**
 - The task requires browser-based UI testing
 - Need to verify web application rendering

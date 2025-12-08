@@ -293,40 +293,40 @@ services:
   # Python実行環境イメージ
   executor-python:
     build:
-      context: ./docker/executor-python
-      dockerfile: Dockerfile
+      context: ./docker
+      dockerfile: Dockerfile-executor-python
     image: coding-agent-executor-python:latest
     command: ["echo", "Build only"]
 
   # Miniforge（conda）実行環境イメージ
   executor-miniforge:
     build:
-      context: ./docker/executor-miniforge
-      dockerfile: Dockerfile
+      context: ./docker
+      dockerfile: Dockerfile-executor-miniforge
     image: coding-agent-executor-miniforge:latest
     command: ["echo", "Build only"]
 
   # Node.js実行環境イメージ
   executor-node:
     build:
-      context: ./docker/executor-node
-      dockerfile: Dockerfile
+      context: ./docker
+      dockerfile: Dockerfile-executor-node
     image: coding-agent-executor-node:latest
     command: ["echo", "Build only"]
 
   # Java実行環境イメージ
   executor-java:
     build:
-      context: ./docker/executor-java
-      dockerfile: Dockerfile
+      context: ./docker
+      dockerfile: Dockerfile-executor-java
     image: coding-agent-executor-java:latest
     command: ["echo", "Build only"]
 
   # Go実行環境イメージ
   executor-go:
     build:
-      context: ./docker/executor-go
-      dockerfile: Dockerfile
+      context: ./docker
+      dockerfile: Dockerfile-executor-go
     image: coding-agent-executor-go:latest
     command: ["echo", "Build only"]
 
@@ -339,8 +339,8 @@ services:
     # profiles:
     #   - executor-build
     build:
-      context: ./docker/executor-python-playwright
-      dockerfile: Dockerfile
+      context: ./docker
+      dockerfile: Dockerfile-executor-python-playwright
       args:
         BOT_NAME: ${BOT_NAME:-bot}
         BOT_EMAIL: ${BOT_EMAIL:-}
@@ -352,8 +352,8 @@ services:
     # profiles:
     #   - executor-build
     build:
-      context: ./docker/executor-node-playwright
-      dockerfile: Dockerfile
+      context: ./docker
+      dockerfile: Dockerfile-executor-node-playwright
       args:
         BOT_NAME: ${BOT_NAME:-bot}
         BOT_EMAIL: ${BOT_EMAIL:-}
@@ -365,8 +365,8 @@ services:
     # profiles:
     #   - executor-build
     build:
-      context: ./docker/executor-miniforge-playwright
-      dockerfile: Dockerfile
+      context: ./docker
+      dockerfile: Dockerfile-executor-miniforge-playwright
       args:
         BOT_NAME: ${BOT_NAME:-bot}
         BOT_EMAIL: ${BOT_EMAIL:-}
@@ -378,8 +378,8 @@ services:
     # profiles:
     #   - executor-build
     build:
-      context: ./docker/executor-java-playwright
-      dockerfile: Dockerfile
+      context: ./docker
+      dockerfile: Dockerfile-executor-java-playwright
       args:
         BOT_NAME: ${BOT_NAME:-bot}
         BOT_EMAIL: ${BOT_EMAIL:-}
@@ -391,8 +391,8 @@ services:
     # profiles:
     #   - executor-build
     build:
-      context: ./docker/executor-go-playwright
-      dockerfile: Dockerfile
+      context: ./docker
+      dockerfile: Dockerfile-executor-go-playwright
       args:
         BOT_NAME: ${BOT_NAME:-bot}
         BOT_EMAIL: ${BOT_EMAIL:-}
