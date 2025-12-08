@@ -409,14 +409,10 @@ command_executor:
     python: "coding-agent-executor-python:latest"
     miniforge: "coding-agent-executor-miniforge:latest"
     node: "coding-agent-executor-node:latest"
-    java: "coding-agent-executor-java:latest"
-    go: "coding-agent-executor-go:latest"
     # Playwright対応環境（ブラウザテスト機能付き）
     python-playwright: "coding-agent-executor-python-playwright:latest"
     node-playwright: "coding-agent-executor-node-playwright:latest"
     miniforge-playwright: "coding-agent-executor-miniforge-playwright:latest"
-    java-playwright: "coding-agent-executor-java-playwright:latest"
-    go-playwright: "coding-agent-executor-go-playwright:latest"
   
   # デフォルト環境（環境選択に失敗した場合）
   default_environment: "python"

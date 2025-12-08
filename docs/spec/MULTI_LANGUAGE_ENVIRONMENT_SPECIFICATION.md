@@ -169,51 +169,13 @@ coding-agent-executor-node:latest
 - Node.jsバックエンド（Express、NestJS等）
 - TypeScriptプロジェクト
 
-### 3.5 Java環境イメージ
-
-#### 3.5.1 イメージ名
-
-```
-coding-agent-executor-java:latest
-```
-
-#### 3.5.2 構成内容
-
-- ベースイメージ: `eclipse-temurin:21-jdk-jammy`
-
-#### 3.5.3 推奨用途
-
-- Java/Kotlinプロジェクト
-- Spring Boot、Quarkus等のフレームワーク
-- Androidビルド（一部対応）
-
-### 3.6 Go環境イメージ
-
-#### 3.6.1 イメージ名
-
-```
-coding-agent-executor-go:latest
-```
-
-#### 3.6.2 構成内容
-
-- ベースイメージ: `golang:1.22-bookworm`
-
-#### 3.6.3 推奨用途
-
-- Goプロジェクト
-- CLIツール開発
-- マイクロサービス
-
-### 3.7 イメージ一覧
+### 3.5 イメージ一覧
 
 | 環境名 | イメージ名 | ベースイメージ |
 |--------|-----------|---------------|
 | python | coding-agent-executor-python:latest | python:3.11-slim-bookworm |
 | miniforge | coding-agent-executor-miniforge:latest | condaforge/miniforge3:latest |
 | node | coding-agent-executor-node:latest | node:20-slim |
-| java | coding-agent-executor-java:latest | eclipse-temurin:21-jdk-jammy |
-| go | coding-agent-executor-go:latest | golang:1.22-bookworm |
 
 ---
 
@@ -223,16 +185,9 @@ coding-agent-executor-go:latest
 
 ```
 docker/
-├── executor-python/
-│   └── Dockerfile
-├── executor-miniforge/
-│   └── Dockerfile
-├── executor-node/
-│   └── Dockerfile
-├── executor-java/
-│   └── Dockerfile
-└── executor-go/
-    └── Dockerfile
+├── Dockerfile-executor-python
+├── Dockerfile-executor-miniforge
+└── Dockerfile-executor-node
 ```
 
 ### 4.2 Dockerfileの共通構造
@@ -307,8 +262,6 @@ You must select an appropriate execution environment for this task. The followin
 | python | coding-agent-executor-python:latest | Pure Python projects, Django/Flask |
 | miniforge | coding-agent-executor-miniforge:latest | Data science, conda environments |
 | node | coding-agent-executor-node:latest | JavaScript/TypeScript, React/Vue/Angular |
-| java | coding-agent-executor-java:latest | Java/Kotlin, Spring Boot |
-| go | coding-agent-executor-go:latest | Go projects, CLI tools |
 
 ```
 

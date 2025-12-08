@@ -24,14 +24,10 @@ DEFAULT_ENVIRONMENTS: dict[str, str] = {
     "python": "coding-agent-executor-python:latest",
     "miniforge": "coding-agent-executor-miniforge:latest",
     "node": "coding-agent-executor-node:latest",
-    "java": "coding-agent-executor-java:latest",
-    "go": "coding-agent-executor-go:latest",
     # Playwright対応環境
     "python-playwright": "coding-agent-executor-python-playwright:latest",
     "node-playwright": "coding-agent-executor-node-playwright:latest",
     "miniforge-playwright": "coding-agent-executor-miniforge-playwright:latest",
-    "java-playwright": "coding-agent-executor-java-playwright:latest",
-    "go-playwright": "coding-agent-executor-go-playwright:latest",
 }
 
 # デフォルト環境名（フォールバック用定数）

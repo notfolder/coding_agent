@@ -491,8 +491,6 @@ class TestMultiLanguageEnvironment(unittest.TestCase):
                     "python": "coding-agent-executor-python:latest",
                     "miniforge": "coding-agent-executor-miniforge:latest",
                     "node": "coding-agent-executor-node:latest",
-                    "java": "coding-agent-executor-java:latest",
-                    "go": "coding-agent-executor-go:latest",
                 },
                 "default_environment": "python",
                 "docker": {

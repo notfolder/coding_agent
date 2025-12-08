@@ -182,26 +182,14 @@ RUN npm install -g @executeautomation/playwright-mcp-server
 
 ```
 docker/
-├── executor-python/
-│   └── Dockerfile                    # 通常版
-├── executor-python-playwright/
-│   └── Dockerfile                    # Playwright版
-├── executor-node/
-│   └── Dockerfile                    # 通常版
-├── executor-node-playwright/
-│   └── Dockerfile                    # Playwright版
-├── executor-miniforge/
-│   └── Dockerfile                    # 通常版
-├── executor-miniforge-playwright/
-│   └── Dockerfile                    # Playwright版
-├── executor-java/
-│   └── Dockerfile                    # 通常版
-├── executor-java-playwright/
-│   └── Dockerfile                    # Playwright版
-├── executor-go/
-│   └── Dockerfile                    # 通常版
-└── executor-go-playwright/
-    └── Dockerfile                    # Playwright版
+```
+docker/
+├── Dockerfile-executor-python
+├── Dockerfile-executor-python-playwright
+├── Dockerfile-executor-node
+├── Dockerfile-executor-node-playwright
+├── Dockerfile-executor-miniforge
+└── Dockerfile-executor-miniforge-playwright
 ```
 
 ---
@@ -596,15 +584,11 @@ command_executor:
     python: "coding-agent-executor-python:latest"
     miniforge: "coding-agent-executor-miniforge:latest"
     node: "coding-agent-executor-node:latest"
-    java: "coding-agent-executor-java:latest"
-    go: "coding-agent-executor-go:latest"
     
     # Playwrightバリアント
     python-playwright: "coding-agent-executor-python-playwright:latest"
     node-playwright: "coding-agent-executor-node-playwright:latest"
     miniforge-playwright: "coding-agent-executor-miniforge-playwright:latest"
-    java-playwright: "coding-agent-executor-java-playwright:latest"
-    go-playwright: "coding-agent-executor-go-playwright:latest"
   
   default_environment: "python"
 ```
@@ -627,8 +611,6 @@ You must select an appropriate execution environment for this task. The followin
 | python | coding-agent-executor-python:latest | Pure Python projects, Django/Flask |
 | miniforge | coding-agent-executor-miniforge:latest | Data science, conda environments |
 | node | coding-agent-executor-node:latest | JavaScript/TypeScript, React/Vue/Angular |
-| java | coding-agent-executor-java:latest | Java/Kotlin, Spring Boot |
-| go | coding-agent-executor-go:latest | Go projects, CLI tools |
 
 ### Playwright-enabled Environments (with Browser Testing)
 
@@ -637,8 +619,6 @@ You must select an appropriate execution environment for this task. The followin
 | python-playwright | coding-agent-executor-python-playwright:latest | Python web apps requiring UI testing |
 | node-playwright | coding-agent-executor-node-playwright:latest | JavaScript/TypeScript web apps requiring UI testing |
 | miniforge-playwright | coding-agent-executor-miniforge-playwright:latest | Data science web dashboards requiring UI testing |
-| java-playwright | coding-agent-executor-java-playwright:latest | Java/Kotlin web apps requiring UI testing |
-| go-playwright | coding-agent-executor-go-playwright:latest | Go web apps requiring UI testing |
 
 **When to use Playwright-enabled environments:**
 - The task requires browser-based UI testing

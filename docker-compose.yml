@@ -314,22 +314,6 @@ services:
     image: coding-agent-executor-node:latest
     command: ["echo", "Build only"]
 
-  # Java実行環境イメージ
-  executor-java:
-    build:
-      context: ./docker
-      dockerfile: Dockerfile-executor-java
-    image: coding-agent-executor-java:latest
-    command: ["echo", "Build only"]
-
-  # Go実行環境イメージ
-  executor-go:
-    build:
-      context: ./docker
-      dockerfile: Dockerfile-executor-go
-    image: coding-agent-executor-go:latest
-    command: ["echo", "Build only"]
-
   # === Playwright対応実行環境イメージ ===
   # ブラウザテスト機能付き実行環境イメージ
   # ビルドコマンド: docker compose --profile executor-build build
@@ -371,32 +355,6 @@ services:
         BOT_NAME: ${BOT_NAME:-bot}
         BOT_EMAIL: ${BOT_EMAIL:-}
     image: coding-agent-executor-miniforge-playwright:latest
-    command: ["echo", "Build only"]
-
-  # Java + Playwright実行環境イメージ
-  executor-java-playwright:
-    # profiles:
-    #   - executor-build
-    build:
-      context: ./docker
-      dockerfile: Dockerfile-executor-java-playwright
-      args:
-        BOT_NAME: ${BOT_NAME:-bot}
-        BOT_EMAIL: ${BOT_EMAIL:-}
-    image: coding-agent-executor-java-playwright:latest
-    command: ["echo", "Build only"]
-
-  # Go + Playwright実行環境イメージ
-  executor-go-playwright:
-    # profiles:
-    #   - executor-build
-    build:
-      context: ./docker
-      dockerfile: Dockerfile-executor-go-playwright
-      args:
-        BOT_NAME: ${BOT_NAME:-bot}
-        BOT_EMAIL: ${BOT_EMAIL:-}
-    image: coding-agent-executor-go-playwright:latest
     command: ["echo", "Build only"]
 
 volumes:

@@ -201,8 +201,6 @@ coding-agent-exec-{task_uuid}
 | python | coding-agent-executor-python:latest | Python 3.11 + pip + pytest/black/flake8/mypy | 純粋Pythonプロジェクト、Webフレームワーク |
 | miniforge | coding-agent-executor-miniforge:latest | conda/mamba + Python + データサイエンスツール | 科学計算、ML/AI、condaenv.yaml使用プロジェクト |
 | node | coding-agent-executor-node:latest | Node.js 20 + npm/yarn/pnpm + TypeScript/ESLint | フロントエンド、Node.jsバックエンド |
-| java | coding-agent-executor-java:latest | Java 21 + Maven + Gradle | Spring Boot、Java/Kotlinプロジェクト |
-| go | coding-agent-executor-go:latest | Go 1.22 + golangci-lint | Goプロジェクト、CLIツール |
 
 **環境選択の判断基準:**
 - プロジェクトルートの依存関係ファイル（package.json, requirements.txt等）
