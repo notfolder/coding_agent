@@ -63,16 +63,12 @@ class TestEnvironmentAnalyzer(unittest.TestCase):
         file_list = [
             "requirements.txt",
             "package.json",
-            "go.mod",
-            "pom.xml",
         ]
         
         detected = self.analyzer.detect_environment_files(file_list)
         
         self.assertIn("python", detected)
         self.assertIn("node", detected)
-        self.assertIn("go", detected)
-        self.assertIn("java", detected)
 
     def test_detect_environment_files_subdirectory(self) -> None:
         """サブディレクトリ内の環境ファイル検出テスト."""

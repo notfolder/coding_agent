@@ -16,7 +16,7 @@
 
 ### 1.3 要求事項
 
-1. Python、Miniforge（conda）、Node.js、Java、Goの各言語用Dockerイメージを事前に準備する
+1. Python、Miniforge（conda）、Node.jsの各言語用Dockerイメージを事前に準備する
 2. 各イメージにはgitとCommand Executor MCP Serverの基盤機能をあらかじめインストールしておく
 3. 計画作成時にLLMがプロジェクトに適した実行環境を選択する
 4. 環境起動後すぐにコマンド実行が可能な状態にする
@@ -38,10 +38,8 @@ flowchart TD
     subgraph BuildPhase[ビルドフェーズ（事前準備）]
         DC[docker-compose.yml] --> |ビルド専用プロファイル指定|Build[docker compose build]
         Build --> ImgPython[Python イメージ]
-        Build --> ImgMiniforge[Miniforge イメージ]
+        Build --> ImgConda[Miniforge イメージ]
         Build --> ImgNode[Node.js イメージ]
-        Build --> ImgJava[Java イメージ]
-        Build --> ImgGo[Go イメージ]
     end
     
     subgraph PlanningPhase[計画フェーズ]
@@ -169,51 +167,13 @@ coding-agent-executor-node:latest
 - Node.jsバックエンド（Express、NestJS等）
 - TypeScriptプロジェクト
 
-### 3.5 Java環境イメージ
-
-#### 3.5.1 イメージ名
-
-```
-coding-agent-executor-java:latest
-```
-
-#### 3.5.2 構成内容
-
-- ベースイメージ: `eclipse-temurin:21-jdk-jammy`
-
-#### 3.5.3 推奨用途
-
-- Java/Kotlinプロジェクト
-- Spring Boot、Quarkus等のフレームワーク
-- Androidビルド（一部対応）
-
-### 3.6 Go環境イメージ
-
-#### 3.6.1 イメージ名
-
-```
-coding-agent-executor-go:latest
-```
-
-#### 3.6.2 構成内容
-
-- ベースイメージ: `golang:1.22-bookworm`
-
-#### 3.6.3 推奨用途
-
-- Goプロジェクト
-- CLIツール開発
-- マイクロサービス
-
-### 3.7 イメージ一覧
+### 3.5 イメージ一覧
 
 | 環境名 | イメージ名 | ベースイメージ |
 |--------|-----------|---------------|
 | python | coding-agent-executor-python:latest | python:3.11-slim-bookworm |
 | miniforge | coding-agent-executor-miniforge:latest | condaforge/miniforge3:latest |
 | node | coding-agent-executor-node:latest | node:20-slim |
-| java | coding-agent-executor-java:latest | eclipse-temurin:21-jdk-jammy |
-| go | coding-agent-executor-go:latest | golang:1.22-bookworm |
 
 ---
 
@@ -223,16 +183,9 @@ coding-agent-executor-go:latest
 
 ```
 docker/
-├── executor-python/
-│   └── Dockerfile
-├── executor-miniforge/
-│   └── Dockerfile
-├── executor-node/
-│   └── Dockerfile
-├── executor-java/
-│   └── Dockerfile
-└── executor-go/
-    └── Dockerfile
+├── Dockerfile-executor-python
+├── Dockerfile-executor-miniforge
+└── Dockerfile-executor-node
 ```
 
 ### 4.2 Dockerfileの共通構造
@@ -303,12 +256,10 @@ docker compose --profile executor-build build executor-python
 You must select an appropriate execution environment for this task. The following environments are available:
 
 | Environment | Image | Recommended For |
-|------------|-------|-----------------|
+|------------|-------|------------------|
 | python | coding-agent-executor-python:latest | Pure Python projects, Django/Flask |
 | miniforge | coding-agent-executor-miniforge:latest | Data science, conda environments |
 | node | coding-agent-executor-node:latest | JavaScript/TypeScript, React/Vue/Angular |
-| java | coding-agent-executor-java:latest | Java/Kotlin, Spring Boot |
-| go | coding-agent-executor-go:latest | Go projects, CLI tools |
 
 ```
 
@@ -399,7 +350,7 @@ sequenceDiagram
 | イメージ選択 | 固定（単一イメージ） | 計画フェーズでLLMが選択 |
 | 環境選択方式 | なし | 計画プロンプトに統合 |
 | git/ツールインストール | コンテナ起動後に実行 | イメージに事前インストール済み |
-| 環境種類 | 1種類 | 5種類（Python, Miniforge, Node.js, Java, Go） |
+| 環境種類 | 1種類 | 3種類（Python, Miniforge, Node.js） |
 
 ---
 
@@ -423,8 +374,6 @@ sequenceDiagram
 - **Python環境**: `pip install <package>` または `pip install -r requirements.txt`
 - **Miniforge環境**: `mamba install <package>` または `mamba env update -f environment.yml`
 - **Node.js環境**: `npm install <package>` または `npm install`（package.jsonから）
-- **Java環境**: `mvn dependency:resolve` または `gradle dependencies`
-- **Go環境**: `go mod download` または `go get <package>`
 
 ---
 
@@ -442,8 +391,6 @@ command_executor:
     python: "coding-agent-executor-python:latest"
     miniforge: "coding-agent-executor-miniforge:latest"
     node: "coding-agent-executor-node:latest"
-    java: "coding-agent-executor-java:latest"
-    go: "coding-agent-executor-go:latest"
   
   # デフォルト環境（環境選択に失敗した場合）
   default_environment: "python"

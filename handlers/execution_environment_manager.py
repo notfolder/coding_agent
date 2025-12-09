@@ -24,8 +24,6 @@ DEFAULT_ENVIRONMENTS: dict[str, str] = {
     "python": "coding-agent-executor-python:latest",
     "miniforge": "coding-agent-executor-miniforge:latest",
     "node": "coding-agent-executor-node:latest",
-    "java": "coding-agent-executor-java:latest",
-    "go": "coding-agent-executor-go:latest",
 }
 
 # デフォルト環境名（フォールバック用定数）
@@ -597,8 +595,6 @@ class ExecutionEnvironmentManager:
             ("requirements.txt", ["pip", "install", "-r", "requirements.txt"]),
             ("environment.yml", ["mamba", "env", "update", "-f", "environment.yml"]),
             ("condaenv.yaml", ["mamba", "env", "update", "-f", "condaenv.yaml"]),
-            ("go.mod", ["go", "mod", "download"]),
-            ("pom.xml", ["mvn", "dependency:resolve", "-q"]),
             ("Gemfile", ["bundle", "install"]),
         ]
 
@@ -841,12 +837,12 @@ class ExecutionEnvironmentManager:
         return {
             "build_package": [
                 "npm", "yarn", "pnpm", "pip", "pip3", "conda", "mamba",
-                "python", "python3", "go", "cargo", "maven", "mvn", "gradle",
+                "python", "python3", "cargo",
                 "make", "cmake", "bundle", "gem", "composer", "dotnet",
             ],
             "test": [
                 "pytest", "jest", "mocha", "rspec", "phpunit",
-                "go test", "cargo test", "dotnet test",
+                "cargo test", "dotnet test",
             ],
             "linter_formatter": [
                 "eslint", "prettier", "black", "flake8", "pylint", "mypy",

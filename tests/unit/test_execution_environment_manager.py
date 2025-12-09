@@ -491,8 +491,6 @@ class TestMultiLanguageEnvironment(unittest.TestCase):
                     "python": "coding-agent-executor-python:latest",
                     "miniforge": "coding-agent-executor-miniforge:latest",
                     "node": "coding-agent-executor-node:latest",
-                    "java": "coding-agent-executor-java:latest",
-                    "go": "coding-agent-executor-go:latest",
                 },
                 "default_environment": "python",
                 "docker": {
@@ -514,8 +512,6 @@ class TestMultiLanguageEnvironment(unittest.TestCase):
         assert "python" in environments
         assert "miniforge" in environments
         assert "node" in environments
-        assert "java" in environments
-        assert "go" in environments
         
         # イメージ名が正しいことを確認
         assert environments["python"] == "coding-agent-executor-python:latest"
@@ -531,8 +527,6 @@ class TestMultiLanguageEnvironment(unittest.TestCase):
         # 有効な環境名
         assert self.manager._validate_and_select_environment("python") == "python"
         assert self.manager._validate_and_select_environment("node") == "node"
-        assert self.manager._validate_and_select_environment("java") == "java"
-        assert self.manager._validate_and_select_environment("go") == "go"
         assert self.manager._validate_and_select_environment("miniforge") == "miniforge"
 
     def test_validate_and_select_environment_invalid(self) -> None:
@@ -626,12 +620,10 @@ class TestMultiLanguageEnvironment(unittest.TestCase):
         from handlers.execution_environment_manager import DEFAULT_ENVIRONMENTS
 
         # すべての環境が定義されていることを確認
-        assert len(DEFAULT_ENVIRONMENTS) == 5
+        assert len(DEFAULT_ENVIRONMENTS) == 3
         assert "python" in DEFAULT_ENVIRONMENTS
         assert "miniforge" in DEFAULT_ENVIRONMENTS
         assert "node" in DEFAULT_ENVIRONMENTS
-        assert "java" in DEFAULT_ENVIRONMENTS
-        assert "go" in DEFAULT_ENVIRONMENTS
 
 
 if __name__ == "__main__":

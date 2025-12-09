@@ -409,8 +409,6 @@ command_executor:
     python: "coding-agent-executor-python:latest"
     miniforge: "coding-agent-executor-miniforge:latest"
     node: "coding-agent-executor-node:latest"
-    java: "coding-agent-executor-java:latest"
-    go: "coding-agent-executor-go:latest"
   
   # デフォルト環境（環境選択に失敗した場合）
   default_environment: "python"

@@ -38,15 +38,6 @@ class EnvironmentAnalyzer:
             "yarn.lock",
             "pnpm-lock.yaml",
         ],
-        "java": [
-            "pom.xml",
-            "build.gradle",
-            "build.gradle.kts",
-        ],
-        "go": [
-            "go.mod",
-            "go.sum",
-        ],
         "common": [
             "Dockerfile",
             "docker-compose.yml",

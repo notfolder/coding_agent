@@ -10,9 +10,9 @@
 
 コーディングエージェントがGitHub/GitLabのIssueやPull Request/Merge Requestを処理する際、以下のようなコマンド実行が必要になるケースがあります：
 
-- ビルドコマンドの実行（npm build、make、go build等）
-- テストコマンドの実行（npm test、pytest、go test等）
-- リンターやフォーマッターの実行（eslint、black、gofmt等）
+- ビルドコマンドの実行（npm build、make等）
+- テストコマンドの実行（npm test、pytest等）
+- リンターやフォーマッターの実行（eslint、black等）
 - ファイル検索・確認（grep、find、cat等）
 - その他のプロジェクト固有のスクリプト実行
 
@@ -63,8 +63,6 @@ flowchart TD
             ImgPython[Python イメージ]
             ImgMiniforge[Miniforge イメージ]
             ImgNode[Node.js イメージ]
-            ImgJava[Java イメージ]
-            ImgGo[Go イメージ]
         end
         subgraph ExecutionContainer[実行環境コンテナ]
             ProjectFiles[プロジェクトファイル]
@@ -201,8 +199,6 @@ coding-agent-exec-{task_uuid}
 | python | coding-agent-executor-python:latest | Python 3.11 + pip + pytest/black/flake8/mypy | 純粋Pythonプロジェクト、Webフレームワーク |
 | miniforge | coding-agent-executor-miniforge:latest | conda/mamba + Python + データサイエンスツール | 科学計算、ML/AI、condaenv.yaml使用プロジェクト |
 | node | coding-agent-executor-node:latest | Node.js 20 + npm/yarn/pnpm + TypeScript/ESLint | フロントエンド、Node.jsバックエンド |
-| java | coding-agent-executor-java:latest | Java 21 + Maven + Gradle | Spring Boot、Java/Kotlinプロジェクト |
-| go | coding-agent-executor-go:latest | Go 1.22 + golangci-lint | Goプロジェクト、CLIツール |
 
 **環境選択の判断基準:**
 - プロジェクトルートの依存関係ファイル（package.json, requirements.txt等）
@@ -367,8 +363,6 @@ flowchart TD
 - package.json: `npm install` または `yarn install`
 - requirements.txt: `pip install -r requirements.txt`
 - condaenv.yaml / environment.yml: `mamba env create -f <環境ファイル>`（miniforge/mambaforge使用）
-- go.mod: `go mod download`
-- pom.xml: `mvn dependency:resolve`
 - Gemfile: `bundle install`
 
 **Conda環境について:**
@@ -467,10 +461,7 @@ sequenceDiagram
 | mamba | 高速Condaパッケージマネージャー | `mamba install`, `mamba env create -f environment.yml` |
 | python | Pythonインタープリター | `python setup.py`, `python -m pytest` |
 | python3 | Python3インタープリター | `python3 -m venv`, `python3 script.py` |
-| go | Go言語ツールチェーン | `go build`, `go test`, `go mod download` |
 | cargo | Rustパッケージマネージャー | `cargo build`, `cargo test` |
-| maven / mvn | Javaビルドツール | `mvn install`, `mvn test` |
-| gradle | Javaビルドツール | `gradle build`, `gradle test` |
 | make | ビルド自動化ツール | `make`, `make install`, `make test` |
 | cmake | ビルドシステムジェネレーター | `cmake .`, `cmake --build .` |
 | bundle | Rubyパッケージマネージャー | `bundle install`, `bundle exec` |
@@ -487,7 +478,6 @@ sequenceDiagram
 | mocha | JavaScriptテストフレームワーク | `mocha`, `mocha tests/` |
 | rspec | Rubyテストフレームワーク | `rspec`, `rspec spec/` |
 | phpunit | PHPテストフレームワーク | `phpunit`, `phpunit tests/` |
-| go test | Goテストコマンド | `go test ./...`, `go test -v` |
 | cargo test | Rustテストコマンド | `cargo test`, `cargo test --all` |
 | dotnet test | .NETテストコマンド | `dotnet test` |
 
@@ -502,8 +492,6 @@ sequenceDiagram
 | pylint | Pythonリンター | `pylint src/` |
 | mypy | Python型チェッカー | `mypy src/` |
 | rubocop | Rubyリンター | `rubocop`, `rubocop -a` |
-| gofmt | Goフォーマッター | `gofmt -w .` |
-| golint | Goリンター | `golint ./...` |
 | rustfmt | Rustフォーマッター | `rustfmt --check .` |
 | clippy | Rustリンター | `cargo clippy` |
 | tsc | TypeScriptコンパイラ | `tsc --noEmit`, `tsc` |
@@ -657,7 +645,7 @@ The following commands are available for execution:
 
 **Test Execution:**
 - Run the project's test suite to verify code changes work correctly
-- Examples: `npm test`, `pytest`, `go test ./...`, `cargo test`
+- Examples: `npm test`, `pytest`, `cargo test`
 
 **Code Search:**
 - Use `grep` command to recursively search for code patterns across the entire project
@@ -666,7 +654,7 @@ The following commands are available for execution:
 
 **Build/Compile:**
 - Execute project build commands to check for compilation errors
-- Examples: `npm run build`, `make`, `go build`, `cargo build`
+- Examples: `npm run build`, `make`, `cargo build`
 
 **Linter/Formatter:**
 - Perform code quality checks and format verification
@@ -696,8 +684,8 @@ The following commands are available for execution:
 システムプロンプト内の `{allowed_commands_list}` プレースホルダーは、セクション6.3で定義された許可コマンドリストの内容で動的に置き換えられます。
 
 **置き換え内容:**
-- ビルド・パッケージ管理コマンド（npm, yarn, pip, conda, mamba, go, cargo等）
-- テスト実行コマンド（pytest, jest, go test等）
+- ビルド・パッケージ管理コマンド（npm, yarn, pip, conda, mamba, cargo等）
+- テスト実行コマンド（pytest, jest等）
 - リンター・フォーマッターコマンド（eslint, black, flake8等）
 - ファイル操作・検索コマンド（grep, find, ls, cat等）
 - バージョン管理コマンド（git status, git diff等）
@@ -705,9 +693,9 @@ The following commands are available for execution:
 
 **生成形式例:**
 ```
-Build/Package Management: npm, yarn, pnpm, pip, pip3, conda, mamba, python, python3, go, cargo, maven, gradle, make, cmake, bundle, gem, composer, dotnet
-Test Execution: pytest, jest, mocha, rspec, phpunit, go test, cargo test, dotnet test
-Linter/Formatter: eslint, prettier, black, flake8, pylint, mypy, rubocop, gofmt, golint, rustfmt, clippy, tsc
+Build/Package Management: npm, yarn, pnpm, pip, pip3, conda, mamba, python, python3, cargo, make, cmake, bundle, gem, composer, dotnet
+Test Execution: pytest, jest, mocha, rspec, phpunit, cargo test, dotnet test
+Linter/Formatter: eslint, prettier, black, flake8, pylint, mypy, rubocop, rustfmt, clippy, tsc
 File Operations: ls, cat, head, tail, grep, find, wc, diff, tree, file, stat
 Version Control: git status, git diff, git log, git branch, git show, git blame
 Utilities: echo, pwd, cd, mkdir, rm, cp, mv, touch, chmod, env, which, curl, wget, tar, unzip, jq, sed, awk, sort, uniq, xargs

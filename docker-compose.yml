@@ -314,22 +314,6 @@ services:
     image: coding-agent-executor-node:latest
     command: ["echo", "Build only"]
 
-  # Java実行環境イメージ
-  executor-java:
-    build:
-      context: ./docker/executor-java
-      dockerfile: Dockerfile
-    image: coding-agent-executor-java:latest
-    command: ["echo", "Build only"]
-
-  # Go実行環境イメージ
-  executor-go:
-    build:
-      context: ./docker/executor-go
-      dockerfile: Dockerfile
-    image: coding-agent-executor-go:latest
-    command: ["echo", "Build only"]
-
 volumes:
   rabbitmq_data:
   postgres_data:

@@ -14,12 +14,10 @@ You can execute commands in an isolated Docker execution environment with projec
 The following execution environments are available:
 
 | Environment | Base Image | Recommended For |
-|-------------|-----------|-----------------|
+|-------------|-----------|------------------|
 | python | python:3.11-slim-bookworm | Pure Python projects, Django/Flask |
 | miniforge | condaforge/miniforge3:latest | Data science, conda environments |
 | node | node:20-slim | JavaScript/TypeScript, React/Vue/Angular |
-| java | eclipse-temurin:21-jdk-jammy | Java/Kotlin, Spring Boot |
-| go | golang:1.22-bookworm | Go projects, CLI tools |
 
 All environments include: git, curl, wget, jq, tree
 
@@ -44,17 +42,6 @@ Before executing project code, you may need to install required libraries:
 - `yarn install` - Install using yarn
 - `pnpm install` - Install using pnpm
 
-**Java Environment:**
-- `mvn dependency:resolve` - Download Maven dependencies
-- `mvn install -DskipTests` - Install project without running tests
-- `gradle dependencies` - Download Gradle dependencies
-- `gradle build -x test` - Build without running tests
-
-**Go Environment:**
-- `go mod download` - Download module dependencies
-- `go get <package>` - Install a specific package
-- `go mod tidy` - Clean up go.mod and go.sum
-
 ### Available Commands
 
 The following commands are available for execution:
@@ -65,7 +52,7 @@ The following commands are available for execution:
 
 **Test Execution:**
 - Run the project's test suite to verify code changes work correctly
-- Examples: `npm test`, `pytest`, `go test ./...`, `cargo test`
+- Examples: `npm test`, `pytest`, `cargo test`
 
 **Code Search:**
 - Use `grep` command to recursively search for code patterns across the entire project
@@ -74,7 +61,7 @@ The following commands are available for execution:
 
 **Build/Compile:**
 - Execute project build commands to check for compilation errors
-- Examples: `npm run build`, `make`, `go build`, `cargo build`
+- Examples: `npm run build`, `make`, `cargo build`
 
 **Linter/Formatter:**
 - Perform code quality checks and format verification

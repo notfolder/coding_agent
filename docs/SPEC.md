@@ -310,7 +310,7 @@ Issueで依頼された内容を自動的にMR/PRとして作成：
 
 Command Executor MCPを使用してDocker環境でコマンドを実行：
 
-- 複数言語対応（Python、Node.js、Java、Go等）
+- 複数言語対応（Python、Node.js等）
 - プロジェクトをクローン
 - 依存関係を自動インストール
 - コマンドを実行してフィードバックを取得

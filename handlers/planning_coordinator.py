@@ -2239,8 +2239,6 @@ Maintain the same JSON format as before for action_plan.actions."""
             "python": "Pure Python projects, Django/Flask web frameworks, data processing scripts",
             "miniforge": "Data science, scientific computing, NumPy/pandas/scikit-learn, conda environments (condaenv.yaml, environment.yml)",
             "node": "JavaScript/TypeScript, React/Vue/Angular, Node.js backend (Express, NestJS)",
-            "java": "Java/Kotlin, Spring Boot, Quarkus, Maven/Gradle projects",
-            "go": "Go projects, CLI tools, microservices",
         }
 
         # 計画前情報収集フェーズで収集された環境情報を取得
@@ -2263,8 +2261,6 @@ Maintain the same JSON format as before for action_plan.actions."""
             "- python: Python 3.11 environment with pip",
             "- miniforge: Miniforge environment with conda, suitable for scientific computing",
             "- node: Node.js environment with npm",
-            "- java: Java environment with Maven/Gradle",
-            "- go: Go environment with go command",
             "",
         ]
         

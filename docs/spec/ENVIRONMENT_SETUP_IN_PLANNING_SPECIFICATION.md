@@ -167,9 +167,9 @@ flowchart TD
 依頼内容の理解フェーズで、環境構築ファイルの情報も収集します。
 
 **処理内容**:
-1. プロジェクトのファイル一覧からrequirements.txt、package.json、pom.xml、go.mod、condaenv.yaml等を検出
+1. プロジェクトのファイル一覧からrequirements.txt、package.json、condaenv.yaml等を検出
 2. 検出したファイルの内容を読み込み
-3. 環境タイプを推測（Python、Node.js、Java、Go、Miniforge）
+3. 環境タイプを推測（Python、Node.js、Miniforge）
 4. 依存関係リストを抽出
 5. セットアップコマンドの候補を生成
 
@@ -181,7 +181,7 @@ flowchart TD
         "package.json": "ファイル内容",
         ...
     },
-    "environment_type": "python" | "node" | "java" | "go" | "miniforge",
+    "environment_type": "python" | "node" | "miniforge",
     "dependencies": [パッケージリスト],
     "setup_commands": [推奨コマンドリスト]
 }
@@ -214,8 +214,6 @@ flowchart TD
 | requirements.txt存在 + conda不要 | python |
 | condaenv.yaml または environment.yml存在 | miniforge |
 | package.json存在 | node |
-| pom.xml または build.gradle存在 | java |
-| go.mod存在 | go |
 
 #### 4.2.2 複合プロジェクトの判定
 
@@ -293,8 +291,6 @@ Available execution environments:
 - python: Python 3.11 environment with pip
 - miniforge: Miniforge environment with conda, suitable for scientific computing
 - node: Node.js environment with npm
-- java: Java environment with Maven/Gradle
-- go: Go environment with go command
 
 Project environment information:
 {environment information collected}
@@ -734,8 +730,6 @@ The following execution environments are available:
 - **python**: Python 3.11 environment with pip package manager
 - **miniforge**: Miniforge environment with conda package manager, suitable for scientific computing and data science projects
 - **node**: Node.js environment with npm package manager
-- **java**: Java environment with Maven/Gradle build tools
-- **go**: Go environment with go module system
 
 ### Environment Selection Criteria
 
@@ -744,8 +738,6 @@ Select the environment based on the following criteria:
 1. **Python environment**: When `requirements.txt` exists and conda is not required
 2. **Miniforge environment**: When `condaenv.yaml` or `environment.yml` exists
 3. **Node.js environment**: When `package.json` exists
-4. **Java environment**: When `pom.xml` or `build.gradle` exists
-5. **Go environment**: When `go.mod` exists
 
 For projects with multiple languages, prioritize based on:
 - The primary language targeted by the task
@@ -820,14 +812,6 @@ For Node.js:
 {
   "command": "node -e 'require(\"express\"); console.log(\"SUCCESS\")'",
   "expected_output": "SUCCESS"
-}
-```
-
-For Go:
-```json
-{
-  "command": "go version | grep -q 'go version' && echo 'OK'",
-  "expected_output": "OK"
 }
 ```
 
@@ -911,36 +895,6 @@ For Go:
     {
       "command": "python -c 'import numpy; print(\"SUCCESS\")'",
       "expected_output": "SUCCESS"
-    }
-  ]
-}
-```
-
-**Java environment**:
-```json
-{
-  "setup_commands": [
-    "mvn clean install -DskipTests"
-  ],
-  "verification": [
-    {
-      "command": "mvn --version | grep -q 'Apache Maven' && echo 'OK'",
-      "expected_output": "OK"
-    }
-  ]
-}
-```
-
-**Go environment**:
-```json
-{
-  "setup_commands": [
-    "go mod download"
-  ],
-  "verification": [
-    {
-      "command": "go version | grep -q 'go version' && echo 'OK'",
-      "expected_output": "OK"
     }
   ]
 }
@@ -1076,8 +1030,6 @@ LLMに修正依頼して再生成します（最大3回固定）。
    - Python: `requirements.txt`, `pyproject.toml`, `setup.py`, `Pipfile`, `poetry.lock`
    - Conda: `environment.yml`, `condaenv.yaml`
    - Node.js: `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`
-   - Java: `pom.xml`, `build.gradle`, `build.gradle.kts`
-   - Go: `go.mod`, `go.sum`
    - 共通: `Dockerfile`, `docker-compose.yml`, `Makefile`
 3. 検出されたファイルのリストを返す
 

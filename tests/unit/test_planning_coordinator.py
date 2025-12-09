@@ -1161,8 +1161,6 @@ class TestEnvironmentSelection(unittest.TestCase):
         assert "Environment Setup" in prompt
         assert "python" in prompt
         assert "node" in prompt
-        assert "java" in prompt
-        assert "go" in prompt
         assert "miniforge" in prompt
         assert "setup_commands" in prompt
         assert "verification" in prompt
@@ -1218,12 +1216,12 @@ class TestEnvironmentSelection(unittest.TestCase):
             "current_phase": "execution",
             "action_counter": 3,
             "revision_counter": 1,
-            "selected_environment": "java",
+            "selected_environment": "node",
         }
 
         coordinator.restore_planning_state(planning_state)
 
-        assert coordinator.selected_environment == "java"
+        assert coordinator.selected_environment == "node"
 
     def test_build_environment_selection_prompt_with_execution_manager(self) -> None:
         """ExecutionEnvironmentManagerがある場合の環境選択プロンプトテスト."""
