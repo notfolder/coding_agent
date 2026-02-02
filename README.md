@@ -458,7 +458,7 @@ grep "LLM" logs/agent.log
 
 ## ライセンス
 
-このプロジェクトは [ライセンス](LICENSE) の下で公開されています。
+Creative Commons Attribution 4.0 International (CC BY 4.0). 詳細は [LICENSE](LICENSE) を参照してください。
 
 ## 関連ドキュメント
 
