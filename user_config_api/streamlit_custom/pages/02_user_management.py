@@ -224,6 +224,8 @@ elif st.session_state.um_mode == "edit":
                         display_name=result["display_name"],
                         is_admin=result["is_admin"],
                         is_active=result["is_active"],
+                        auth_type=result["auth_type"],
+                        new_password=result.get("initial_password"),
                     )
                     st.success(f"ユーザー「{result['username']}」を更新しました")
                     reset_to_list_mode()
@@ -286,7 +288,8 @@ elif st.session_state.um_mode == "delete":
     if selected_user:
         confirmed = show_delete_confirmation(selected_user, key_prefix="delete_user")
 
-        if confirmed:
+        if confirmed is True:
+            # 削除ボタンがクリックされた
             with get_db_context() as db:
                 user_service = UserService(db)
                 # 論理削除（is_active=Falseにする）
@@ -294,3 +297,7 @@ elif st.session_state.um_mode == "delete":
                 st.success(f"ユーザー「{selected_user['username']}」を無効化しました")
                 reset_to_list_mode()
                 st.rerun()
+        elif confirmed is False:
+            # キャンセルボタンがクリックされた
+            reset_to_list_mode()
+            st.rerun()

@@ -237,6 +237,8 @@ class UserService:
         display_name: str | None = None,
         is_admin: bool | None = None,
         is_active: bool | None = None,
+        auth_type: str | None = None,
+        new_password: str | None = None,
     ) -> User | None:
         """ユーザーを更新する.
 
@@ -248,12 +250,14 @@ class UserService:
             display_name: 新しい表示名
             is_admin: 新しい管理者フラグ
             is_active: 新しい有効フラグ
+            auth_type: 新しい認証タイプ（ldap/password）
+            new_password: 認証タイプをpasswordに変更する場合の新しいパスワード
 
         Returns:
             更新されたユーザーオブジェクト、または None
 
         Raises:
-            ValueError: ユーザー名が既に存在する場合
+            ValueError: ユーザー名が既に存在する場合、または認証タイプ変更時のバリデーションエラー
 
         """
         user = self.get_user_by_id(user_id)
@@ -277,6 +281,34 @@ class UserService:
             user.is_admin = is_admin
         if is_active is not None:
             user.is_active = is_active
+
+        # 認証タイプの変更処理
+        if auth_type is not None and auth_type != user.auth_type:
+            if auth_type == "password":
+                # LDAP→パスワード認証への変更
+                if not new_password:
+                    raise ValueError("パスワード認証に変更する場合は新しいパスワードが必須です")
+                # パスワードポリシー検証
+                policy = PasswordPolicy.from_config(get_password_auth_config())
+                valid, errors = validate_password(new_password, policy)
+                if not valid:
+                    raise ValueError("\n".join(errors))
+                # bcryptでハッシュ化
+                pw_config = get_password_auth_config()
+                user.password_hash = hash_password(new_password, rounds=pw_config.get("bcrypt_rounds", 12))
+                user.password_must_change = True
+                user.password_updated_at = datetime.now(timezone.utc)
+                user.auth_type = "password"
+                logger.info(f"ユーザー {user.username} の認証タイプをLDAPからパスワード認証に変更しました")
+            elif auth_type == "ldap":
+                # パスワード→LDAP認証への変更
+                user.password_hash = None
+                user.password_must_change = False
+                user.password_updated_at = None
+                user.auth_type = "ldap"
+                logger.info(f"ユーザー {user.username} の認証タイプをパスワード認証からLDAPに変更しました")
+            else:
+                raise ValueError(f"無効な認証タイプ: {auth_type}")
 
         self.db.commit()
         self.db.refresh(user)
