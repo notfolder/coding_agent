@@ -182,7 +182,12 @@ if is_password_auth and tab_password is not None:
         # 最終パスワード更新日時の表示
         password_updated_at = user.get("password_updated_at")
         if password_updated_at:
-            st.markdown(f"最終パスワード更新日時: **{password_updated_at}**")
+            # datetimeオブジェクトの場合はフォーマット、文字列の場合はそのまま表示
+            if hasattr(password_updated_at, "strftime"):
+                formatted_dt = password_updated_at.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                formatted_dt = str(password_updated_at)
+            st.markdown(f"最終パスワード更新日時: **{formatted_dt}**")
 
         with st.form("change_password_form"):
             current_password = st.text_input(

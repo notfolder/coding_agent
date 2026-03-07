@@ -9,6 +9,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+# 特殊文字として許可する文字セット
+_SPECIAL_CHARS_PATTERN = r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>\/?]"
+
 
 @dataclass
 class PasswordPolicy:
@@ -101,7 +104,7 @@ def validate_password(password: str, policy: PasswordPolicy) -> tuple[bool, list
         errors.append("パスワードに数字を含めてください")
 
     # 特殊文字チェック
-    if policy.require_special and not re.search(r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>\/?]", password):
+    if policy.require_special and not re.search(_SPECIAL_CHARS_PATTERN, password):
         errors.append("パスワードに特殊文字を含めてください")
 
     return len(errors) == 0, errors

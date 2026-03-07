@@ -14,8 +14,8 @@ import streamlit as st
 # 親ディレクトリをPythonパスに追加
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from app.config import get_password_auth_config
 from app.auth.password_policy import PasswordPolicy
+from app.config import get_password_auth_config
 from app.database import get_db_context
 from app.services.user_service import UserService
 from streamlit_custom.components.auth import show_logout_button
