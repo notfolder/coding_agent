@@ -121,6 +121,35 @@ def get_ad_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
     return config.get("active_directory", {})
 
 
+def get_password_auth_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """パスワード認証設定を取得する.
+
+    Args:
+        config: 設定辞書（Noneの場合は読み込む）
+
+    Returns:
+        password_auth設定辞書
+
+    """
+    if config is None:
+        config = load_config()
+
+    # デフォルト設定
+    defaults: dict[str, Any] = {
+        "enabled": True,
+        "min_length": 8,
+        "require_uppercase": True,
+        "require_lowercase": True,
+        "require_digit": True,
+        "require_special": False,
+        "bcrypt_rounds": 12,
+    }
+
+    password_auth_config = config.get("password_auth", {})
+    defaults.update(password_auth_config)
+    return defaults
+
+
 def get_llm_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
     """LLM設定を取得する.
 

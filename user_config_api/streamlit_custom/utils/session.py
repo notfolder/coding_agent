@@ -64,6 +64,10 @@ def set_user(user: User) -> None:
         "ldap_email": user.ldap_email,
         "display_name": user.display_name,
         "is_admin": user.is_admin,
+        # パスワード認証関連フィールド
+        "auth_type": user.auth_type,
+        "password_must_change": user.password_must_change,
+        "password_updated_at": user.password_updated_at,
     }
 
 

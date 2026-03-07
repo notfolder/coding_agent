@@ -33,8 +33,8 @@ def show_login_form() -> tuple[str, str] | None:
     with st.form("login_form"):
         username = st.text_input(
             "ユーザー名",
-            placeholder="Active Directoryのユーザー名を入力",
-            help="sAMAccountNameを入力してください",
+            placeholder="ユーザー名を入力",
+            help="ユーザー名を入力してください",
         )
         password = st.text_input(
             "パスワード",

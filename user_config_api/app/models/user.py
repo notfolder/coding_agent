@@ -26,6 +26,10 @@ class User(Base):
         ldap_uid: Active DirectoryのUID（ユニーク、オプション）
         ldap_email: Active Directoryのメールアドレス（ユニーク、オプション）
         display_name: 表示名（オプション）
+        auth_type: 認証タイプ（"ldap" または "password"）
+        password_hash: bcryptハッシュ化パスワード（auth_type="password"の場合のみ使用）
+        password_must_change: 初回ログイン時のパスワード変更要求フラグ
+        password_updated_at: パスワード最終更新日時
         is_admin: 管理者フラグ（デフォルト: False）
         is_active: 有効フラグ（デフォルト: True）
         created_at: 作成日時
@@ -41,6 +45,11 @@ class User(Base):
     ldap_uid: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     ldap_email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # パスワード認証用フィールド
+    auth_type: Mapped[str] = mapped_column(String(20), default="ldap", nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_must_change: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    password_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

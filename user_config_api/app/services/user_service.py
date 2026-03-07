@@ -6,11 +6,15 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth.password_hasher import hash_password
+from app.auth.password_policy import PasswordPolicy, validate_password
+from app.config import get_password_auth_config
 from app.models.user import User
 from app.models.user_config import UserConfig
 from app.utils.encryption import decrypt_value, encrypt_value
@@ -163,6 +167,8 @@ class UserService:
         display_name: str | None = None,
         is_admin: bool = False,
         is_active: bool = True,
+        auth_type: str = "ldap",
+        initial_password: str | None = None,
     ) -> User:
         """新規ユーザーを作成する.
 
@@ -173,18 +179,34 @@ class UserService:
             display_name: 表示名
             is_admin: 管理者フラグ
             is_active: 有効フラグ
+            auth_type: 認証タイプ（"ldap" または "password"）
+            initial_password: 初期パスワード（auth_type="password"の場合必須）
 
         Returns:
             作成されたユーザーオブジェクト
 
         Raises:
-            ValueError: ユーザー名が既に存在する場合
+            ValueError: ユーザー名が既に存在する場合、またはpasswordタイプで初期パスワードが未設定の場合
 
         """
         # 重複チェック
         existing = self.get_user_by_username(username)
         if existing:
             raise ValueError(f"ユーザー名 '{username}' は既に使用されています")
+
+        # パスワード認証タイプの場合、パスワードをハッシュ化
+        password_hash: str | None = None
+        if auth_type == "password":
+            if not initial_password:
+                raise ValueError("パスワード認証タイプではパスワードが必須です")
+            # パスワードポリシー検証
+            policy = PasswordPolicy.from_config(get_password_auth_config())
+            valid, errors = validate_password(initial_password, policy)
+            if not valid:
+                raise ValueError("\n".join(errors))
+            # bcryptでハッシュ化
+            pw_config = get_password_auth_config()
+            password_hash = hash_password(initial_password, rounds=pw_config.get("bcrypt_rounds", 12))
 
         user = User(
             username=username,
@@ -193,12 +215,16 @@ class UserService:
             display_name=display_name,
             is_admin=is_admin,
             is_active=is_active,
+            auth_type=auth_type,
+            password_hash=password_hash,
+            # パスワード認証タイプの場合は初回ログイン時にパスワード変更を要求
+            password_must_change=(auth_type == "password"),
         )
         self.db.add(user)
         self.db.commit()
         self.db.refresh(user)
 
-        logger.info(f"ユーザーを作成しました: {username}")
+        logger.info(f"ユーザーを作成しました: {username} (auth_type={auth_type})")
         return user
 
     def update_user(
@@ -426,4 +452,94 @@ class UserService:
         self.db.commit()
 
         logger.info(f"ユーザー設定を削除しました: user_id={user_id}")
+        return True
+
+    def reset_password(self, user_id: int, new_password: str) -> bool:
+        """管理者がユーザーのパスワードをリセットする.
+
+        対象ユーザーの認証タイプがpasswordである必要があります。
+        リセット後、password_must_changeをTrueに設定します。
+
+        Args:
+            user_id: 対象ユーザーのID
+            new_password: 新しいパスワード（平文）
+
+        Returns:
+            成功の場合True
+
+        Raises:
+            ValueError: ユーザーが存在しない、認証タイプがpasswordでない、またはポリシー違反
+
+        """
+        user = self.get_user_by_id(user_id)
+        if not user:
+            raise ValueError("ユーザーが存在しません")
+        if user.auth_type != "password":
+            raise ValueError("このユーザーはパスワード認証タイプではありません")
+
+        # パスワードポリシー検証
+        policy = PasswordPolicy.from_config(get_password_auth_config())
+        valid, errors = validate_password(new_password, policy)
+        if not valid:
+            raise ValueError("\n".join(errors))
+
+        # ハッシュ化して保存
+        pw_config = get_password_auth_config()
+        user.password_hash = hash_password(new_password, rounds=pw_config.get("bcrypt_rounds", 12))
+        user.password_must_change = True
+        user.password_updated_at = datetime.now(timezone.utc)
+        self.db.commit()
+        self.db.refresh(user)
+
+        logger.info(f"パスワードをリセットしました: username={user.username}")
+        return True
+
+    def change_password(
+        self, user_id: int, current_password: str, new_password: str,
+    ) -> bool:
+        """ユーザーが自身のパスワードを変更する.
+
+        現在のパスワードを検証した上で新しいパスワードを設定します。
+        変更後、password_must_changeをFalseに設定します。
+
+        Args:
+            user_id: 対象ユーザーのID
+            current_password: 現在のパスワード（平文）
+            new_password: 新しいパスワード（平文）
+
+        Returns:
+            成功の場合True
+
+        Raises:
+            ValueError: ユーザーが存在しない、認証タイプがpasswordでない、
+                       現在のパスワードが正しくない、またはポリシー違反
+
+        """
+        from app.auth.password_auth import authenticate_with_password
+
+        user = self.get_user_by_id(user_id)
+        if not user:
+            raise ValueError("ユーザーが存在しません")
+        if user.auth_type != "password":
+            raise ValueError("このユーザーはパスワード認証タイプではありません")
+
+        # 現在のパスワードを検証
+        if not authenticate_with_password(user, current_password):
+            raise ValueError("現在のパスワードが正しくありません")
+
+        # パスワードポリシー検証
+        policy = PasswordPolicy.from_config(get_password_auth_config())
+        valid, errors = validate_password(new_password, policy)
+        if not valid:
+            raise ValueError("\n".join(errors))
+
+        # ハッシュ化して保存
+        pw_config = get_password_auth_config()
+        user.password_hash = hash_password(new_password, rounds=pw_config.get("bcrypt_rounds", 12))
+        user.password_must_change = False
+        user.password_updated_at = datetime.now(timezone.utc)
+        self.db.commit()
+        self.db.refresh(user)
+
+        logger.info(f"パスワードを変更しました: username={user.username}")
         return True

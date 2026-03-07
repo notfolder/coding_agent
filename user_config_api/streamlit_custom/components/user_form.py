@@ -10,6 +10,9 @@ from typing import Any
 
 import streamlit as st
 
+from app.config import get_password_auth_config
+from app.auth.password_policy import PasswordPolicy
+
 
 def validate_username(username: str) -> tuple[bool, str]:
     """ユーザー名のバリデーションを行う.
@@ -56,6 +59,10 @@ def show_user_form(
 
     st.subheader(title)
 
+    # パスワードポリシー取得
+    pw_config = get_password_auth_config()
+    policy = PasswordPolicy.from_config(pw_config)
+
     with st.form(f"{key_prefix}_form"):
         # ユーザー名
         username = st.text_input(
@@ -65,11 +72,27 @@ def show_user_form(
             disabled=is_edit_mode,  # 編集時はユーザー名変更不可
         )
 
-        # LDAP UID
+        # 認証タイプ（新規作成時のみ選択可能）
+        if not is_edit_mode:
+            auth_type = st.radio(
+                "認証タイプ",
+                options=["ldap", "password"],
+                format_func=lambda x: "LDAP / Active Directory" if x == "ldap" else "パスワード認証",
+                horizontal=True,
+                help="ユーザーの認証方法を選択してください",
+            )
+        else:
+            # 編集時は現在の認証タイプを表示のみ
+            current_auth_type = user.get("auth_type", "ldap")
+            auth_type_label = "LDAP / Active Directory" if current_auth_type == "ldap" else "パスワード認証"
+            st.text_input("認証タイプ", value=auth_type_label, disabled=True)
+            auth_type = current_auth_type
+
+        # LDAP UID（LDAP認証タイプの場合のみ）
         ldap_uid = st.text_input(
             "AD UID",
             value=user.get("ldap_uid", "") if user else "",
-            help="Active DirectoryのsAMAccountNameを入力してください",
+            help="Active DirectoryのsAMAccountNameを入力してください（LDAP認証の場合）",
         )
 
         # LDAPメールアドレス
@@ -85,6 +108,23 @@ def show_user_form(
             value=user.get("display_name", "") if user else "",
             help="画面に表示する名前を入力してください",
         )
+
+        # 初期パスワード（新規作成かつpassword認証タイプの場合のみ表示）
+        initial_password = ""
+        confirm_password = ""
+        if not is_edit_mode and auth_type == "password":
+            st.info(f"パスワードポリシー: {policy.get_description()}")
+            initial_password = st.text_input(
+                "初期パスワード",
+                type="password",
+                placeholder="初期パスワードを入力",
+                help="ユーザーが初回ログイン時に変更するパスワードを設定します",
+            )
+            confirm_password = st.text_input(
+                "初期パスワード（確認）",
+                type="password",
+                placeholder="初期パスワードを再度入力",
+            )
 
         # 管理者フラグ
         is_admin = st.checkbox(
@@ -117,7 +157,16 @@ def show_user_form(
                     st.error(error_msg)
                     return None
 
-            return {
+            # パスワード認証タイプの場合のバリデーション
+            if not is_edit_mode and auth_type == "password":
+                if not initial_password:
+                    st.error("初期パスワードを入力してください")
+                    return None
+                if initial_password != confirm_password:
+                    st.error("パスワードと確認パスワードが一致しません")
+                    return None
+
+            result: dict[str, Any] = {
                 "id": user.get("id") if user else None,
                 "username": username,
                 "ldap_uid": ldap_uid or None,
@@ -125,7 +174,11 @@ def show_user_form(
                 "display_name": display_name or None,
                 "is_admin": is_admin,
                 "is_active": is_active,
+                "auth_type": auth_type,
             }
+            if not is_edit_mode and auth_type == "password":
+                result["initial_password"] = initial_password
+            return result
 
     return None
 

@@ -13,6 +13,8 @@ import streamlit as st
 # 親ディレクトリをPythonパスに追加
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from app.auth.password_policy import PasswordPolicy
+from app.config import get_password_auth_config
 from app.database import get_db_context
 from app.services.user_service import UserService
 from streamlit_custom.components.auth import show_logout_button
@@ -33,6 +35,11 @@ if not check_authentication():
     st.page_link("streamlit_app.py", label="ログインページへ", icon="🔐")
     st.stop()
 
+# パスワード変更が必要な場合はリダイレクト
+current_user = get_current_user()
+if current_user and current_user.get("password_must_change"):
+    st.switch_page("pages/00_force_change_password.py")
+
 # 管理者権限チェック
 if not require_admin():
     st.stop()
@@ -45,7 +52,7 @@ if "um_search" not in st.session_state:
 if "um_active_only" not in st.session_state:
     st.session_state.um_active_only = False
 if "um_mode" not in st.session_state:
-    st.session_state.um_mode = "list"  # list, add, edit, delete
+    st.session_state.um_mode = "list"  # list, add, edit, delete, reset_password
 if "um_selected_user" not in st.session_state:
     st.session_state.um_selected_user = None
 
@@ -109,27 +116,33 @@ if st.session_state.um_mode == "list":
         )
         total_users = user_service.count_users(active_only=st.session_state.um_active_only)
 
-    # データをリスト形式に変換
+    # データをリスト形式に変換（認証タイプとパスワード更新日を追加）
     user_data = [
         {
             "id": u.id,
             "username": u.username,
             "display_name": u.display_name or "",
+            "auth_type": u.auth_type,
             "is_admin": u.is_admin,
             "is_active": u.is_active,
             "ldap_uid": u.ldap_uid,
             "ldap_email": u.ldap_email,
+            "password_updated_at": (
+                u.password_updated_at.strftime("%Y-%m-%d") if u.password_updated_at else ""
+            ) if u.auth_type == "password" else "",
         }
         for u in users
     ]
 
     # データテーブル表示
-    columns = ["username", "display_name", "is_admin", "is_active"]
+    columns = ["username", "display_name", "auth_type", "is_admin", "is_active", "password_updated_at"]
     column_labels = {
         "username": "ユーザー名",
         "display_name": "表示名",
+        "auth_type": "認証タイプ",
         "is_admin": "管理者",
         "is_active": "有効",
+        "password_updated_at": "パスワード更新日",
     }
 
     idx, action, row_data = show_data_table(
@@ -181,6 +194,8 @@ elif st.session_state.um_mode == "add":
                     display_name=result["display_name"],
                     is_admin=result["is_admin"],
                     is_active=result["is_active"],
+                    auth_type=result.get("auth_type", "ldap"),
+                    initial_password=result.get("initial_password"),
                 )
                 st.success(f"ユーザー「{result['username']}」を作成しました")
                 reset_to_list_mode()
@@ -215,6 +230,51 @@ elif st.session_state.um_mode == "edit":
                     st.rerun()
                 except ValueError as e:
                     st.error(str(e))
+
+        # パスワードリセット（password認証タイプのユーザーのみ）
+        if selected_user.get("auth_type") == "password":
+            st.markdown("---")
+            st.markdown("### パスワードリセット")
+            st.warning("パスワードをリセットすると、ユーザーは次回ログイン時にパスワード変更が必要になります。")
+
+            # パスワードポリシーの表示
+            pw_config = get_password_auth_config()
+            policy = PasswordPolicy.from_config(pw_config)
+            st.info(f"パスワードポリシー: {policy.get_description()}")
+
+            with st.form("reset_password_form"):
+                new_password = st.text_input(
+                    "新しいパスワード",
+                    type="password",
+                    placeholder="新しいパスワードを入力",
+                )
+                confirm_password = st.text_input(
+                    "新しいパスワード（確認）",
+                    type="password",
+                    placeholder="新しいパスワードを再度入力",
+                )
+                reset_submitted = st.form_submit_button(
+                    "パスワードをリセット", use_container_width=True,
+                )
+
+                if reset_submitted:
+                    if not new_password or not confirm_password:
+                        st.error("パスワードを入力してください")
+                    elif new_password != confirm_password:
+                        st.error("パスワードと確認パスワードが一致しません")
+                    else:
+                        with get_db_context() as db:
+                            user_service = UserService(db)
+                            try:
+                                user_service.reset_password(selected_user["id"], new_password)
+                                st.success(
+                                    f"ユーザー「{selected_user['username']}」のパスワードをリセットしました。"
+                                    "次回ログイン時にパスワード変更が必要です。"
+                                )
+                                reset_to_list_mode()
+                                st.rerun()
+                            except ValueError as e:
+                                st.error(str(e))
 
 elif st.session_state.um_mode == "delete":
     # 削除確認
