@@ -36,6 +36,10 @@ if not check_authentication():
 # 現在のユーザー情報
 user = get_current_user()
 
+# パスワード変更が必要な場合は強制変更画面へリダイレクト
+if user and user.get("password_must_change"):
+    st.switch_page("pages/00_force_change_password.py")
+
 # ヘッダー
 col1, col2 = st.columns([4, 1])
 with col1:

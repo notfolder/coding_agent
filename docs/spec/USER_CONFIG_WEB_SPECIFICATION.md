@@ -311,13 +311,121 @@ sequenceDiagram
 
 ---
 
-## 11. 関連ドキュメント
+## 11. データベースマイグレーション
 
-- [ユーザー管理API仕様](user_management_api_spec.md)
-- [基本仕様](spec.md)
+パスワード認証機能の追加に伴い、既存の `users` テーブルに4つのカラムが追加されています。
+**新規インストールでは自動的に全カラムが作成されるため、マイグレーション作業は不要です。**
+既存環境をアップグレードする場合のみ、以下の手順を実施してください。
+
+### 11.1 追加カラム
+
+| カラム | 型 | デフォルト値 | 説明 |
+|--------|-----|-------------|------|
+| `auth_type` | `VARCHAR(20)` | `'ldap'` | 認証タイプ（`"ldap"` または `"password"`） |
+| `password_hash` | `VARCHAR(255)` | `NULL` | bcryptハッシュ化パスワード |
+| `password_must_change` | `BOOLEAN` | `FALSE` | 初回ログイン時のパスワード変更要求フラグ |
+| `password_updated_at` | `DATETIME` | `NULL` | パスワード最終更新日時 |
+
+### 11.2 マイグレーションスクリプトの使用方法
+
+`user_config_api/app/commands/migrate_password_auth.py` を使用して既存DBを自動更新できます。
+
+#### ローカル環境（SQLite）
+
+```bash
+cd user_config_api
+
+# ドライラン（実際の変更なし・確認のみ）
+DATABASE_URL=sqlite:///./data/users.db python app/commands/migrate_password_auth.py --dry-run
+
+# 実際のマイグレーション実行
+DATABASE_URL=sqlite:///./data/users.db python app/commands/migrate_password_auth.py
+```
+
+#### Docker環境
+
+```bash
+# 実行中のuser-config-apiコンテナでマイグレーションを実行
+docker compose exec user-config-api python app/commands/migrate_password_auth.py
+
+# ドライラン（確認のみ）
+docker compose exec user-config-api python app/commands/migrate_password_auth.py --dry-run
+```
+
+#### PostgreSQL環境
+
+```bash
+# PostgreSQL接続URLを指定して実行
+DATABASE_URL=postgresql://user:password@localhost/dbname python app/commands/migrate_password_auth.py
+
+# または環境変数を設定してから実行
+export DATABASE_URL=postgresql://coding_agent:password@localhost:5432/coding_agent
+python app/commands/migrate_password_auth.py
+```
+
+#### --database-url オプション
+
+```bash
+# コマンドライン引数で直接URLを指定する場合
+python app/commands/migrate_password_auth.py --database-url sqlite:///./data/users.db
+```
+
+### 11.3 マイグレーション後の確認
+
+マイグレーション完了後、以下のSQLでカラムが追加されたことを確認できます。
+
+```bash
+# SQLite の場合
+sqlite3 data/users.db ".schema users"
+
+# PostgreSQL の場合
+psql -U coding_agent -d coding_agent -c "\d users"
+```
+
+### 11.4 手動マイグレーション（SQLコマンド）
+
+スクリプトを使わずにSQLで直接マイグレーションすることもできます。
+
+#### SQLite
+
+```sql
+ALTER TABLE users ADD COLUMN auth_type VARCHAR(20) NOT NULL DEFAULT 'ldap';
+ALTER TABLE users ADD COLUMN password_hash VARCHAR(255) NULL;
+ALTER TABLE users ADD COLUMN password_must_change INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN password_updated_at DATETIME NULL;
+```
+
+#### PostgreSQL
+
+```sql
+ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_type VARCHAR(20) NOT NULL DEFAULT 'ldap';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255) NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_must_change BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_updated_at TIMESTAMP NULL;
+```
+
+### 11.5 パスワード認証ユーザーの初期作成
+
+マイグレーション後、管理者はStreamlitのユーザー管理画面から `auth_type=password` のユーザーを追加できます。
+コマンドラインから作成したい場合は `create_admin.py` を使用してください（管理者はLDAP認証のみ）。
+
+```bash
+cd user_config_api
+
+# LDAP認証タイプの管理者を作成
+python app/commands/create_admin.py --username admin --display-name "管理者"
+```
 
 ---
 
-**文書バージョン:** 2.0  
-**最終更新日:** 2024-11-28  
+## 12. 関連ドキュメント
+
+- [ユーザー管理API仕様](user_management_api_spec.md)
+- [基本仕様](spec.md)
+- [パスワード認証仕様](USER_CONFIG_WEB_PASSWORD.md)
+
+---
+
+**文書バージョン:** 2.1  
+**最終更新日:** 2026-03-07  
 **ステータス:** 実装済み

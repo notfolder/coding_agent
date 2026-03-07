@@ -1,6 +1,6 @@
 """認証サービス.
 
-Active Directory認証のビジネスロジックを提供します。
+Active Directory認証およびパスワード認証のビジネスロジックを提供します。
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.auth.ad_client import ADClient, MockADClient
+from app.auth.password_auth import authenticate_with_password
 from app.config import get_ad_config
 from app.models.user import User
 from app.services.user_service import UserService
@@ -22,7 +23,8 @@ logger = logging.getLogger(__name__)
 class AuthService:
     """認証サービス.
 
-    Active Directory認証とユーザー管理を統合します。
+    Active Directory認証とパスワード認証を統合します。
+    ユーザーの認証タイプ（auth_type）に応じて認証方法を切り替えます。
     """
 
     def __init__(self, db: Session, ad_config: dict[str, Any] | None = None) -> None:
@@ -51,8 +53,58 @@ class AuthService:
     def authenticate(self, username: str, password: str) -> User | None:
         """ユーザーを認証する.
 
-        Active Directory認証を行い、成功した場合はデータベースの
-        ユーザーを取得または作成します。
+        ユーザーの認証タイプに応じて認証方法を切り替えます。
+        - auth_type="ldap": Active Directory認証
+        - auth_type="password": パスワードハッシュ認証
+
+        ユーザーがデータベースに存在しない場合はLDAP認証を試み、
+        成功した場合はLDAPユーザーとして作成します。
+
+        Args:
+            username: ユーザー名
+            password: パスワード
+
+        Returns:
+            認証成功時: Userオブジェクト
+            認証失敗時: None
+
+        """
+        # まずデータベースでユーザーを検索して認証タイプを確認
+        existing_user = self.user_service.get_user_by_username(username)
+
+        if existing_user and existing_user.auth_type == "password":
+            # パスワード認証タイプのユーザーはパスワードハッシュで認証
+            return self._authenticate_with_password(existing_user, password)
+
+        # LDAPユーザーまたは新規ユーザーはAD認証を試みる
+        return self._authenticate_with_ldap(username, password)
+
+    def _authenticate_with_password(self, user: User, password: str) -> User | None:
+        """パスワードハッシュ認証を行う.
+
+        Args:
+            user: データベースのUserオブジェクト
+            password: 認証するパスワード（平文）
+
+        Returns:
+            認証成功時: Userオブジェクト
+            認証失敗時: None
+
+        """
+        if not authenticate_with_password(user, password):
+            logger.warning(f"パスワード認証に失敗しました: {user.username}")
+            return None
+
+        # アクティブでないユーザーは認証拒否
+        if not user.is_active:
+            logger.warning(f"無効なユーザーがログインを試みました: {user.username}")
+            return None
+
+        logger.info(f"パスワード認証でユーザーが認証されました: {user.username}")
+        return user
+
+    def _authenticate_with_ldap(self, username: str, password: str) -> User | None:
+        """Active Directory認証を行う.
 
         Args:
             username: ユーザー名（sAMAccountName）
@@ -95,7 +147,7 @@ class AuthService:
             logger.warning(f"無効なユーザーがログインを試みました: {username}")
             return None
 
-        logger.info(f"ユーザーが認証されました: {user.username}")
+        logger.info(f"LDAP認証でユーザーが認証されました: {user.username}")
         return user
 
     def get_user_from_session(self, user_id: int) -> User | None:

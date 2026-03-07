@@ -13,6 +13,7 @@ psycopg2-binary==2.9.10
 
 # 認証関連
 python-ldap==3.4.4
+bcrypt==4.2.1
 
 # 暗号化
 cryptography==41.0.7
